@@ -24,9 +24,12 @@ jobs:
             - name: Install dependencies
               run: |
                   python -m pip install --upgrade pip setuptools wheel
-                  python -m pip install flake8 pytest
+                  python -m pip install flake8 pytest, apache-license-check
                   if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
                   python setup.py install
+                  
+            - name: Run license-check
+              run: apache-license-check --copyright "Ben Deda"
 
             - name: Lint with flake8
               run: |
