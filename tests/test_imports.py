@@ -1,4 +1,4 @@
 
 
 def test_imports():
-    pass
+    import deda
