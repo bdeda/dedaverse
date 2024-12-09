@@ -15,10 +15,29 @@
 # limitations under the License.
 #
 # ###################################################################################
-__all__ = ['AssetBrowserWidget']
-
-from PySide6 import QtWidgets
+__all__ = ['Project']
 
 
-class AssetBrowserWidget(QtWidgets.QWidget):
-    pass
+class Project:
+    
+    def __init__(self, name, **kwargs):
+        self._name = name
+        self._data = kwargs
+        
+    @property
+    def name(self):
+        return self._name
+        
+    def __eq__(self, other):
+        if isinstance(other, Project) and self.name == other.name:
+            return True
+        try:
+            return self.name == other['name']
+        except KeyError:
+            pass
+        return False
+        
+    def as_dict(self):
+        data = copy.deepcopy(self._data)
+        data['name'] = self._name
+        

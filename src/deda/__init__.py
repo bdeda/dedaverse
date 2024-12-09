@@ -15,5 +15,11 @@
 # limitations under the License.
 #
 # ###################################################################################
+
+__version__ = '0.1.0'
+__author__ = 'Ben Deda'
+
+
 from . import core
 from . import app
+

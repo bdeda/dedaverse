@@ -15,10 +15,33 @@
 # limitations under the License.
 #
 # ###################################################################################
-__all__ = ['AssetBrowserWidget']
+import sys
+import os
+import click
+import getpass
 
-from PySide6 import QtWidgets
+import deda.app
 
 
-class AssetBrowserWidget(QtWidgets.QWidget):
+@click.group()
+def dedaverse():
     pass
+
+
+@dedaverse.command()
+def run():
+    return deda.app.run()
+    
+    
+@dedaverse.command()
+def install(self):
+    """Install the dedaverse startup script that will run the dedaverse app."""
+    cmd_path = fr'C:\Users\{getpass.getuser()}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\dedaverse.cmd'
+    if os.path.isfile(cmd_path):
+        pass
+    
+
+
+if __name__ == '__main__':
+    sys.exit(dedaverse())
+    

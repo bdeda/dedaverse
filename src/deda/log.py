@@ -15,10 +15,19 @@
 # limitations under the License.
 #
 # ###################################################################################
-__all__ = ['AssetBrowserWidget']
-
-from PySide6 import QtWidgets
+__all__ = ['initialize']
 
 
-class AssetBrowserWidget(QtWidgets.QWidget):
-    pass
+import logging
+import coloredlogs
+
+
+def initialize(loglevel=logging.DEBUG):
+    """Initialize the logger for the given log level.
+    
+    Args:
+        loglevel: (str) The loglevel string.
+        
+    """
+    logger = logging.getLogger('')
+    coloredlogs.install(level=loglevel, logger=logger)
