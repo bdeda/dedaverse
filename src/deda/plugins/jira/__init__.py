@@ -15,11 +15,4 @@
 # limitations under the License.
 #
 # ###################################################################################
-from ._plugin import *
-from ._project import *
-from ._user_config import *
-
-
-def initialize():
-    """Initialize all plugins and subsystems."""
-    initialize_plugins()
+print('Jira plugin loading...')

@@ -62,6 +62,7 @@ class MainWindow(QtWidgets.QMainWindow):
         version = deda.__version__
         self._window_title_context = f"{app_name} [deda@{version}]"
         self.setWindowTitle(self._window_title_context)
+        self.setObjectName('DedaverseMainWindow')
         
         icon_path = os.path.join(os.path.dirname(__file__), 'star_icon.png')
         icon = QtGui.QIcon(icon_path)
@@ -182,20 +183,7 @@ class MainWindow(QtWidgets.QMainWindow):
             os.makedirs(settings_dir)
         with open(self._user_settings_path, 'w') as f:
             json.dump(self._user_settings, f, sort_keys=True, indent=4)
-
-    #def showEvent(self, event):
-        #"""Overriden showEvent to handle loading the window settings.
-
-        #Args:
-            #event: (QEvent) The event.
-            
-        #Returns:
-            #None
-            
-        #"""
-        #self.load_settings()
-        #super().showEvent(event)
-        
+       
     def show_message(self, title, message, icon=QtWidgets.QSystemTrayIcon.Information, timeout=10000):
         """Show a message in the tray icon, status, and log."""
         if icon == QtWidgets.QSystemTrayIcon.NoIcon:

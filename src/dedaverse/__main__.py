@@ -34,11 +34,20 @@ def run():
     
     
 @dedaverse.command()
-def install(self):
+def install():
     """Install the dedaverse startup script that will run the dedaverse app."""
+    
+    # TODO: This should create a venv if one does not already exist for the current dedaverse git clone.
+    
     cmd_path = fr'C:\Users\{getpass.getuser()}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\dedaverse.cmd'
-    if os.path.isfile(cmd_path):
-        pass
+    bat_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'bin', 'dedaverse.bat'))
+    if os.path.isfile(bat_path):
+        with open(cmd_path, 'w') as f:
+            f.write(f'@echo off\nstart {bat_path}\n')
+        print(f'Startup script installed to {cmd_path}')
+        return 0
+    print('Install errors!')
+    return 1
     
 
 

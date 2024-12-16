@@ -19,15 +19,17 @@
 Application class definition, used for all Dedaverse tools run outside of other DCCs.
 """
 
-__all__ = ["Application", "run"]
+__all__ = ["Application", "run", "get_top_window", "get_main_menu"]
 
 
 import os
 import logging
+import functools
 
 from PySide6 import QtWidgets, QtCore
 
 import deda.log
+import deda.core
 from ._main_window import MainWindow
 
 
@@ -53,9 +55,47 @@ class Application(QtWidgets.QApplication):
 def run(loglevel='DEBUG'):
     """Run the main application."""
     deda.log.initialize(loglevel=loglevel)
+    deda.core.initialize()
     app = Application()
     w = MainWindow(app_name='Dedaverse')
+    # This needs to happen after the main window is created because the load calls may b emodifying the UIs.
+    for plugin in deda.core.PluginRegistry():
+        try:
+            plugin.load()
+        except Exception as err:
+            log.exception(err)
     ret = app.exec_()
-    log.warning(f'returning {ret}')
+    log.debug(f'Returning {ret}')
     return ret
+
+
+@functools.lru_cache
+def get_top_window():
+    """Retrun the top window of the application to use as a parent for other tool windows.
+    
+    Returns:
+        QWidget
+        
+    """
+    for top_window in QtWidgets.QApplication.instance().topLevelWidgets():
+        if top_window.objectName() in ('DedaverseMainWindow', 'MayaWindow'):
+            return top_window
+        
+        
+@functools.lru_cache
+def get_main_menu():
+    """Get the main menu for the app. When this is running as the standalone dedaverse app
+    in the windows system tray, this will return the main context menu instance. In the
+    DCC applications, thisi will be the main dedaverse menu.
+    
+    Returns:
+        QMenu
+    
+    """
+    window = get_top_window()
+    for child in window.children():
+        if not isinstance(child, QtWidgets.QMenu):
+            continue
+        if child.objectName() == 'DedaverseTaskbarContextMenu':
+            return child
     

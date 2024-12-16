@@ -35,7 +35,7 @@ class TaskbarIcon(QtWidgets.QSystemTrayIcon):
 
     def __init__(self, icon, *args, **kwargs):        
         super().__init__(*args, **kwargs)
-        
+        self.setObjectName('DedaverseTaskbarIcon')
         self.setIcon(icon)
         self._menu = self._create_menu()
         self.setContextMenu(self._menu)  
@@ -45,7 +45,8 @@ class TaskbarIcon(QtWidgets.QSystemTrayIcon):
         
     
     def _create_menu(self):
-        menu = QtWidgets.QMenu()
+        menu = QtWidgets.QMenu(parent=self.parent())
+        menu.setObjectName('DedaverseTaskbarContextMenu')
         menu.addAction('Restart', self._on_restart)
         menu.addAction('Exit', self._on_exit)
         return menu
