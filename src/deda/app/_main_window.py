@@ -25,6 +25,7 @@ import sys
 import os
 import logging
 import json
+import getpass
 
 from PySide6 import QtWidgets, QtCore, QtGui
 

@@ -148,6 +148,17 @@ class PluginRegistry:
         for item in self._registry_.values():
             yield item
             
+    def iter_plugins(self, plugin_type):
+        """Iterate over the plugins of a given type.
+        
+        Yields:
+            Plugin instance if the plugin isinstance of the given type.
+            
+        """
+        for plugin in self:
+            if isinstance(plugin, plugin_type):
+                yield plugin
+            
             
 class Tool(Plugin):
     """This plugin is a UI and contains it's own logic for managing the functionality of the tool.
@@ -313,6 +324,30 @@ class DCCPlugin(Plugin):
         super().__init__(dcc_name, *args, **kwargs)
         self._executable = executable
         
+    def find(self):
+        """Find the DCC using the plugin logic to check normal install locations, env vars, etc.
+        This should be overriden in the plugin implementation to find and self.set_executable(path).
+        
+        Returns:
+            (str) Full path of executable found.
+        
+        """
+        raise NotImplementedError
+    
+    def set_executable(self, executable):
+        """Set the executable string to use when launching this DCC.
+        
+        Args:
+            executable: (str) The full path to the executable.
+            
+        Returns:
+            None
+            
+        """
+        if not isinstance(executable, str):
+            raise TypeError(f'Executable must be a string. Got {type(executable)}')
+        self._executable = executable
+        
     def setup_env(self, env):
         """Override in the plugin to modify the env for the subprocess.
         
@@ -329,6 +364,7 @@ class DCCPlugin(Plugin):
         """Launch the dcc application with the appropriate environment using the given args.
         
         """
+        # TODO: Check if this needs to be wrapped in quotes or not, depending on the system.
         cmd = [f'"{self._executable}"']
         for arg in args:
             cmd.append(arg)
