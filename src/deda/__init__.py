@@ -21,5 +21,11 @@ __author__ = 'Ben Deda'
 
 
 from . import core
-from . import app
-
+#try:
+    #from . import app
+#except ImportError as err:
+    ## I am getting this import error on ubuntu when running github actions.
+    ## ImportError: libEGL.so.1: cannot open shared object file: No such file or directory
+    #print(err) 
+    #if 'libEGL.so' not in str(err):
+        #raise
