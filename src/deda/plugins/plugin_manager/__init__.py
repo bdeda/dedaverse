@@ -36,6 +36,20 @@ __vendor__ = 'Deda'
 log = logging.getLogger('deda.plugins.plugin_manager')
 
 
+class PluginWidget(QtWidgets.QWidget):
+    
+    def __init__(self, plugin, parent=None):
+        super().__init__(parent=parent)
+        
+        layout = QtWidgets.QGridLayout()
+        self.setLayout(layout)
+        
+        icon = plugin.image
+        title = plugin.name
+        description = plugin.description
+        
+        
+
 class PluginManagerDialog(QtWidgets.QDialog):
     """UI for the plugin manager."""
     
@@ -44,6 +58,7 @@ class PluginManagerDialog(QtWidgets.QDialog):
         
         self._window_title_context = f"Plugin Manager [deda@{__version__}]"
         self.setWindowTitle(self._window_title_context)
+        self.setModal(True)
         
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -53,6 +68,8 @@ class PluginManagerDialog(QtWidgets.QDialog):
         vbox.addWidget(scroll_area)
         
         # list of all installed plugins
+        
+        # check state to load/unload a plugin
         
         # Button to search internet for available plugins
         
@@ -75,15 +92,12 @@ class PluginManager(deda.core.Tool):
             
         """
         return PluginManagerDialog(parent=parent)
-        #w = QtWidgets.QDialog(parent=parent)
-        #w.setModal(True)
-        #return w
         
     
     def load(self):
         """Load the plugin."""
         
-        log.info('Dedaverse Plugin Manager plugin loading...')
+        log.info('Dedaverse Plugin Manager loading...')
         
         # Create the menu to launch the tool, then wire up the launch
         # method to handle opening the modal tool window.
