@@ -57,7 +57,7 @@ class TaskbarIcon(QtWidgets.QSystemTrayIcon):
         QtWidgets.QApplication.instance().quit()
         
     def _on_restart(self):
-        """Restart teh application"""
+        """Restart the application"""
         import deda.app
         log.warning('Restarting dedaverse system...')
         sys.exit(deda.app.RESTART_CODE)
