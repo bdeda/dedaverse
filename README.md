@@ -1,8 +1,17 @@
-Dedaverse, The USD Asset Manager
+Dedaverse
 ===========================
 
-Dedaverse is a system for managing the components of a visual media projects, films, and games.
-The system predominantly uses USD files as the storage media for 3d assets on disk. 
+Dedaverse is an asset system for managing the components of visual media projects, films, and games.
+
+
+# Focus on Art, not on Tech
+
+Development of visual content for various media is developed using some standard practices across 
+various project types. The Dedaverse helps streamline those standards while making workflows easier 
+for artists to iterate on the art, and not be burdened by the technical details of the workflow. 
+
+
+## The Tech
 
 Built with Python, the Dedaverse provides tooling to store and track the development process of an asset from concept to completion. 
 Users can brainstorm ideas before committing to an idea for an asset. Once ideas pass through gated checkpoints of developemnt, they 
