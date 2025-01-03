@@ -31,6 +31,7 @@ import logging
 import pkgutil
 from collections import OrderedDict
 import packaging.version
+import subprocess
 
 
 log = logging.getLogger(__name__)
@@ -65,24 +66,39 @@ def initialize_plugins():
 class Plugin:
     """Base class for all plugins."""
     
-    def __init__(self, name, version=None, vendor=None, *args, **kwargs):
+    def __init__(self, name, 
+                 version=None, 
+                 vendor=None, 
+                 description=None, 
+                 image=None, 
+                 *args, **kwargs):
         self._name = name
         self._version = None
         if version:
             self._version = packaging.version.parse(version)
         self._vendor = vendor
+        self._description = description or ''
+        self._image = image
+        
+    @property
+    def description(self):
+        return self._description
+    
+    @property
+    def image(self):
+        return self._image    
         
     @property
     def name(self):
         return self._name
     
     @property
-    def version(self):
-        return self._version
+    def vendor(self):
+        return self._vendor    
     
     @property
-    def vendor(self):
-        return self._vendor
+    def version(self):
+        return self._version
     
     def load(self):
         """Override in derived classes to handle the loading process for the plugin.
@@ -168,8 +184,15 @@ class TaskManager(Plugin):
     """
     
     def get_task(self, search_criteria):
-        pass
+        """Get a task from the server."""
+        raise NotImplementedError
     
+    def update_task(self, task):
+        """Update the given task on the server. 
+        This commits any local changes to the task management server.
+        
+        """
+        raise NotImplementedError    
     
     
 class NotificationSystem(Plugin):
@@ -178,6 +201,14 @@ class NotificationSystem(Plugin):
     through slack, teams, or broadcast via a nework system to other dedaverse applications.
     
     """
+    
+    def notify(self, title, message, level='info', *args, **kwargs):
+        """Notify the necesary subsystems with the given message. 
+        Depending on the notificatiuon system, this can show a popup window, 
+        a status message in the main window, log to disk, email, slack, etc.
+        
+        """
+        raise NotImplementedError
     
     
 class AssetManager(Plugin):
@@ -193,7 +224,7 @@ class AssetManager(Plugin):
         """Check to see if the given assets are the types of assets this plugin can handle. 
         
         Args:
-            assets: (Assets) The asset sto check.
+            assets: (Assets) The asset to check.
             
         Returns:
             list: The list of bools on if the asset can be handles by this plugin.
@@ -276,11 +307,34 @@ class DCCPlugin(Plugin):
     
     """
     
-    dcc_name = None   # must be defined in the derived plugin classes
-    executable = None # must be set to the name of the executable to run
+    def __init__(self, dcc_name=None,   # must be defined in the derived plugin classes
+                 executable=None, # must be set to the name of the executable to run
+                 *args, **kwargs):
+        super().__init__(dcc_name, *args, **kwargs)
+        self._executable = executable
+        
+    def setup_env(self, env):
+        """Override in the plugin to modify the env for the subprocess.
+        
+        Args:
+            env: (dict) The original env.
+        
+        Returns:
+            dict: The modified version of env.
+            
+        """
+        return env
     
     def launch(self, *args, **kwargs):
         """Launch the dcc application with the appropriate environment using the given args.
         
         """
-        raise NotImplementedError 
+        cmd = [f'"{self._executable}"']
+        for arg in args:
+            cmd.append(arg)
+        for key, value in kwargs.items():
+            cmd.append(f'{key}={value}')
+        dcc_env = os.environ.copy()
+        # modify env if required for the subprocess
+        dcc_env = self.setup_env()
+        return subprocess.run(cmd, capture_output=True, env=dcc_env)
