@@ -48,3 +48,8 @@ implementation details.
 
 Dedaverse is driven by plugins that allow you to customize the system for your studio. Plugins can be found and installed via the Plugin Manager. 
 The Plugin Manager can be configured to find plugins developed by internal tech teams or third party vendors.  
+
+
+### Icons
+
+Generic plugin icon from Vecteezy.com
