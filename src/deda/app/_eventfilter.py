@@ -85,8 +85,7 @@ class EventFilter(QtCore.QObject):
         """
         if not self._dragged_object:
             # We are not tracking a drag event, so early out.
-            return
-        
+            return        
         mouse_pos = obj.mapFromGlobal(QtGui.QCursor.pos())
         # TODO: emit signal with obj and mouse_pos
         self.dragMove.emit(obj, mouse_pos, self._dragged_object)

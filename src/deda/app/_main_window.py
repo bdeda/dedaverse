@@ -19,7 +19,7 @@
 MainWindow class definition, used for all Dedaverse tools.
 """
 
-__all__ = ["MainWindow"]
+__all__ = ["MainWindow", "get_top_window"]
 
 import sys
 import os
@@ -54,7 +54,7 @@ class MainWindow(QtWidgets.QMainWindow):
         import deda  # pylint: disable=import-outside-toplevel
 
         if not parent:
-            parent = _get_top_window()
+            parent = get_top_window()
             log.debug("Setting main window's parent to %s", parent)
         super().__init__(parent=parent)
         if app_name is None:
@@ -253,7 +253,7 @@ class MainWindow(QtWidgets.QMainWindow):
         pass
 
 
-def _get_top_window():
+def get_top_window():
     """Get the top window for the main application, if there is one.
 
     Returns:
