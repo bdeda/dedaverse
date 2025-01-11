@@ -182,6 +182,8 @@ class Tool(Plugin):
             parent_window = deda.app.get_top_window()
             self._window_instance = self.initialize_window(parent=parent_window)
         self._window_instance.show()
+        self._window_instance.raise_()
+        self._window_instance.activateWindow()
 
 
 class TaskManager(Plugin):

@@ -21,8 +21,8 @@ list of git repos. These repos can be public facing or a private corporate enter
 repo only available to internal employees.
 
 """
+import os
 import logging
-import functools
 
 import deda.core
 import deda.app
@@ -36,17 +36,37 @@ __vendor__ = 'Deda'
 log = logging.getLogger('deda.plugins.plugin_manager')
 
 
+DEFAULT_IMAGE_PATH = os.path.join(os.path.dirname(__file__), 'plug.png')
+
 class PluginWidget(QtWidgets.QWidget):
+    
+    DEFAULT_IMAGE = QtGui.QImage(DEFAULT_IMAGE_PATH)
     
     def __init__(self, plugin, parent=None):
         super().__init__(parent=parent)
         
         layout = QtWidgets.QGridLayout()
         self.setLayout(layout)
+        layout.setContentsMargins(0, 0, 0, 0)
         
-        icon = plugin.image
-        title = plugin.name
-        description = plugin.description
+        if plugin.image:
+            image = QtGui.QImage(plugin.image)
+        else:
+            image = self.DEFAULT_IMAGE
+        title = f'{plugin.name} v{plugin.version}'
+        description = plugin.description or '(No Description found)'
+        
+        image_lbl = QtWidgets.QLabel(parent=self)
+        image_lbl.setPixmap(QtGui.QPixmap.fromImage(image))
+        layout.addWidget(image_lbl, 0, 0, -1, 1)
+        
+        title_lbl = QtWidgets.QLabel(title, parent=self)  
+        title_lbl.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        layout.addWidget(title_lbl, 0, 1, 1, -1)
+        
+        desc_lbl = QtWidgets.QLabel(description, parent=self)
+        title_lbl.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        layout.addWidget(desc_lbl, 1, 1, -1, -1)        
         
         
 
@@ -66,8 +86,17 @@ class PluginManagerDialog(QtWidgets.QDialog):
         
         scroll_area = QtWidgets.QScrollArea(parent=self)
         vbox.addWidget(scroll_area)
+        central_widget = QtWidgets.QWidget(parent=self)
+        scroll_area.setWidget(central_widget)
+        scroll_area.setWidgetResizable(True)
+        plugin_list = QtWidgets.QVBoxLayout(central_widget)
+        central_widget.setLayout(plugin_list)
         
         # list of all installed plugins
+        for plugin in deda.core.PluginRegistry():
+            plugin_list.addWidget(PluginWidget(plugin, parent=self))
+            
+        plugin_list.addStretch()
         
         # check state to load/unload a plugin
         
@@ -117,7 +146,4 @@ class PluginManager(deda.core.Tool):
         log.info('Plugin Manager loaded successfully.')
         
         
-        
-        
-        
-deda.core.PluginRegistry().register(PluginManager('Dedaverse Plugin Manager', __version__, __vendor__))
+deda.core.PluginRegistry().register(PluginManager('Plugin Manager', __version__, __vendor__))
