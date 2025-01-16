@@ -181,6 +181,10 @@ class Tool(Plugin):
             import deda.app
             parent_window = deda.app.get_top_window()
             self._window_instance = self.initialize_window(parent=parent_window)
+        if not self._window_instance:
+            # TODO: pop up an error messagebox
+            log.error(f'{self.name} did not return a window instance from the initialize_window command!')
+            return
         self._window_instance.show()
         self._window_instance.raise_()
         self._window_instance.activateWindow()

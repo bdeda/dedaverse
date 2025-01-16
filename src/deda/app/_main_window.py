@@ -19,13 +19,14 @@
 MainWindow class definition, used for all Dedaverse tools.
 """
 
-__all__ = ["MainWindow", "get_top_window"]
+__all__ = ["MainWindow", "get_top_window", "get_main_menu"]
 
 import sys
 import os
 import logging
 import json
 import getpass
+import functools
 
 from PySide6 import QtWidgets, QtCore, QtGui
 
@@ -54,8 +55,11 @@ class MainWindow(QtWidgets.QMainWindow):
         import deda  # pylint: disable=import-outside-toplevel
 
         if not parent:
-            parent = get_top_window()
-            log.debug("Setting main window's parent to %s", parent)
+            try:
+                parent = get_top_window()
+            except RuntimeError:
+                parent = None
+            log.debug("Setting main window's parent to {}".format(parent))
         super().__init__(parent=parent)
         if app_name is None:
             app_name = "Dedaverse"
@@ -64,6 +68,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._window_title_context = f"{app_name} [deda@{version}]"
         self.setWindowTitle(self._window_title_context)
         self.setObjectName('DedaverseMainWindow')
+        
+        self.setWindowFlags(QtCore.Qt.FramelessWindowHint) # QtCore.Qt.Window |
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground) #, True)
         
         icon_path = os.path.join(os.path.dirname(__file__), 'star_icon.png')
         icon = QtGui.QIcon(icon_path)
@@ -74,11 +81,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._icon.activated.connect(self.toggle_visibility)
         
         w = QtWidgets.QWidget(parent=self)
+        w.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setCentralWidget(w)
         
-        self._create_menu()
-        self._create_status()
-        self._create_main_widget()
+        #self._create_menu()
+        #self._create_status()
+        #self._create_main_widget()
         
         self._user_settings_path = None
         self._user_settings = {'projects': {}, 'current_project': None}
@@ -127,6 +135,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Load the current project, if there is one set in the user settings."""
         current_project = self._user_settings.get('current_project')
         if not current_project:
+            # TODO: Open Project Manager, if plugin is installed
             return
         cfg = self._user_settings['projects'].get(current_project)
         if not cfg:
@@ -253,32 +262,45 @@ class MainWindow(QtWidgets.QMainWindow):
         pass
 
 
+@functools.lru_cache
 def get_top_window():
-    """Get the top window for the main application, if there is one.
-
+    """Retrun the top window of the application to use as a parent for other tool windows.
+    
     Returns:
-        QtWidget or None
-
+        QWidget or None
+        
+    Raises:
+        RuntimeError when top level window is not found. This prevents the 
+        function from cachine the window value.
+        
     """
-
-    name, _ = os.path.splitext(os.path.basename(sys.executable))
-
-    if name == "houdini":
-        window = None
-        try:
-            import hou  # pylint: disable=import-outside-toplevel
-
-            window = hou.qt.mainWindow()
-        except ImportError:
-            pass
-        return window
-
-    elif name == "maya":
-        for window in QtWidgets.QApplication.instance().topLevelWidgets():
-            if window.objectName() == "MayaWindow":
-                return window
-
+    try:
+        import hou  # pylint: disable=import-outside-toplevel
+        return hou.qt.mainWindow()
+    except ImportError:
+        pass    
+    for top_window in QtWidgets.QApplication.instance().topLevelWidgets():
+        if top_window.objectName() in ('DedaverseMainWindow', 'MayaWindow'):
+            return top_window
     for window in QtWidgets.QApplication.instance().topLevelWidgets():
         if isinstance(window, QtWidgets.QMainWindow):
             return window
-    return None
+    raise RuntimeError('No top-level windows found!') # prevents caching
+        
+        
+@functools.lru_cache
+def get_main_menu():
+    """Get the main menu for the app. When this is running as the standalone dedaverse app
+    in the windows system tray, this will return the main context menu instance. In the
+    DCC applications, thisi will be the main dedaverse menu.
+    
+    Returns:
+        QMenu
+    
+    """
+    window = get_top_window()
+    for child in window.children():
+        if not isinstance(child, QtWidgets.QMenu):
+            continue
+        if child.objectName() == 'DedaverseTaskbarContextMenu':
+            return child

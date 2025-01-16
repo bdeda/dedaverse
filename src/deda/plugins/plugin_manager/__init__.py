@@ -68,7 +68,6 @@ class PluginWidget(QtWidgets.QWidget):
         title_lbl.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         layout.addWidget(desc_lbl, 1, 1, -1, -1)        
         
-        
 
 class PluginManagerDialog(QtWidgets.QDialog):
     """UI for the plugin manager."""
@@ -136,7 +135,7 @@ class PluginManager(deda.core.Tool):
         for action in menu.actions():
             first_action = action
             break
-        show_action = QtGui.QAction('Plugin Manager', parent=menu)
+        show_action = QtGui.QAction('Plugins', parent=menu)
         show_action.triggered.connect(self.launch)
         if first_action:
             menu.insertAction(first_action, show_action)

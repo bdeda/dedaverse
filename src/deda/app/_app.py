@@ -19,12 +19,18 @@
 Application class definition, used for all Dedaverse tools run outside of other DCCs.
 """
 
-__all__ = ["Application", "run", "get_top_window", "get_main_menu"]
+__all__ = ["Application", "run", "get_proc_under_mouse"]
 
 
 import os
 import logging
-import functools
+try:
+    import win32gui
+    import win32process
+except ImportError:
+    pass
+import psutil
+import ctypes
 
 from PySide6 import QtWidgets, QtCore
 
@@ -44,6 +50,10 @@ class Application(QtWidgets.QApplication):
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_ShareOpenGLContexts, True)
         super().__init__(*args, **kwargs)
+        
+        myappid = u'dedafx.dedaverse.0.1.0' # arbitrary string
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)        
+        
         log.debug("Dedaverse main application created.")
 
         stylesheet = os.path.join(os.path.dirname(__file__), "stylesheet")
@@ -69,33 +79,8 @@ def run(loglevel='DEBUG'):
     return ret
 
 
-@functools.lru_cache
-def get_top_window():
-    """Retrun the top window of the application to use as a parent for other tool windows.
-    
-    Returns:
-        QWidget
-        
-    """
-    for top_window in QtWidgets.QApplication.instance().topLevelWidgets():
-        if top_window.objectName() in ('DedaverseMainWindow', 'MayaWindow'):
-            return top_window
-        
-        
-@functools.lru_cache
-def get_main_menu():
-    """Get the main menu for the app. When this is running as the standalone dedaverse app
-    in the windows system tray, this will return the main context menu instance. In the
-    DCC applications, thisi will be the main dedaverse menu.
-    
-    Returns:
-        QMenu
-    
-    """
-    window = get_top_window()
-    for child in window.children():
-        if not isinstance(child, QtWidgets.QMenu):
-            continue
-        if child.objectName() == 'DedaverseTaskbarContextMenu':
-            return child
-    
+def get_proc_under_mouse():
+    """Get the process under the mouse on Windows."""
+    hwnd = win32gui.WindowFromPoint(win32gui.GetCursorPos())
+    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+    return psutil.Process(pid)

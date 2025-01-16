@@ -16,5 +16,11 @@
 #
 # ###################################################################################
 from ._app import *
+try:
+    # This imports PySide libs that fail to import on the github actions runners, 
+    # so it is wrapped in a try-except clause.
+    from ._main_window import *
+except ImportError:
+    pass
 
 RESTART_CODE = 1212333
