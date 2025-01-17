@@ -38,7 +38,7 @@ log = logging.getLogger('deda.plugins.plugin_manager')
 
 DEFAULT_IMAGE_PATH = os.path.join(os.path.dirname(__file__), 'plug.png')
 
-class PluginWidget(QtWidgets.QWidget):
+class PluginWidget(QtWidgets.QFrame):
     
     DEFAULT_IMAGE = QtGui.QImage(DEFAULT_IMAGE_PATH)
     
@@ -61,11 +61,11 @@ class PluginWidget(QtWidgets.QWidget):
         layout.addWidget(image_lbl, 0, 0, -1, 1)
         
         title_lbl = QtWidgets.QLabel(title, parent=self)  
-        title_lbl.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        #title_lbl.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         layout.addWidget(title_lbl, 0, 1, 1, -1)
         
         desc_lbl = QtWidgets.QLabel(description, parent=self)
-        title_lbl.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        #desc_lbl.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         layout.addWidget(desc_lbl, 1, 1, -1, -1)        
         
 

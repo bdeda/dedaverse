@@ -40,6 +40,47 @@ from ._usd_viewer import UsdViewWidget
 log = logging.getLogger(__name__)
 
 
+class Panel(QtWidgets.QFrame):
+    """Base class for all panel types."""
+    
+    def __init__(self, name, parent=None):
+        super().__init__(parent=parent)
+        
+        self.setStyleSheet("Panel{background-color: rgb(20,20,20); border: 1px solid rgb(40,40,40); border-radius: 5px;}")
+        
+        vbox = QtWidgets.QVBoxLayout()
+        self.setLayout(vbox)
+        
+        title = QtWidgets.QLabel(name)
+        font = title.font()
+        #font.setBold(True)
+        font.setPointSize(10)
+        title.setFont(font)
+        vbox.addWidget(title)
+        scroll_area = QtWidgets.QScrollArea()
+        #scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        #scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)        
+        vbox.addWidget(scroll_area)
+        #vbox.addStretch()
+    
+
+class AssetPanel(Panel):
+    
+    def __init__(self, parent=None):
+        super().__init__("Assets", parent=parent)
+
+class AppPanel(Panel):
+    
+    def __init__(self, parent=None):
+        super().__init__("Apps", parent=parent)    
+
+class TaskPanel(Panel):
+    
+    def __init__(self, parent=None):
+        super().__init__("Tasks", parent=parent)    
+
+
+
 class MainWindow(QtWidgets.QMainWindow):
     """Main Window base class for all DedaFX applications."""
 
@@ -70,7 +111,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setObjectName('DedaverseMainWindow')
         
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint) # QtCore.Qt.Window |
-        self.setAttribute(QtCore.Qt.WA_TranslucentBackground) #, True)
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+        
+        geo = QtWidgets.QApplication.primaryScreen().availableGeometry()
+        size = QtWidgets.QApplication.primaryScreen().size()
+        width = 450
+        self.setFixedWidth(width)
+        self.setFixedHeight(geo.height())
+        self.setGeometry(size.width()-self.width(), 0, width, geo.height()) 
         
         icon_path = os.path.join(os.path.dirname(__file__), 'star_icon.png')
         icon = QtGui.QIcon(icon_path)
@@ -81,12 +129,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._icon.activated.connect(self.toggle_visibility)
         
         w = QtWidgets.QWidget(parent=self)
-        w.setAttribute(QtCore.Qt.WA_TranslucentBackground)
+        #w.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setCentralWidget(w)
         
         #self._create_menu()
         #self._create_status()
-        #self._create_main_widget()
+        self._create_main_widget()
         
         self._user_settings_path = None
         self._user_settings = {'projects': {}, 'current_project': None}
@@ -128,8 +176,8 @@ class MainWindow(QtWidgets.QMainWindow):
             None
 
         """
-        if self.settings.contains("mainwindow.geometry"):
-            self.restoreGeometry(self.settings.value("mainwindow.geometry"))
+        #if self.settings.contains("mainwindow.geometry"):
+        #    self.restoreGeometry(self.settings.value("mainwindow.geometry"))
             
     def _load_project(self):
         """Load the current project, if there is one set in the user settings."""
@@ -216,9 +264,21 @@ class MainWindow(QtWidgets.QMainWindow):
         if context in (QtWidgets.QSystemTrayIcon.Context, QtWidgets.QSystemTrayIcon.DoubleClick):
             return
         if self.isVisible():
+            
             self.hide()
         else:
+            
+            
+            #slide_anim = QtCore.QPropertyAnimation(self, b"pos")
+            #slide_anim.setDuration(1000)
+            #slide_anim.setStartValue(QtCore.QPoint(geo.width()+self.width(), 0))
+            #slide_anim.setEndValue(QtCore.QPoint(geo.width()-self.width(), 0))
+            
+            
             self.show()
+            self.raise_()
+            self.activateWindow()
+            #slide_anim.start()
         
     def _create_menu(self):
         """Create the main menu bar for the window."""
@@ -239,20 +299,24 @@ class MainWindow(QtWidgets.QMainWindow):
         widget = self.centralWidget()
         vbox = QtWidgets.QVBoxLayout()
         widget.setLayout(vbox)
-        vbox.setContentsMargins(0, 0, 0, 0)
+        #vbox.setContentsMargins(0, 0, 0, 0)
         
-        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        vbox.addWidget(splitter)
+        vbox.addWidget(AssetPanel(parent=self))
+        vbox.addWidget(AppPanel(parent=self))
+        vbox.addWidget(TaskPanel(parent=self))
         
-        self._asset_browser = AssetBrowserWidget(parent=self)
-        self._asset_info = AssetInfoWidget(parent=self)
-        self._tabs = QtWidgets.QTabWidget(parent=self)
-        splitter.addWidget(self._tabs)
-        self._tabs.addTab(self._asset_browser, 'Library')
-        self._tabs.addTab(self._asset_info, 'Info')
+        #splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        #vbox.addWidget(splitter)
         
-        self._usd_view = UsdViewWidget(parent=self)
-        splitter.addWidget(self._usd_view)        
+        #self._asset_browser = AssetBrowserWidget(parent=self)
+        #self._asset_info = AssetInfoWidget(parent=self)
+        #self._tabs = QtWidgets.QTabWidget(parent=self)
+        #splitter.addWidget(self._tabs)
+        #self._tabs.addTab(self._asset_browser, 'Library')
+        #self._tabs.addTab(self._asset_info, 'Info')
+        
+        #self._usd_view = UsdViewWidget(parent=self)
+        #splitter.addWidget(self._usd_view)        
     
     def _open_project_settings(self):
         dlg = ProjectSettingsDialog(parent=self)

@@ -45,21 +45,22 @@ log = logging.getLogger(__name__)
 class Application(QtWidgets.QApplication):
     """Main application instance for all DedaFX apps."""
 
-    def __init__(self, *args, **kwargs):        
+    def __init__(self, *args, **kwargs): 
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_ShareOpenGLContexts, True)
-        super().__init__(*args, **kwargs)
+        super().__init__(['-platform', 'windows:darkmode=2'], **kwargs)
+        self.setStyle('Fusion')
         
-        myappid = u'dedafx.dedaverse.0.1.0' # arbitrary string
+        myappid = u'dedafx.dedaverse.0.1.0' 
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)        
         
         log.debug("Dedaverse main application created.")
 
-        stylesheet = os.path.join(os.path.dirname(__file__), "stylesheet")
-        with open(stylesheet, "r", encoding="utf-8") as f:
-            style = f.read()
-        self.setStyleSheet(style)
+        #stylesheet = os.path.join(os.path.dirname(__file__), "stylesheet")
+        #with open(stylesheet, "r", encoding="utf-8") as f:
+        #    style = f.read()
+        #self.setStyleSheet(style)
 
 
 def run(loglevel='DEBUG'):

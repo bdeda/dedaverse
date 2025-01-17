@@ -86,6 +86,8 @@ class ProjectManagerDialog(QtWidgets.QDialog):
         self.setLayout(vbox)
         #vbox.setContentsMargins(0, 0, 0, 0)
         
+        # Project: <project name>, combobox with autocomplete
+        
         vbox.addWidget(QtWidgets.QLabel('Current Project:'))
         vbox.addStretch()
         
@@ -93,6 +95,10 @@ class ProjectManagerDialog(QtWidgets.QDialog):
         vbox.addWidget(buttons)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        
+    def accept(self):
+        log.info('Project settings saved.')
+        super().accept()
         
 
 
