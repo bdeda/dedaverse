@@ -18,4 +18,4 @@ maintainers = [
 readme = "README.md"
 
 [project.scripts]
-dedaverse = "dedaverse:__main__"
+dedaverse = "dedaverse:__main__:dedaverse"
