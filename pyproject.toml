@@ -16,7 +16,6 @@ maintainers = [
   {name = "Ben Deda"}
 ]
 readme = "README.md"
-license = "Apache-2.0"
 
 [project.scripts]
 dedaverse = "dedaverse:__main__"
