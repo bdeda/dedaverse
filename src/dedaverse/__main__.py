@@ -30,12 +30,13 @@ def dedaverse():
 
 @dedaverse.command()
 def run():
+    """Run the app in the system tray."""
     return deda.app.run()
     
     
 @dedaverse.command()
 def install():
-    """Install the dedaverse startup script that will run the dedaverse app."""
+    """Install the dedaverse startup script."""
     
     # TODO: This should create a venv if one does not already exist for the current dedaverse git clone.
     

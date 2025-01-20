@@ -1,4 +1,0 @@
-usd-core == 24.11
-PySide6 >= 6.6
-p4python >= 2024.2
-coloredlogs

@@ -17,7 +17,7 @@
 # ###################################################################################
 from ._plugin import *
 from ._project import *
-from ._user_config import *
+from ._config import *
 
 
 def initialize():

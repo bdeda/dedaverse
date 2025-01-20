@@ -19,10 +19,10 @@
 Application class definition, used for all Dedaverse tools run outside of other DCCs.
 """
 
-__all__ = ["Application", "run", "get_proc_under_mouse"]
+__all__ = ["Application", "run", "get_proc_under_mouse", "is_venv"]
 
 
-import os
+import sys
 import logging
 try:
     import win32gui
@@ -47,20 +47,14 @@ class Application(QtWidgets.QApplication):
 
     def __init__(self, *args, **kwargs): 
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
+        QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_ShareOpenGLContexts, True)
         super().__init__(['-platform', 'windows:darkmode=2'], **kwargs)
-        self.setStyle('Fusion')
-        
+        self.setStyle('Fusion')        
         myappid = u'dedafx.dedaverse.0.1.0' 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)        
-        
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         log.debug("Dedaverse main application created.")
-
-        #stylesheet = os.path.join(os.path.dirname(__file__), "stylesheet")
-        #with open(stylesheet, "r", encoding="utf-8") as f:
-        #    style = f.read()
-        #self.setStyleSheet(style)
 
 
 def run(loglevel='DEBUG'):
@@ -83,5 +77,13 @@ def run(loglevel='DEBUG'):
 def get_proc_under_mouse():
     """Get the process under the mouse on Windows."""
     hwnd = win32gui.WindowFromPoint(win32gui.GetCursorPos())
-    _, pid = win32process.GetWindowThreadProcessId(hwnd)
-    return psutil.Process(pid)
+    try:
+        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        return psutil.Process(pid)
+    except Exception as err:
+        log.error(err)
+
+
+def is_venv():
+    """If this process is a virtual env or not."""
+    return sys.prefix != sys.base_prefix

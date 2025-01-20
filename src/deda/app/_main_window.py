@@ -21,65 +21,94 @@ MainWindow class definition, used for all Dedaverse tools.
 
 __all__ = ["MainWindow", "get_top_window", "get_main_menu"]
 
-import sys
 import os
 import logging
 import json
-import getpass
 import functools
+import pkg_resources
 
 from PySide6 import QtWidgets, QtCore, QtGui
 
-from ._asset_browser import AssetBrowserWidget
-from ._asset_info import AssetInfoWidget
-from ._project_settings import ProjectSettingsDialog
+from deda.core import LayeredConfig
+
+#from ._asset_browser import AssetBrowserWidget
+#from ._asset_info import AssetInfoWidget
+from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
-from ._usd_viewer import UsdViewWidget
+#from ._usd_viewer import UsdViewWidget
 
 
 log = logging.getLogger(__name__)
 
 
+class PanelHeader(QtWidgets.QWidget):
+    
+    gear_icon = None
+    close_icon = None
+    
+    def __init__(self, title, 
+                 icon=None, 
+                 config_callback=None,
+                 close_callback=None, 
+                 parent=None):
+        super().__init__(parent=parent)
+        
+        hbox = QtWidgets.QHBoxLayout()
+        self.setLayout(hbox)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        
+        label = QtWidgets.QLabel(title)
+        font = label.font()
+        font.setPointSize(10)
+        metrics = QtGui.QFontMetrics(font)
+        label.setFont(font)         
+        
+        if icon:
+            icon = QtGui.QPixmap(icon).scaled(metrics.height(), metrics.height())
+            img = QtWidgets.QLabel()
+            img.setPixmap(icon)
+            img.setFixedSize(metrics.height(), metrics.height())
+            hbox.addWidget(img)       
+        
+        hbox.addWidget(label)
+        
+        hbox.addStretch()
+        
+        if not PanelHeader.gear_icon:
+            icon_path = os.path.join(os.path.dirname(__file__), 'icons', 'gear_icon_32.png')
+            PanelHeader.gear_icon = QtGui.QIcon(icon_path)
+        gear_btn = QtWidgets.QPushButton(PanelHeader.gear_icon, '')
+        gear_btn.setToolTip('Settings')
+        gear_btn.setFlat(True)
+        gear_btn.setFixedSize(metrics.height(), metrics.height())
+        hbox.addWidget(gear_btn)
+        
+        self.setFixedHeight(metrics.height())
+        
+        
+
 class Panel(QtWidgets.QFrame):
     """Base class for all panel types."""
     
-    def __init__(self, name, parent=None):
+    def __init__(self, name, show_scroll_area=True, parent=None, **kwargs):
         super().__init__(parent=parent)
         
         self.setStyleSheet("Panel{background-color: rgb(20,20,20); border: 1px solid rgb(40,40,40); border-radius: 5px;}")
         
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
+        #vbox.setContentsMargins(0, 0, 0, 0)
         
-        title = QtWidgets.QLabel(name)
-        font = title.font()
-        #font.setBold(True)
-        font.setPointSize(10)
-        title.setFont(font)
-        vbox.addWidget(title)
-        scroll_area = QtWidgets.QScrollArea()
-        #scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-        #scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)        
-        vbox.addWidget(scroll_area)
+        header = PanelHeader(name, parent=self, **kwargs) 
+        vbox.addWidget(header)
+        
+        if show_scroll_area:
+            scroll_area = QtWidgets.QScrollArea()
+            #scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+            #scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)        
+            vbox.addWidget(scroll_area)
         #vbox.addStretch()
     
-
-class AssetPanel(Panel):
-    
-    def __init__(self, parent=None):
-        super().__init__("Assets", parent=parent)
-
-class AppPanel(Panel):
-    
-    def __init__(self, parent=None):
-        super().__init__("Apps", parent=parent)    
-
-class TaskPanel(Panel):
-    
-    def __init__(self, parent=None):
-        super().__init__("Tasks", parent=parent)    
-
-
 
 class MainWindow(QtWidgets.QMainWindow):
     """Main Window base class for all DedaFX applications."""
@@ -105,7 +134,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if app_name is None:
             app_name = "Dedaverse"
         self._settings = QtCore.QSettings("DedaFX", app_name)
-        version = deda.__version__
+        version = pkg_resources.get_distribution('dedaverse').version
         self._window_title_context = f"{app_name} [deda@{version}]"
         self.setWindowTitle(self._window_title_context)
         self.setObjectName('DedaverseMainWindow')
@@ -120,13 +149,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setFixedHeight(geo.height())
         self.setGeometry(size.width()-self.width(), 0, width, geo.height()) 
         
-        icon_path = os.path.join(os.path.dirname(__file__), 'star_icon.png')
+        icon_path = os.path.join(os.path.dirname(__file__), 'icons', 'star_icon.png')
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         
         self._icon = TaskbarIcon(icon, parent=self)
         self._icon.setVisible(True)
         self._icon.activated.connect(self.toggle_visibility)
+        self._icon.messageClicked.connect(self.message_clicked)
         
         w = QtWidgets.QWidget(parent=self)
         #w.setAttribute(QtCore.Qt.WA_TranslucentBackground)
@@ -136,12 +166,9 @@ class MainWindow(QtWidgets.QMainWindow):
         #self._create_status()
         self._create_main_widget()
         
-        self._user_settings_path = None
-        self._user_settings = {'projects': {}, 'current_project': None}
-        self._project_settings = {}
-        
-        self._load_user_settings()
-        self._load_project() 
+        self._config = None        
+        self._load_config()
+        #self._load_project() 
         self.load_settings()
 
     @property
@@ -196,30 +223,22 @@ class MainWindow(QtWidgets.QMainWindow):
             self._project_settings = json.load(f)
         self._icon.format_tool_tip(current_project)        
             
-    def _load_user_settings(self):
+    def _load_config(self):
         """Load the user settings from the local machine, or from the env configured user settings location."""
-        user_config_dir = os.getenv('DEDA_USER_CONFIG_DIR')
-        if not user_config_dir:
-            user_config_dir = os.path.expanduser('~\\.dedaverse')
-        else:
-            user_config_dir = f'{user_config_dir}\\{getpass.getuser()}'
-        # Once the user has created a project, it will be saved in the user projects dict in the form {name: config_path}.
-        self._user_settings_path = f'{user_config_dir}\\user_settings.cfg'
-        if os.path.isfile(self._user_settings_path):
-            log.debug('Loading user settings from {}'.format(self._user_settings_path))
-            with open(self._user_settings_path, 'r') as f:
-                data = f.read()
-                log.debug('User_settings.cfg contents:')
-                log.debug(data)
-                user_settings = json.loads(data)
-                if isinstance(user_settings, dict):
-                    self._user_settings = user_settings
-                else:
-                    log.error(f'Bad format of user settings cfg file! Expecting dict but got {type(user_settings)}')
-        else:
-            log.warning('User settings not found!')
-            # TODO: show the new project dialog
-            self._save_user_settings()
+        self._config = LayeredConfig()
+        if not self._config.current_project:
+            # TODO: open the project settings dialog so the user can choose a project name 
+            # and root directory location to save files to.
+            #log.warning('Choose a project to start.')        
+            self.show_message('Choose a project.', 
+                              'You must set up your project before starting work.', 
+                              icon=QtWidgets.QSystemTrayIcon.Warning)
+            
+    def message_clicked(self):
+        if not self._config.current_project:
+            # shot the dialog to create a new project
+            dlg = StartProjectDialog(self._config, parent=self)
+            dlg.exec_()
 
     def save_settings(self):
         """Save the window settings for this window.
@@ -232,15 +251,6 @@ class MainWindow(QtWidgets.QMainWindow):
             
         """
         self.settings.setValue("mainwindow.geometry", self.saveGeometry())
-        self._save_user_settings()
-        
-    def _save_user_settings(self):
-        """Save the user settings to disk."""
-        settings_dir = os.path.dirname(self._user_settings_path)
-        if not os.path.isdir(settings_dir):
-            os.makedirs(settings_dir)
-        with open(self._user_settings_path, 'w') as f:
-            json.dump(self._user_settings, f, sort_keys=True, indent=4)
        
     def show_message(self, title, message, icon=QtWidgets.QSystemTrayIcon.Information, timeout=10000):
         """Show a message in the tray icon, status, and log."""
@@ -256,29 +266,19 @@ class MainWindow(QtWidgets.QMainWindow):
         elif icon == QtWidgets.QSystemTrayIcon.Critical:
             log.critical(title)
             log.critical(message)
-        self.status().showMessage(message, timeout)
+        #self.status().showMessage(message, timeout)
         self._icon.showMessage(title, message, icon, timeout)        
         
     def toggle_visibility(self, context=None):
         """Toggle the visibility of the main window."""
         if context in (QtWidgets.QSystemTrayIcon.Context, QtWidgets.QSystemTrayIcon.DoubleClick):
             return
-        if self.isVisible():
-            
+        if self.isVisible():            
             self.hide()
         else:
-            
-            
-            #slide_anim = QtCore.QPropertyAnimation(self, b"pos")
-            #slide_anim.setDuration(1000)
-            #slide_anim.setStartValue(QtCore.QPoint(geo.width()+self.width(), 0))
-            #slide_anim.setEndValue(QtCore.QPoint(geo.width()-self.width(), 0))
-            
-            
             self.show()
             self.raise_()
             self.activateWindow()
-            #slide_anim.start()
         
     def _create_menu(self):
         """Create the main menu bar for the window."""
@@ -301,9 +301,25 @@ class MainWindow(QtWidgets.QMainWindow):
         widget.setLayout(vbox)
         #vbox.setContentsMargins(0, 0, 0, 0)
         
-        vbox.addWidget(AssetPanel(parent=self))
-        vbox.addWidget(AppPanel(parent=self))
-        vbox.addWidget(TaskPanel(parent=self))
+        # TODO: get this list from a user/project config
+        panels = {
+            'Project': {'show_scroll_area': False, 'icon': r'F:\dev\film_projector.png'},
+            'Assets': {},
+            'Apps': {}, 
+            'Services': {},
+            'Tasks': {}, 
+        }
+        
+        for panel, settings in panels.items():
+            title = panel
+            if panel == 'Project':
+                title = 'My Project Name'
+                # TODO: Project panel also control drag positioning of main window
+            vbox.addWidget(Panel(title, parent=self, **settings))
+        
+        #vbox.addWidget(AssetPanel(parent=self))
+        #vbox.addWidget(AppPanel(parent=self))
+        #vbox.addWidget(TaskPanel(parent=self))
         
         #splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         #vbox.addWidget(splitter)
@@ -319,7 +335,9 @@ class MainWindow(QtWidgets.QMainWindow):
         #splitter.addWidget(self._usd_view)        
     
     def _open_project_settings(self):
-        dlg = ProjectSettingsDialog(parent=self)
+        dlg = ProjectSettingsDialog(parent=self._icon)
+        #dlg.show()
+        #dlg.raise_()
         dlg.exec_() # modal        
     
     def _open_about(self):

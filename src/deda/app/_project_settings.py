@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 # ###################################################################################
-__all__ = ['ProjectSettingsDialog']
+__all__ = ['ProjectSettingsDialog', 'StartProjectDialog']
 
 from PySide6 import QtWidgets
 
@@ -23,6 +23,37 @@ import deda.core
 
 # pip install https://github.com/NVIDIA/warp/releases/download/v1.4.2/warp_lang-1.4.2+cu11-py3-none-win_amd64.whl
 
+
+class StartProjectDialog(QtWidgets.QDialog):
+    
+    def __init__(self, config, parent=None):
+        super().__init__(parent=parent)
+        
+        # Create a new project (ProjectConfig), or browse for one.
+        self.setWindowTitle('Start a Project')
+        
+        self._config = config        
+        self._project = deda.core.ProjectConfig(name='My Project', rootdir='C:\dedaverse')
+        
+        vbox = QtWidgets.QVBoxLayout()
+        self.setLayout(vbox)
+        
+        grid = QtWidgets.QGridLayout()
+        vbox.addLayout(grid)
+        vbox.addStretch()
+        
+        btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
+        btns.accepted.connect(self.save_and_close)
+        btns.rejected.connect(self.close)
+        vbox.addWidget(btns)
+        
+    def save_and_close(self):
+        if self._project not in self._config.projects:
+            self._config.user.projects.append(self._project)
+        self._config.current_project = self._project
+        self._config.save()
+        self.close()
+        
 
 class ProjectSettingsDialog(QtWidgets.QDialog):
     
