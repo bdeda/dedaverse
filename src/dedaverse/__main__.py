@@ -20,6 +20,14 @@ import os
 import click
 import getpass
 
+try:
+    sys.path.insert(0, r'C:\Program Files\Wing Pro 10')
+    import wingdbstub
+except ImportError:
+    pass
+finally:
+    sys.path = sys.path[1:]
+
 import deda.app
 
 
@@ -50,7 +58,6 @@ def install():
     print('Install errors!')
     return 1
     
-
 
 if __name__ == '__main__':
     sys.exit(dedaverse())

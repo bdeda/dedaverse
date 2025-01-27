@@ -40,15 +40,14 @@ class TaskbarIcon(QtWidgets.QSystemTrayIcon):
         self._menu = self._create_menu()
         self.setContextMenu(self._menu)  
         self.setToolTip('Dedaverse is running.')
-        
-        log.debug("Dedaverse taskbar icon created.")
-        
+        log.debug("Dedaverse taskbar icon created.")        
     
     def _create_menu(self):
         menu = QtWidgets.QMenu(parent=self.parent())
         menu.setObjectName('DedaverseTaskbarContextMenu')
+        menu.addAction('Project', self.parent()._open_project_settings)
         menu.addAction('Restart', self._on_restart)
-        menu.addAction('Exit', self._on_exit)
+        #menu.addAction('Exit', self._on_exit)
         return menu
     
     def _on_exit(self):

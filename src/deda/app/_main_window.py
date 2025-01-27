@@ -46,12 +46,24 @@ class PanelHeader(QtWidgets.QWidget):
     gear_icon = None
     close_icon = None
     
+    settings_clicked = QtCore.Signal()
+    minmax_clicked = QtCore.Signal(bool) # True when minimized, False when maximized
+    close_clicked = QtCore.Signal()
+    
+    
     def __init__(self, title, 
                  icon=None, 
-                 config_callback=None,
+                 show_minmax=True,
+                 minimized=False,
+                 show_close=True,
+                 settings_callback=None,
                  close_callback=None, 
                  parent=None):
         super().__init__(parent=parent)
+        
+        self._minimized = False
+        self._settings_callback = settings_callback
+        self._close_callback = close_callback
         
         hbox = QtWidgets.QHBoxLayout()
         self.setLayout(hbox)
@@ -82,33 +94,79 @@ class PanelHeader(QtWidgets.QWidget):
         gear_btn.setFlat(True)
         gear_btn.setFixedSize(metrics.height(), metrics.height())
         hbox.addWidget(gear_btn)
+        gear_btn.clicked.connect(self._on_settings_clicked)
         
-        self.setFixedHeight(metrics.height())
+        if show_minmax:
+            self._minmax_btn = QtWidgets.QPushButton('__')
+            self._minmax_btn.setFlat(True)
+            self._minmax_btn.setFixedSize(metrics.height(), metrics.height())
+            hbox.addWidget(self._minmax_btn)
+            self._minmax_btn.clicked.connect(self._minmax_clicked)
+            
+        if show_close:
+            close_btn = QtWidgets.QPushButton('X')
+            close_btn.setFlat(True)
+            close_btn.setFixedSize(metrics.height(), metrics.height())
+            hbox.addWidget(close_btn) 
+            close_btn.clicked.connect(self.close_clicked.emit)
         
+        self.setFixedHeight(metrics.height())        
+        
+    @property
+    def minimized(self):
+        return self._minimized
+        
+    def _minmax_clicked(self):
+        self._minimized = not self._minimized
+        if self._minimized:
+            self._minmax_btn.setText('[]')
+        else:
+            self._minmax_btn.setText('__')
+        self.minmax_clicked.emit(self._minimized) 
+        
+    def _on_settings_clicked(self):
+        self.settings_clicked.emit()
+        if self._settings_callback:
+            self._settings_callback()        
         
 
 class Panel(QtWidgets.QFrame):
     """Base class for all panel types."""
     
-    def __init__(self, name, show_scroll_area=True, parent=None, **kwargs):
+    close_clicked = QtCore.Signal()
+    
+    def __init__(self, type_name, name, show_scroll_area=True, parent=None, **kwargs):
         super().__init__(parent=parent)
+        
+        self.setObjectName(type_name)
         
         self.setStyleSheet("Panel{background-color: rgb(20,20,20); border: 1px solid rgb(40,40,40); border-radius: 5px;}")
         
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
-        #vbox.setContentsMargins(0, 0, 0, 0)
         
         header = PanelHeader(name, parent=self, **kwargs) 
         vbox.addWidget(header)
+        header.close_clicked.connect(self.close)
         
         if show_scroll_area:
-            scroll_area = QtWidgets.QScrollArea()
-            #scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-            #scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)        
-            vbox.addWidget(scroll_area)
-        #vbox.addStretch()
-    
+            self._scroll_area = QtWidgets.QScrollArea()
+            #self._scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+            #self._scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)        
+            vbox.addWidget(self._scroll_area)
+            header.minmax_clicked.connect(self._on_minimized)
+            
+    def __repr__(self):
+        return f'<{self.__class__} {self.objectName()}>'
+            
+    def _on_minimized(self, minimized):
+        self._scroll_area.setVisible(not minimized)
+        
+    def close(self):        
+        super().close() 
+        self.close_clicked.emit()
+        
+              
 
 class MainWindow(QtWidgets.QMainWindow):
     """Main Window base class for all DedaFX applications."""
@@ -122,8 +180,6 @@ class MainWindow(QtWidgets.QMainWindow):
             parent: (QWidget) Default=None, The optional parent window of this window.
 
         """
-        import deda  # pylint: disable=import-outside-toplevel
-
         if not parent:
             try:
                 parent = get_top_window()
@@ -131,6 +187,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 parent = None
             log.debug("Setting main window's parent to {}".format(parent))
         super().__init__(parent=parent)
+        
+        self._config = None
+        self._proj_settings_dlg = None
+        
         if app_name is None:
             app_name = "Dedaverse"
         self._settings = QtCore.QSettings("DedaFX", app_name)
@@ -158,18 +218,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self._icon.activated.connect(self.toggle_visibility)
         self._icon.messageClicked.connect(self.message_clicked)
         
-        w = QtWidgets.QWidget(parent=self)
-        #w.setAttribute(QtCore.Qt.WA_TranslucentBackground)
-        self.setCentralWidget(w)
-        
-        #self._create_menu()
-        #self._create_status()
-        self._create_main_widget()
-        
-        self._config = None        
         self._load_config()
-        #self._load_project() 
-        self.load_settings()
+        self._create_main_widget()
+        if self.current_project:
+            self._icon.setToolTip(f'Dedaverse :: {self.current_project.name}')
+        
+    @property 
+    def current_project(self):
+        return self._config.current_project        
+    
+    @current_project.setter
+    def current_project(self, project):
+        """User selected a different project to be the current project."""
+        if project == self.current_project:
+            return
+        self._config.current_project = project
+        # TODO: emit signal?
+        self._create_main_widget()
+        self._icon.setToolTip(f'Dedaverse :: {project.name}')
 
     @property
     def settings(self):
@@ -190,68 +256,38 @@ class MainWindow(QtWidgets.QMainWindow):
             self.hide()
             event.ignore()
             return
-        self.save_settings()
+        #self.save_settings()
         super().closeEvent(event)
 
-    def load_settings(self):
-        """Load the window settings for this window.
+    #def load_settings(self):
+        #"""Load the window settings for this window.
 
-        Subclasses should implement their own load_settings method and
-        call super().load_settings() to load base class settings.
+        #Subclasses should implement their own load_settings method and
+        #call super().load_settings() to load base class settings.
 
-        Returns:
-            None
+        #Returns:
+            #None
 
-        """
-        #if self.settings.contains("mainwindow.geometry"):
-        #    self.restoreGeometry(self.settings.value("mainwindow.geometry"))
+        #"""
+        ##if self.settings.contains("mainwindow.geometry"):
+        ##    self.restoreGeometry(self.settings.value("mainwindow.geometry"))
+        
+    #def save_settings(self):
+        #"""Save the window settings for this window.
+
+        #Subclasses should implement their own save_settings method and
+        #call super().save_settings() to save base class settings.
+        
+        #Returns:
+            #None
             
-    def _load_project(self):
-        """Load the current project, if there is one set in the user settings."""
-        current_project = self._user_settings.get('current_project')
-        if not current_project:
-            # TODO: Open Project Manager, if plugin is installed
-            return
-        cfg = self._user_settings['projects'].get(current_project)
-        if not cfg:
-            log.error(f'User settings file is not set up properly! The project {current_project} is not found in the available user projects.')
-            return
-        if not os.path.isfile(cfg):
-            log.error(f'Project settings file {cfg} does not exist!')
-            return
-        with open(cfg, 'r') as f:
-            self._project_settings = json.load(f)
-        self._icon.format_tool_tip(current_project)        
-            
-    def _load_config(self):
-        """Load the user settings from the local machine, or from the env configured user settings location."""
-        self._config = LayeredConfig()
-        if not self._config.current_project:
-            # TODO: open the project settings dialog so the user can choose a project name 
-            # and root directory location to save files to.
-            #log.warning('Choose a project to start.')        
-            self.show_message('Choose a project.', 
-                              'You must set up your project before starting work.', 
-                              icon=QtWidgets.QSystemTrayIcon.Warning)
-            
+        #"""
+        #self.settings.setValue("mainwindow.geometry", self.saveGeometry()) 
+        
     def message_clicked(self):
         if not self._config.current_project:
-            # shot the dialog to create a new project
-            dlg = StartProjectDialog(self._config, parent=self)
-            dlg.exec_()
-
-    def save_settings(self):
-        """Save the window settings for this window.
-
-        Subclasses should implement their own save_settings method and
-        call super().save_settings() to save base class settings.
-        
-        Returns:
-            None
+            self._open_project_settings()
             
-        """
-        self.settings.setValue("mainwindow.geometry", self.saveGeometry())
-       
     def show_message(self, title, message, icon=QtWidgets.QSystemTrayIcon.Information, timeout=10000):
         """Show a message in the tray icon, status, and log."""
         if icon == QtWidgets.QSystemTrayIcon.NoIcon:
@@ -278,44 +314,51 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.show()
             self.raise_()
-            self.activateWindow()
-        
-    def _create_menu(self):
-        """Create the main menu bar for the window."""
-        menubar = self.menuBar()
-        
-        file_menu = QtWidgets.QMenu('Project')
-        file_menu.addAction('Project Settings', self._open_project_settings)
-        menubar.addMenu(file_menu)
-        
-        help_menu = QtWidgets.QMenu('Help')
-        help_menu.addAction('About', self._open_about)
-        menubar.addMenu(help_menu)
-    
-    def _create_status(self):
-        pass
-    
+            self.activateWindow() 
+            
     def _create_main_widget(self):
-        widget = self.centralWidget()
+        """Reconstruct the central widget. This will generate all of the panels for the current project
+        based on the config settings.
+        
+        """
+        widget = QtWidgets.QWidget(parent=self)
+        self.setCentralWidget(widget)        
         vbox = QtWidgets.QVBoxLayout()
         widget.setLayout(vbox)
-        #vbox.setContentsMargins(0, 0, 0, 0)
+        
+        current_project = self.current_project
         
         # TODO: get this list from a user/project config
         panels = {
-            'Project': {'show_scroll_area': False, 'icon': r'F:\dev\film_projector.png'},
-            'Assets': {},
-            'Apps': {}, 
-            'Services': {},
-            'Tasks': {}, 
+            'Project': {'show_minmax': False, 
+                        'show_close': False, 
+                        'show_scroll_area': False, 
+                        'icon': None,
+                        'settings_callback': self._open_project_settings,
+                        },
+            #'Assets': {}, # additional panels shown are added based on the project, when the project is loaded.
+            #'Apps': {}, 
+            #'Services': {},
+            #'Tasks': {}, 
         }
+        
+        if current_project:
+            # TODO: load the plugin panel info, etc...
+            pass
+        
+        if tuple(panels.keys()) == ('Project',):
+            vbox.addStretch() # only a project with no other plugins loaded        
         
         for panel, settings in panels.items():
             title = panel
             if panel == 'Project':
-                title = 'My Project Name'
+                title = 'Untitled Project'
+                if current_project:
+                    title = current_project.name
                 # TODO: Project panel also control drag positioning of main window
-            vbox.addWidget(Panel(title, parent=self, **settings))
+            panel_obj = Panel(panel, title, parent=self, **settings)
+            vbox.addWidget(panel_obj)
+            panel_obj.close_clicked.connect(self._on_panel_closed)
         
         #vbox.addWidget(AssetPanel(parent=self))
         #vbox.addWidget(AppPanel(parent=self))
@@ -332,16 +375,70 @@ class MainWindow(QtWidgets.QMainWindow):
         #self._tabs.addTab(self._asset_info, 'Info')
         
         #self._usd_view = UsdViewWidget(parent=self)
-        #splitter.addWidget(self._usd_view)        
+        #splitter.addWidget(self._usd_view)     
+        
+    def _load_config(self):
+        """Load the user settings from the local machine, or from the env configured user settings location."""
+        self._config = LayeredConfig()
+        if not self._config.current_project:
+            # TODO: open the project settings dialog so the user can choose a project name 
+            # and root directory location to save files to.
+            #log.warning('Choose a project to start.')        
+            self.show_message('Choose a project.', 
+                              'You must set up your project before starting work.', 
+                              icon=QtWidgets.QSystemTrayIcon.Warning)    
+            
+    #def _load_project(self):
+        #"""Load the current project, if there is one set in the user settings."""
+        #current_project = self._user_settings.get('current_project')
+        #if not current_project:
+            ## TODO: Open Project Manager, if plugin is installed
+            #return
+        #cfg = self._user_settings['projects'].get(current_project)
+        #if not cfg:
+            #log.error(f'User settings file is not set up properly! The project {current_project} is not found in the available user projects.')
+            #return
+        #if not os.path.isfile(cfg):
+            #log.error(f'Project settings file {cfg} does not exist!')
+            #return
+        #with open(cfg, 'r') as f:
+            #self._project_settings = json.load(f)
+        #self._icon.format_tool_tip(current_project)        
+                   
+    def _on_panel_closed(self):
+        widget = self.centralWidget()
+        visible_panels = [p for p in widget.children() if isinstance(p, Panel) and p.isVisible()]
+        if not visible_panels:
+            return        
+        elif len(visible_panels) == 1:
+            widget.layout().insertStretch(0)     
     
     def _open_project_settings(self):
-        dlg = ProjectSettingsDialog(parent=self._icon)
-        #dlg.show()
-        #dlg.raise_()
-        dlg.exec_() # modal        
-    
-    def _open_about(self):
-        pass
+        
+        if not self.current_project:
+            if self._proj_settings_dlg and not isinstance (self._proj_settings_dlg, StartProjectDialog):
+                self._proj_settings_dlg.close() 
+                self._proj_settings_dlg = None
+            # show the dialog to create a new project
+            if not self._proj_settings_dlg:
+                self._proj_settings_dlg = StartProjectDialog(self._config, parent=self)
+                self._proj_settings_dlg.project_changed.connect(self._create_main_widget)
+            self._proj_settings_dlg.show()
+            self._proj_settings_dlg.raise_()
+            self._proj_settings_dlg.activateWindow()
+            self._proj_settings_dlg.exec_()
+        else:
+            if self._proj_settings_dlg and not isinstance (self._proj_settings_dlg, ProjectSettingsDialog):
+                self._proj_settings_dlg.close() 
+                self._proj_settings_dlg = None
+            # show the dialog to create a new project
+            if not self._proj_settings_dlg:            
+                self._proj_settings_dlg = ProjectSettingsDialog(self._config, parent=self)
+                self._proj_settings_dlg.project_changed.connect(self._create_main_widget)
+            self._proj_settings_dlg.show()
+            self._proj_settings_dlg.raise_()
+            self._proj_settings_dlg.activateWindow()
+            self._proj_settings_dlg.exec_() 
 
 
 @functools.lru_cache

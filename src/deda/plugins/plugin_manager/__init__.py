@@ -27,7 +27,7 @@ import logging
 import deda.core
 import deda.app
 
-from PySide6 import QtWidgets, QtGui
+from PySide6 import QtWidgets, QtGui, QtCore
 
 
 __version__ = '0.1.0'
@@ -39,17 +39,18 @@ log = logging.getLogger('deda.plugins.plugin_manager')
 DEFAULT_IMAGE_PATH = os.path.join(os.path.dirname(__file__), 'plug.png')
 
 class PluginWidget(QtWidgets.QFrame):
+    """Widget for a single plugin."""
     
     DEFAULT_IMAGE = QtGui.QImage(DEFAULT_IMAGE_PATH)
     
     def __init__(self, plugin, parent=None):
         super().__init__(parent=parent)
         
-        layout = QtWidgets.QGridLayout()
-        self.setLayout(layout)
-        layout.setContentsMargins(0, 0, 0, 0)
+        self.setStyleSheet("PluginWidget{background-color: rgb(20,20,20); border: 1px solid rgb(40,40,40); border-radius: 5px;}")
         
-        if plugin.image:
+        layout = QtWidgets.QGridLayout()
+        self.setLayout(layout)        
+        if plugin.image and os.path.isfile(plugin.image):
             image = QtGui.QImage(plugin.image)
         else:
             image = self.DEFAULT_IMAGE
@@ -61,16 +62,30 @@ class PluginWidget(QtWidgets.QFrame):
         layout.addWidget(image_lbl, 0, 0, -1, 1)
         
         title_lbl = QtWidgets.QLabel(title, parent=self)  
-        #title_lbl.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         layout.addWidget(title_lbl, 0, 1, 1, -1)
         
         desc_lbl = QtWidgets.QLabel(description, parent=self)
-        #desc_lbl.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        layout.addWidget(desc_lbl, 1, 1, -1, -1)        
+        layout.addWidget(desc_lbl, 1, 1)
+        
+        layout.setColumnMinimumWidth(0, image.width())
+        layout.setColumnStretch(0, 0)
+        layout.setColumnStretch(1, 1)
+        
+        self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_context_menu)
+        
+    def show_context_menu(self, pos):
+        menu = QtWidgets.QMenu(parent=self)
+        
+        action = menu.addAction('Check for Updates')
+        
+        menu.exec_(self.mapToGlobal(pos))
         
 
 class PluginManagerDialog(QtWidgets.QDialog):
-    """UI for the plugin manager."""
+    """UI for the plugin manager.
+    Allows the user to load and unload plugins available for the current project.
+    """
     
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -81,7 +96,6 @@ class PluginManagerDialog(QtWidgets.QDialog):
         
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
-        vbox.setContentsMargins(0, 0, 0, 0)
         
         scroll_area = QtWidgets.QScrollArea(parent=self)
         vbox.addWidget(scroll_area)
@@ -119,6 +133,13 @@ class PluginManager(deda.core.Tool):
             QWidget
             
         """
+        if hasattr(parent, 'current_project'):
+            if not parent.current_project:
+                log.error('Choose a project before configuring the plugins for the project.')
+                return
+            if not parent.current_project.is_writable:
+                log.error('Project cannot be modified. The config file is not writable.')
+                return
         return PluginManagerDialog(parent=parent)
         
     
@@ -145,4 +166,5 @@ class PluginManager(deda.core.Tool):
         log.info('Plugin Manager loaded successfully.')
         
         
-deda.core.PluginRegistry().register(PluginManager('Plugin Manager', __version__, __vendor__))
+deda.core.PluginRegistry().register(PluginManager('Plugin Manager', __version__, __vendor__,
+                                                  description=PluginManager.__doc__))

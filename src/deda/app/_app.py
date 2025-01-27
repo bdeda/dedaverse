@@ -46,6 +46,7 @@ class Application(QtWidgets.QApplication):
     """Main application instance for all DedaFX apps."""
 
     def __init__(self, *args, **kwargs): 
+        # For UI scaling
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
         QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)

@@ -144,4 +144,4 @@ class ProjectManager(deda.core.Tool):
         log.info('Project Manager loaded successfully.')
         
         
-deda.core.PluginRegistry().register(ProjectManager('Project Manager', __version__, __vendor__))
+#deda.core.PluginRegistry().register(ProjectManager('Project Manager', __version__, __vendor__))

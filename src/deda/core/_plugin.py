@@ -18,11 +18,12 @@
 __all__ = ['initialize_plugins',
            'Plugin', 
            'PluginRegistry',
-           'Tool', 
-           'TaskManager',
-           'NotificationSystem',
+           'Application',
            'AssetManager',
-           'DCCPlugin',
+           'NotificationSystem',
+           'Service',            
+           'TaskManager',
+           'Tool',
            ]
 
 import os
@@ -158,74 +159,80 @@ class PluginRegistry:
         for plugin in self:
             if isinstance(plugin, plugin_type):
                 yield plugin
-            
-            
-class Tool(Plugin):
-    """This plugin is a UI and contains it's own logic for managing the functionality of the tool.
-    
-    The UI should not be defined in the plugin __init__, but should be instantiated, or shown in the overriden launch method.
+                
+
+class Application(Plugin):
+    """Plugin for launching a DCC application with the appropriate environment to expose
+    the Dedaverse menu and tools. This also controls the entry points for generating the 
+    interface for accessing the available tools and customizations for the application.
     
     """
     
-    def __init__(self, name, *args, **kwargs):
-        super().__init__(name, *args, **kwargs)
-        self._window_instance = None
-    
-    def initialize_window(self, parent):
-        """Override in the derived classes to initialize the widget for this plugin."""
-        raise NotImplementedError
-       
-    def launch(self):
-        """Construct the UI or find the appropriate instance and show."""
-        if not self._window_instance:
-            import deda.app
-            parent_window = deda.app.get_top_window()
-            self._window_instance = self.initialize_window(parent=parent_window)
-        if not self._window_instance:
-            # TODO: pop up an error messagebox
-            log.error(f'{self.name} did not return a window instance from the initialize_window command!')
-            return
-        self._window_instance.show()
-        self._window_instance.raise_()
-        self._window_instance.activateWindow()
-
-
-class TaskManager(Plugin):
-    """Plugin for handliong task management system updates for the user.
-    
-    This interface provides the bridge for the sites task management system. This will 
-    set status of the task when work starts or stops iteration, log time worked, and add
-    comments based on state changes or whenever needed by the user. It will also be the 
-    bridge for watching certain tasks and notify when watched tasks change state.
-    
-    """
-    
-    def get_task(self, search_criteria):
-        """Get a task from the server."""
-        raise NotImplementedError
-    
-    def update_task(self, task):
-        """Update the given task on the server. 
-        This commits any local changes to the task management server.
+    def __init__(self, app_name,   # must be defined in the derived plugin classes
+                 version=None, 
+                 vendor=None, 
+                 description=None, 
+                 image=None,                 
+                 executable=None, # must be set to the name of the executable to run
+                 *args, **kwargs):
+        super().__init__(app_name, 
+                         version=version,
+                         vendor=vendor,
+                         description=description,
+                         image=image,
+                         *args, **kwargs)
+        self._executable = executable
         
-        """
-        raise NotImplementedError    
-    
-    
-class NotificationSystem(Plugin):
-    """Plugin for handling notifications to a specific system. This can be as simple 
-    as a log file, log server, or email. More involved notification systems can be 
-    through slack, teams, or broadcast via a nework system to other dedaverse applications.
-    
-    """
-    
-    def notify(self, title, message, level='info', *args, **kwargs):
-        """Notify the necesary subsystems with the given message. 
-        Depending on the notificatiuon system, this can show a popup window, 
-        a status message in the main window, log to disk, email, slack, etc.
+    def find(self):
+        """Find the DCC using the plugin logic to check normal install locations, env vars, etc.
+        This should be overriden in the plugin implementation to find and self.set_executable(path).
+        
+        Returns:
+            (str) Full path of executable found.
         
         """
         raise NotImplementedError
+    
+    def set_executable(self, executable):
+        """Set the executable string to use when launching this DCC.
+        
+        Args:
+            executable: (str) The full path to the executable.
+            
+        Returns:
+            None
+            
+        """
+        if not isinstance(executable, str):
+            raise TypeError(f'Executable must be a string. Got {type(executable)}')
+        self._executable = executable
+        
+    def setup_env(self, env):
+        """Override in the plugin to modify the env for the subprocess.
+        
+        Args:
+            env: (dict) The original env.
+        
+        Returns:
+            dict: The modified version of env.
+            
+        """
+        return env
+    
+    def launch(self, *args, **kwargs):
+        """Launch the dcc application with the appropriate environment using the given args.
+        
+        """
+        # TODO: Check if this needs to be wrapped in quotes or not, depending on the system.
+        cmd = [f'"{self._executable}"']
+        for arg in args:
+            cmd.append(arg)
+        for key, value in kwargs.items():
+            cmd.append(f'{key}={value}')
+        dcc_env = os.environ.copy()
+        # modify env if required for the subprocess
+        dcc_env = self.setup_env()
+        return subprocess.run(cmd, capture_output=True, env=dcc_env)
     
     
 class AssetManager(Plugin):
@@ -315,68 +322,82 @@ class AssetManager(Plugin):
             
         """
         raise NotImplementedError    
-
-
-class DCCPlugin(Plugin):
-    """Plugin for launching a DCC application with the appropriate environment to expose
-    the Dedaverse menu and tools. This also controls the entry points for generating the 
-    interface for accessing the available tools and customizations for the application.
+            
+            
+class NotificationSystem(Plugin):
+    """Plugin for handling notifications to a specific system. This can be as simple 
+    as a log file, log server, or email. More involved notification systems can be 
+    through slack, teams, or broadcast via a nework system to other dedaverse applications.
     
     """
     
-    def __init__(self, dcc_name=None,   # must be defined in the derived plugin classes
-                 executable=None, # must be set to the name of the executable to run
-                 *args, **kwargs):
-        super().__init__(dcc_name, *args, **kwargs)
-        self._executable = executable
-        
-    def find(self):
-        """Find the DCC using the plugin logic to check normal install locations, env vars, etc.
-        This should be overriden in the plugin implementation to find and self.set_executable(path).
-        
-        Returns:
-            (str) Full path of executable found.
+    def notify(self, title, message, level='info', *args, **kwargs):
+        """Notify the necesary subsystems with the given message. 
+        Depending on the notificatiuon system, this can show a popup window, 
+        a status message in the main window, log to disk, email, slack, etc.
         
         """
         raise NotImplementedError
     
-    def set_executable(self, executable):
-        """Set the executable string to use when launching this DCC.
-        
-        Args:
-            executable: (str) The full path to the executable.
-            
-        Returns:
-            None
-            
-        """
-        if not isinstance(executable, str):
-            raise TypeError(f'Executable must be a string. Got {type(executable)}')
-        self._executable = executable
-        
-    def setup_env(self, env):
-        """Override in the plugin to modify the env for the subprocess.
-        
-        Args:
-            env: (dict) The original env.
-        
-        Returns:
-            dict: The modified version of env.
-            
-        """
-        return env
     
-    def launch(self, *args, **kwargs):
-        """Launch the dcc application with the appropriate environment using the given args.
+class Service(Plugin):
+    """Plugin for calling web services.
+    
+    """
+    
+    def __init__(self, name,   # must be defined in the derived plugin classes
+                 url=None, # must be set to the name of the executable to run
+                 *args, **kwargs):
+        super().__init__(name, *args, **kwargs)
+
+
+class TaskManager(Plugin):
+    """Plugin for handliong task management system updates for the user.
+    
+    This interface provides the bridge for the sites task management system. This will 
+    set status of the task when work starts or stops iteration, log time worked, and add
+    comments based on state changes or whenever needed by the user. It will also be the 
+    bridge for watching certain tasks and notify when watched tasks change state.
+    
+    """
+    
+    def get_task(self, search_criteria):
+        """Get a task from the server."""
+        raise NotImplementedError
+    
+    def update_task(self, task):
+        """Update the given task on the server. 
+        This commits any local changes to the task management server.
         
         """
-        # TODO: Check if this needs to be wrapped in quotes or not, depending on the system.
-        cmd = [f'"{self._executable}"']
-        for arg in args:
-            cmd.append(arg)
-        for key, value in kwargs.items():
-            cmd.append(f'{key}={value}')
-        dcc_env = os.environ.copy()
-        # modify env if required for the subprocess
-        dcc_env = self.setup_env()
-        return subprocess.run(cmd, capture_output=True, env=dcc_env)
+        raise NotImplementedError
+    
+
+class Tool(Plugin):
+    """This plugin is a UI and contains it's own logic for managing the functionality of the tool.
+    
+    The UI should not be defined in the plugin __init__, but should be instantiated, or shown in the overriden launch method.
+    
+    """
+    
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(name, *args, **kwargs)
+        self._window_instance = None
+    
+    def initialize_window(self, parent):
+        """Override in the derived classes to initialize the widget for this plugin."""
+        raise NotImplementedError
+       
+    def launch(self):
+        """Construct the UI or find the appropriate instance and show."""
+        if not self._window_instance:
+            import deda.app
+            parent_window = deda.app.get_top_window()
+            self._window_instance = self.initialize_window(parent=parent_window)
+        if not self._window_instance:
+            # TODO: pop up an error messagebox
+            log.error(f'{self.name} did not return a window instance from the initialize_window command!')
+            return
+        self._window_instance.show()
+        self._window_instance.raise_()
+        self._window_instance.activateWindow()
