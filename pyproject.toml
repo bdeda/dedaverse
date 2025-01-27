@@ -1,0 +1,24 @@
+[project]
+name = "dedaverse"
+dynamic = ["version"]
+dependencies = [
+  "usd-core==24.11",
+  "PySide6>=6.6",
+  "p4python>=2024.2",
+  "coloredlogs",
+  "click",
+  "packaging",
+  "psutil",
+  "dataclasses_json "
+]
+requires-python = ">= 3.9"
+authors = [
+  {name = "Ben Deda"}
+]
+maintainers = [
+  {name = "Ben Deda"}
+]
+readme = "README.md"
+
+[project.scripts]
+dedaverse = "dedaverse.__main__:dedaverse"
