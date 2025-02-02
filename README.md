@@ -64,4 +64,4 @@ To check if you have Python 3.11 installed on your machine, open a cmd prompt an
 ```
 py --list
 ```
-If there is not an installed version 3.11 or higher (3.12 or 3.13), <a hreaf="https://www.python.org/downloads/" target="_blank">install Python 3.11 or higher</a>
+If there is not an installed version 3.11 or higher (3.12 or 3.13), [install Python 3.11 or higher](https://www.python.org/downloads/)
