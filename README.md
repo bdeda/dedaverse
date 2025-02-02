@@ -81,7 +81,7 @@ Next, in the venv, we will pip install Dedaverse from github. This will download
 ```
 D:\dedaverse_app\.venv\Scripts\python.exe git+https://github.com/bdeda/dedaverse.git
 ```
-Finally, nstall teh startup script that will run Dedaverse when the machine is rebooted.
+Finally, nstall the startup script that will run Dedaverse when the machine is rebooted.
 ```
 D:\dedaverse_app\.venv\Scripts\python.exe -m dedaverse install
 ```
