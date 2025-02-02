@@ -8,10 +8,10 @@ while making it easier for you, the Artists and Producers to focus on the artist
 the assets you are creating.
 
 ### Contents
-[Art](#focus-on-art-not-on-tech)
-[Production](#production-concerns)
-[Tech](#the-tech)
-[Getting Started](#getting-started)
+- [Art](#focus-on-art-not-on-tech)
+- [Production](#production-concerns)
+- [Tech](#the-tech)
+- [Getting Started](#getting-started)
 
 
 ## Focus on Art, not on Tech
