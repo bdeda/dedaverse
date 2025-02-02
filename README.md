@@ -17,7 +17,7 @@ for artists to iterate on the art, and not be burdened by the technical details 
 You will be able to answer these questions quickly and easily:
 1. What assets are planned?
 2. What assets are in development?
-3. What what done today?
+3. What was done today?
 4. What do the changes look like?
 
 
@@ -53,3 +53,15 @@ The Plugin Manager can be configured to find plugins developed by internal tech 
 ### Icons
 
 Generic plugin icon from Vecteezy.com
+
+
+
+### Getting Started
+
+Dataverse currently runs in Python 3.11 on Windows. 
+
+To check if you have Python 3.11 installed on your machine, open a cmd prompt and run 
+```
+py --list
+```
+If there is not an installed version 3.11 or higher (3.12 or 3.13), <a hreaf="https://www.python.org/downloads/" target="_blank">install Python 3.11 or higher</a>
