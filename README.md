@@ -7,6 +7,12 @@ Dedaverse strives to be an easy to install and easy to use system for managing t
 while making it easier for you, the Artists and Producers to focus on the artistic iteration and production status of 
 the assets you are creating.
 
+### Contents
+- [Art](#focus-on-art-not-on-tech)
+- [Production](#production-concerns)
+- [Tech](#the-tech)
+- [Getting Started](#getting-started)
+
 
 ## Focus on Art, not on Tech
 
@@ -17,7 +23,7 @@ for artists to iterate on the art, and not be burdened by the technical details 
 You will be able to answer these questions quickly and easily:
 1. What assets are planned?
 2. What assets are in development?
-3. What what done today?
+3. What was done today?
 4. What do the changes look like?
 
 
@@ -53,3 +59,30 @@ The Plugin Manager can be configured to find plugins developed by internal tech 
 ### Icons
 
 Generic plugin icon from Vecteezy.com
+
+
+## Getting Started
+
+Dataverse currently runs in Python 3.11 on Windows. 
+
+To check if you have Python 3.11 installed on your machine, open a cmd prompt and run 
+```
+py --list
+```
+If there is not an installed version 3.11 or higher (3.12 or 3.13), [install Python 3.11 or higher](https://www.python.org/downloads/)
+
+It is highly recommended that you use a virtual environment for the main Dedaverse application. 
+It should be created in a directory that can store several Gb of python package dependencies, as this area will grow as plugins are installed into the system.
+```
+mkdir D:\dedaverse_app
+py -3.11 -m venv D:\dedaverse_app\.venv
+```
+Next, in the venv, we will pip install Dedaverse from github. This will download and install all of the necessary python dependencies.
+```
+D:\dedaverse_app\.venv\Scripts\python.exe git+https://github.com/bdeda/dedaverse.git
+```
+Finally, nstall teh startup script that will run Dedaverse when the machine is rebooted.
+```
+D:\dedaverse_app\.venv\Scripts\python.exe -m dedaverse install
+```
+You should see a star icon show up in the windows system tray. Click it to get started setting up a new project.
