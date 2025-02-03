@@ -46,7 +46,15 @@ class PluginWidget(QtWidgets.QFrame):
     def __init__(self, plugin, parent=None):
         super().__init__(parent=parent)
         
-        self.setStyleSheet("PluginWidget{background-color: rgb(20,20,20); border: 1px solid rgb(40,40,40); border-radius: 5px;}")
+        self._plugin = plugin
+        self.setMouseTracking(True)
+        #self.setAttribute(QtCore.Qt.WA_HOVER, True)
+        
+        self.setStyleSheet("PluginWidget{background-color: rgba(20,20,20,255);"
+                           "border: 1px solid rgb(40,40,40); border-radius: 5px;}")
+        if True: #self._plugin.loaded:
+            self.setStyleSheet("PluginWidget{background-color: rgba(20,20,20,128);"
+                               "border: 1px solid rgb(40,40,40); border-radius: 5px;}")
         
         layout = QtWidgets.QGridLayout()
         self.setLayout(layout)        
@@ -58,14 +66,18 @@ class PluginWidget(QtWidgets.QFrame):
         description = plugin.description or '(No Description found)'
         
         image_lbl = QtWidgets.QLabel(parent=self)
-        image_lbl.setPixmap(QtGui.QPixmap.fromImage(image))
+        pix = QtGui.QPixmap.fromImage(image)
+        image_lbl.setPixmap(pix)
+        effect = QtWidgets.QGraphicsColorizeEffect(image_lbl)
+        effect.setStrength(1.0)
+        effect.setColor(QtGui.QColor('silver'))        
         layout.addWidget(image_lbl, 0, 0, -1, 1)
         
-        title_lbl = QtWidgets.QLabel(title, parent=self)  
-        layout.addWidget(title_lbl, 0, 1, 1, -1)
+        self._title_lbl = QtWidgets.QLabel(title, parent=self)  
+        layout.addWidget(self._title_lblself._title_lbl, 0, 1, 1, -1)
         
-        desc_lbl = QtWidgets.QLabel(description, parent=self)
-        layout.addWidget(desc_lbl, 1, 1)
+        self._desc_lbl = QtWidgets.QLabel(description, parent=self)
+        layout.addWidget(self._desc_lbl, 1, 1)
         
         layout.setColumnMinimumWidth(0, image.width())
         layout.setColumnStretch(0, 0)
@@ -80,6 +92,28 @@ class PluginWidget(QtWidgets.QFrame):
         action = menu.addAction('Check for Updates')
         
         menu.exec_(self.mapToGlobal(pos))
+        
+    def enterEvent(self, event):
+        self.setStyleSheet("PluginWidget{background-color: rgba(20,20,20,255);"
+                           "border: 1px solid rgb(40,40,40); border-radius: 5px;}")
+    
+    def leaveEvent(self, event):
+        if not self._plugin.loaded:
+            self.setStyleSheet("PluginWidget{background-color: rgba(20,20,20,128);"
+                               "border: 1px solid rgb(40,40,40); border-radius: 5px;}")
+        
+    def mouseReleaseEvent(self, event):
+        """Handle the click"""
+        if event.button() == QtCore.Qt.LeftButton:
+            self._plugin._loaded = not self._plugin._loaded
+            if self._plugin.loaded:
+                self.enterEvent(None)
+            else:
+                self.enterEvent(None)
+        return super().mouseReleaseEvent(event)
+        
+        
+    
         
 
 class PluginManagerDialog(QtWidgets.QDialog):

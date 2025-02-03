@@ -19,7 +19,7 @@ __all__ = ['initialize_plugins',
            'Plugin', 
            'PluginRegistry',
            'Application',
-           'AssetManager',
+           'FileManager',
            'NotificationSystem',
            'Service',            
            'TaskManager',
@@ -80,6 +80,7 @@ class Plugin:
         self._vendor = vendor
         self._description = description or ''
         self._image = image
+        self._loaded = False
         
     @property
     def description(self):
@@ -87,7 +88,11 @@ class Plugin:
     
     @property
     def image(self):
-        return self._image    
+        return self._image 
+    
+    @property
+    def loaded(self):
+        return self._loaded
         
     @property
     def name(self):
@@ -235,90 +240,87 @@ class Application(Plugin):
         return subprocess.run(cmd, capture_output=True, env=dcc_env)
     
     
-class AssetManager(Plugin):
-    """Plugin for handling the asset versioning systems used for a project. Typically 
+class FileManager(Plugin):
+    """Plugin for handling the file versioning systems used for a project. Typically 
     a project will have one storage system. Simple cases use a local or network drive.
-    More complex systems allow versioning of files, like Perforce, or git. More complex 
-    may have multiple versioning systems for different asset types, and the type will 
-    identify the asset system it uses.
+    More complex systems allow versioning of files, like Perforce, or git. 
     
     """
     
-    def can_handle(self, assets):
-        """Check to see if the given assets are the types of assets this plugin can handle. 
+    def can_handle(self, files):
+        """Check to see if the given files are the types of files this plugin can handle. 
         
         Args:
-            assets: (Assets) The asset to check.
+            files: (list(str)) The fiel or files to check.
             
         Returns:
-            list: The list of bools on if the asset can be handles by this plugin.
+            list: The list of bools on if the file can be handled by this plugin.
+            
+        """
+        raise NotImplementedError    
+    
+    def add(self, files):
+        """Add files to the file management system.
+        
+        Args: 
+            files: (list(str)) Add a file to the file management system.
             
         """
         raise NotImplementedError
     
-    
-    def add(self, assets):
-        """Add assets to the asset system.
+    def rename(self, file, new_name):
+        """Rename a file in the file management system.
         
         Args: 
-            asset: (Asset) Add an asset to the asset system.
+            file: (str) The source file to rename.
+            new_name: (str) The new name for the file.
             
         """
         raise NotImplementedError
     
-    def rename(self, asset, new_name):
-        """Rename an asset in the asset system.
+    def delete(self, files):
+        """Delete files from the file management system.
         
         Args: 
-            asset: (Asset) Add an asset to the asset system.
-            new_name: (str) The new name for the asset.
+            files: (list(str)) Delete a file from the file management system.
             
         """
         raise NotImplementedError
     
-    def delete(self, assets):
-        """Delete assets from the asset system.
+    def get_latest(self, files):
+        """Get the latest version of files from the file management system.
         
         Args: 
-            asset: (Asset) Add an asset to the asset system.
-            
-        """
-        raise NotImplementedError
-    
-    def get_latest(self, assets):
-        """Get the latest version of assets from the asset system.
-        
-        Args: 
-            asset: (Asset) Add an asset to the asset system.
+            files: (list(str)) Get latest versions of the files from the file management system.
             
         """
         raise NotImplementedError 
     
-    def get_version(self, asset, version):
+    def get_version(self, file, version):
         """Get the given version of an asset from the asset system.
         
         Args: 
-            asset: (Asset) Add an asset to the asset system.
+            file: (str) Get the specific version of the file from the file management system.
             version: (int) The version number.
             
         """
         raise NotImplementedError    
     
-    def checkout(self, assets):
-        """Checkout the assets from the asset system. This is an exclusive checkout.
+    def checkout(self, files):
+        """Checkout the files from the file management system. This is an exclusive checkout.
         
         Args: 
-            asset: (Asset) Add an asset to the asset system.
+            files: (list(str)) Check out the file from the file management system.
             
         """
         raise NotImplementedError
     
-    def commit(self, assets, message):
-        """Commit the assets to the asset system. 
+    def commit(self, files, message):
+        """Commit the files to the file management system. 
         
         Args: 
-            asset: (Asset) Add an asset to the asset system.
-            message: (str) The commit message for this asset
+            files: (list(str)) Files to commit.
+            message: (str) The commit message.
             
         """
         raise NotImplementedError    

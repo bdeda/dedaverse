@@ -24,8 +24,24 @@ from PySide6 import QtWidgets, QtCore, QtGui
 
 import deda.core
 
+from ._buttons import AddButton
+
 
 log = logging.getLogger(__name__)
+
+
+def _uniquify_proj_name(name, projects):
+    """Return a unique project name based on the given name, but incremented to
+    make it unique for the given list of projects.
+    
+    """
+    if name not in projects:
+        return name
+    n = 1
+    name = f'{name} ({n})'
+    while name in projects and n < 1000: # cap it
+        n += 1
+    return name
 
 
 class StartProjectDialog(QtWidgets.QDialog):
@@ -39,8 +55,9 @@ class StartProjectDialog(QtWidgets.QDialog):
         self.setWindowTitle('Start a Project')
         self.setMinimumWidth(650)
         
-        self._config = config        
-        self._project = deda.core.ProjectConfig(name='Untitled Project', rootdir='C:\dedaverse')
+        self._config = config
+        name = _uniquify_proj_name('Untitled Project', self._config.projects)
+        self._project = deda.core.ProjectConfig(name=name, rootdir='C:\dedaverse')
         
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -75,15 +92,21 @@ class StartProjectDialog(QtWidgets.QDialog):
         browse_btn.setFixedSize(browse_btn.sizeHint().height(), browse_btn.sizeHint().height())
         browse_btn.clicked.connect(self._pick_rootdir)
         grid.addWidget(browse_btn, row, 2)
-        row += 1        
+        row += 1  
+        
+        # TODO: configure asset management plugin
+        # configure notifications plugin
+        # etc.
         
         vbox.addSpacing(metrics.height())
         vbox.addStretch()
         
-        btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
-        btns.accepted.connect(self.save_and_close)
-        btns.rejected.connect(self.close)
-        vbox.addWidget(btns)
+        self._btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
+        self._btns.accepted.connect(self.save_and_close)
+        self._btns.rejected.connect(self.close)
+        vbox.addWidget(self._btns)
+        
+        self._validate_proj_root()
         
     def _set_project_name(self, text):
         self._project.name = text
@@ -94,29 +117,53 @@ class StartProjectDialog(QtWidgets.QDialog):
         if not ret:
             return
         rootdir = os.path.abspath(ret).replace('\\', '/')
+        # TODO: move these two cfg_path calculations to a function call on the ProjectConfig class
         cfg_path = os.path.join(rootdir, '.dedaverse', 'project.cfg').replace('\\', '/')
         if os.path.isfile(cfg_path):
             self._project = deda.core.ProjectConfig.load(cfg_path)
+            if self._project:
+                self._name_editor.setText(self._project.name)
         else:
             self._project.rootdir = ret
             self._project.cfg_path = os.path.join(self._project.rootdir, '.dedaverse', 'project.cfg').replace('\\', '/')                
         self._rootdir_editor.setText(ret)
-        #self._project.rootdir = ret
-        #self._project.cfg_path = os.path.join(self._project.rootdir, '.dedaverse', 'project.cfg').replace('\\', '/')
-        #self._project.load()
+        self._validate_proj_root()
+        
+    def _validate_proj_root(self):
+        """Validate the project root is unique."""
+        name = self._name_editor.text()
+        rootdir = self._rootdir_editor.text()
+        for proj in self._config.projects:
+            if proj.rootdir == rootdir and proj.name == name:
+                self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(False)
+                self._check_proj_writable()
+                return
+        data = deda.core.ProjectConfig.load(rootdir)
+        if data:
+            if data.name != name:
+                self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(False)
+                self._check_proj_writable()
+                return                
+        self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(True)
+        self._check_proj_writable()
+        
+    def _check_proj_writable(self):
+        """Check if the current project is writable. If not, disable editing the name and rootdir."""
+        if self._project and not self._project.is_writable:
+            self._name_editor.setReadOnly(True)
+            self._rootdir_editor.setReadOnly(True)
+            return
+        self._name_editor.setReadOnly(False)
+        self._rootdir_editor.setReadOnly(False)        
         
     def save_and_close(self):
-        # TODO: validate project before saving.
-        # project.name must be non-empty string
-        # root dir must be a valid directory path (possibly non-existant)
-        # warn user if the project name is already in the user projects map
-        
         if self._project not in self._config.projects:
             self._config.user.add_project(self._project)
         self._config.current_project = self._project
         self._project.save() # try to save, fail gracefully if cfg is not writable
         self._config.save()
         self.close()
+        self.project_changed.emit()
         
 
 class ProjectSettingsDialog(QtWidgets.QDialog):
@@ -152,7 +199,11 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         else:
             self._project_cb.setCurrentIndex(-1)
         self._project_cb.currentIndexChanged.connect(self._current_project_changed)
-        grid.addWidget(self._project_cb, 0, 1, 1, -1)
+        grid.addWidget(self._project_cb, 0, 1)
+        self._add_proj_btn = AddButton(parent=self)
+        self._add_proj_btn.clicked.connect(self._add_project)
+        self._add_proj_btn.setToolTip('Add a Project')
+        grid.addWidget(self._add_proj_btn, 0, 2)
         
         box = QtWidgets.QGroupBox('Project')
         vbox.addWidget(box)
@@ -190,8 +241,9 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         
     def showEvent(self, event):
         """Update the list of projects in the combobox."""
-        #orig_val = self._project_cb.blockSignals(True)
-        #try:
+        self.initialize()
+        
+    def initialize(self):
         self._project_cb.clear()
         for project in sorted(self._config.projects, key=lambda x: str(x)):
             self._project_cb.addItem(project.name, project)
@@ -199,8 +251,13 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
             self._project_cb.setCurrentText(self._config.current_project.name)
         else:
             self._project_cb.setCurrentIndex(-1)
-        #finally:
-        #    self._project_name_le.blockSignals(orig_val)
+        
+    def _add_project(self):
+        """Open the start project dialog."""
+        dlg = StartProjectDialog(self._config, parent=self)
+        dlg.project_changed.connect(self.initialize)
+        dlg.exec_()
+        self.project_changed.emit()
         
     def _current_project_changed(self, index):
         """User changed the combobox for the current project."""
