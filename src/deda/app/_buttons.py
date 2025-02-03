@@ -15,12 +15,26 @@
 # limitations under the License.
 #
 # ###################################################################################
-from ._plugin import *
-from ._project import *
-from ._config import *
-from ._types import *
+__all__ = ['AddButton']
+
+import os
+
+from PySide6 import QtWidgets, QtGui, QtCore
 
 
-def initialize():
-    """Initialize all plugins and subsystems."""
-    initialize_plugins()
+class AddButton(QtWidgets.QPushButton):
+    """Button with a green plus icon."""
+    
+    _ICON = None # for caching the icon for later use
+    
+    def __init__(self, parent=None):
+        super().__init__(parent=None)
+        
+        if not AddButton._ICON:
+            path = os.path.join(os.path.dirname(__file__), 'icons', 'green_plus.png')
+            AddButton._ICON = QtGui.QIcon(path)
+            
+        self.setIcon(AddButton._ICON)
+        size_hint = self.sizeHint()
+        self.setFixedSize(size_hint.height(), size_hint.height())        
+    

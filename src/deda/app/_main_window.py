@@ -31,8 +31,6 @@ from PySide6 import QtWidgets, QtCore, QtGui
 
 from deda.core import LayeredConfig
 
-#from ._asset_browser import AssetBrowserWidget
-#from ._asset_info import AssetInfoWidget
 from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
 #from ._usd_viewer import UsdViewWidget
@@ -199,7 +197,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle(self._window_title_context)
         self.setObjectName('DedaverseMainWindow')
         
-        self.setWindowFlags(QtCore.Qt.FramelessWindowHint) # QtCore.Qt.Window |
+        self.setWindowFlags(QtCore.Qt.FramelessWindowHint) 
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
         
         geo = QtWidgets.QApplication.primaryScreen().availableGeometry()
@@ -256,33 +254,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.hide()
             event.ignore()
             return
-        #self.save_settings()
         super().closeEvent(event)
-
-    #def load_settings(self):
-        #"""Load the window settings for this window.
-
-        #Subclasses should implement their own load_settings method and
-        #call super().load_settings() to load base class settings.
-
-        #Returns:
-            #None
-
-        #"""
-        ##if self.settings.contains("mainwindow.geometry"):
-        ##    self.restoreGeometry(self.settings.value("mainwindow.geometry"))
-        
-    #def save_settings(self):
-        #"""Save the window settings for this window.
-
-        #Subclasses should implement their own save_settings method and
-        #call super().save_settings() to save base class settings.
-        
-        #Returns:
-            #None
-            
-        #"""
-        #self.settings.setValue("mainwindow.geometry", self.saveGeometry()) 
         
     def message_clicked(self):
         if not self._config.current_project:
@@ -302,7 +274,6 @@ class MainWindow(QtWidgets.QMainWindow):
         elif icon == QtWidgets.QSystemTrayIcon.Critical:
             log.critical(title)
             log.critical(message)
-        #self.status().showMessage(message, timeout)
         self._icon.showMessage(title, message, icon, timeout)        
         
     def toggle_visibility(self, context=None):
@@ -386,24 +357,7 @@ class MainWindow(QtWidgets.QMainWindow):
             #log.warning('Choose a project to start.')        
             self.show_message('Choose a project.', 
                               'You must set up your project before starting work.', 
-                              icon=QtWidgets.QSystemTrayIcon.Warning)    
-            
-    #def _load_project(self):
-        #"""Load the current project, if there is one set in the user settings."""
-        #current_project = self._user_settings.get('current_project')
-        #if not current_project:
-            ## TODO: Open Project Manager, if plugin is installed
-            #return
-        #cfg = self._user_settings['projects'].get(current_project)
-        #if not cfg:
-            #log.error(f'User settings file is not set up properly! The project {current_project} is not found in the available user projects.')
-            #return
-        #if not os.path.isfile(cfg):
-            #log.error(f'Project settings file {cfg} does not exist!')
-            #return
-        #with open(cfg, 'r') as f:
-            #self._project_settings = json.load(f)
-        #self._icon.format_tool_tip(current_project)        
+                              icon=QtWidgets.QSystemTrayIcon.Warning)     
                    
     def _on_panel_closed(self):
         widget = self.centralWidget()
@@ -423,10 +377,6 @@ class MainWindow(QtWidgets.QMainWindow):
             if not self._proj_settings_dlg:
                 self._proj_settings_dlg = StartProjectDialog(self._config, parent=self)
                 self._proj_settings_dlg.project_changed.connect(self._create_main_widget)
-            self._proj_settings_dlg.show()
-            self._proj_settings_dlg.raise_()
-            self._proj_settings_dlg.activateWindow()
-            self._proj_settings_dlg.exec_()
         else:
             if self._proj_settings_dlg and not isinstance (self._proj_settings_dlg, ProjectSettingsDialog):
                 self._proj_settings_dlg.close() 
@@ -434,11 +384,16 @@ class MainWindow(QtWidgets.QMainWindow):
             # show the dialog to create a new project
             if not self._proj_settings_dlg:            
                 self._proj_settings_dlg = ProjectSettingsDialog(self._config, parent=self)
-                self._proj_settings_dlg.project_changed.connect(self._create_main_widget)
-            self._proj_settings_dlg.show()
-            self._proj_settings_dlg.raise_()
-            self._proj_settings_dlg.activateWindow()
-            self._proj_settings_dlg.exec_() 
+                self._proj_settings_dlg.project_changed.connect(self._create_main_widget) 
+        self._proj_settings_dlg.adjustSize()
+        screen_geo = QtWidgets.QApplication.primaryScreen().availableGeometry()
+        self._proj_settings_dlg.show()
+        dlg_geo = self._proj_settings_dlg.geometry()
+        x = screen_geo.width() - dlg_geo.width()
+        self._proj_settings_dlg.move(x, dlg_geo.y())          
+        self._proj_settings_dlg.raise_()
+        self._proj_settings_dlg.activateWindow()        
+        self._proj_settings_dlg.exec_()
 
 
 @functools.lru_cache

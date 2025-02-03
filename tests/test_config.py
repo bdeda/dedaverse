@@ -15,4 +15,16 @@
 # limitations under the License.
 #
 # ###################################################################################
-print('Asset Manager plugin loading...')
+
+def test_config():
+
+    from deda.core import LayeredConfig
+    
+    cfg1 = LayeredConfig()
+    cfg2 = LayeredConfig.instance()
+    assert cfg1 == cfg2
+    cfg3 = LayeredConfig()
+    assert cfg1 == cfg3
+    
+    # TODO: test editing and saving
+    

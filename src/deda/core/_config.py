@@ -193,6 +193,8 @@ class ProjectConfig:
         return project
     
     def save(self):
+        if not self.is_writable:
+            return
         if not self.cfg_path:
             if not self.rootdir:
                 log.error('Cannot save the project config file because neither rootdir or cfg_path are set for the project.')
@@ -286,6 +288,17 @@ class LayeredConfig:
                
         # Loaded first, when the system starts. If not found, opens up a <new project>
         self._user_config = UserConfig.load()
+        
+    def __new__(cls):
+        if not hasattr(cls, '_instance'):
+            cls._instance = super().__new__(cls)
+        return cls._instance 
+    
+    @classmethod
+    def instance(cls):
+        if not hasattr(cls, '_instance'):
+            cls._instance = super().__new__(cls)
+        return cls._instance
                
     @property
     def user(self):
