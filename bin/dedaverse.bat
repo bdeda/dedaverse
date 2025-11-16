@@ -7,6 +7,7 @@
 @rem if not exists "%~dp0..\.venv\Scripts\python.exe" (
     echo Installing...
     call py -3.11 -m venv "%~dp0..\.venv"
+    call "%~dp0..\.venv\Scripts\python.exe" -m pip install --upgrade pip
     call "%~dp0..\.venv\Scripts\python.exe" -m pip install %~dp0..
 
     call "%~dp0..\.venv\Scripts\python.exe" -m pip install --upgrade dedaverse

@@ -1,6 +1,6 @@
 # ###################################################################################
 #
-# Copyright 2024 Ben Deda
+# Copyright 2025 Ben Deda
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -132,11 +132,15 @@ class Panel(QtWidgets.QFrame):
     """Base class for all panel types."""
     
     close_clicked = QtCore.Signal()
+    add_item = QtCore.Signal(str)
     
     def __init__(self, type_name, name, show_scroll_area=True, parent=None, **kwargs):
         super().__init__(parent=parent)
         
         self.setObjectName(type_name)
+        self._type_name = type_name
+        if type_name.endswith('s'):
+            self._type_name = type_name[:-1]
         
         self.setStyleSheet("Panel{background-color: rgb(20,20,20); border: 1px solid rgb(40,40,40); border-radius: 5px;}")
         
@@ -149,20 +153,45 @@ class Panel(QtWidgets.QFrame):
         
         if show_scroll_area:
             self._scroll_area = QtWidgets.QScrollArea()
+            
+            # TODO: Add tiled icons or list to scroll area
+            # Need to add a graphics view with tiles of object types
+            # sortable, or custom drag-drop organization of tiles, in "edit" mode
+            # optional list view
+            
             #self._scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
             #self._scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)        
             vbox.addWidget(self._scroll_area)
             header.minmax_clicked.connect(self._on_minimized)
             
+            self._scroll_area.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+            self._scroll_area.customContextMenuRequested.connect(self._show_context_menu)        
+            
     def __repr__(self):
         return f'<{self.__class__} {self.objectName()}>'
             
-    def _on_minimized(self, minimized):
-        self._scroll_area.setVisible(not minimized)
+    def __repr__(self):
+        return f'<{self.__class__} {self.objectName()}>'
         
     def close(self):        
         super().close() 
         self.close_clicked.emit()
+        
+    def _add_item(self):
+        self.add_item.emit(self._type_name)
+        
+    def _on_minimized(self, minimized):
+        self._scroll_area.setVisible(not minimized)    
+        
+    def _show_context_menu(self, position):
+        menu = QtWidgets.QMenu(parent=self)
+        
+        icon_path = os.path.join(os.path.dirname(__file__), 'icons', 'green_plus.png')
+        plus_icon = QtGui.QIcon(icon_path)        
+        action = menu.addAction(plus_icon, f'Add {self._type_name}')
+        action.triggered.connect(self._add_item)
+        
+        menu.exec(self._scroll_area.mapToGlobal(position))
         
               
 
@@ -188,6 +217,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self._config = None
         self._proj_settings_dlg = None
+        self._force_close = False
         
         if app_name is None:
             app_name = "Dedaverse"
@@ -250,7 +280,7 @@ class MainWindow(QtWidgets.QMainWindow):
             None
 
         """
-        if self._icon.isVisible():
+        if not self._force_close and self._icon.isVisible():
             self.hide()
             event.ignore()
             return
@@ -307,10 +337,10 @@ class MainWindow(QtWidgets.QMainWindow):
                         'icon': None,
                         'settings_callback': self._open_project_settings,
                         },
-            #'Assets': {}, # additional panels shown are added based on the project, when the project is loaded.
-            #'Apps': {}, 
-            #'Services': {},
-            #'Tasks': {}, 
+            'Assets': {}, # additional panels shown are added based on the project, when the project is loaded.
+            'Apps': {}, 
+            'Services': {},
+            'Tasks': {}, 
         }
         
         if current_project:

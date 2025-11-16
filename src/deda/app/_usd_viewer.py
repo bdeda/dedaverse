@@ -1,6 +1,6 @@
 # ###################################################################################
 #
-# Copyright 2024 Ben Deda
+# Copyright 2025 Ben Deda
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -84,3 +84,10 @@ class UsdViewWidget(QtWidgets.QWidget):
         
         
 
+if __name__ == '__main__':
+    app = QtWidgets.QApplication([])
+    stage = Usd.Stage.Open('F:\\cube_from_blender.usda')
+    w = UsdViewWidget()#stage=stage)
+    w.show()
+    w.stage = stage
+    app.exec_()

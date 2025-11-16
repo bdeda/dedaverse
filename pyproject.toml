@@ -2,7 +2,7 @@
 name = "dedaverse"
 dynamic = ["version"]
 dependencies = [
-  "usd-core==24.11",
+  "usd-core>=25.08",
   "PySide6>=6.6",
   "p4python>=2024.2",
   "coloredlogs",
@@ -22,3 +22,6 @@ readme = "README.md"
 
 [project.scripts]
 dedaverse = "dedaverse.__main__:dedaverse"
+
+[tool.setuptools.package-data]
+"deda" = ["app/icons/*.png"]
