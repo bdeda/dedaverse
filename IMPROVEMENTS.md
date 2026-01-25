@@ -54,7 +54,7 @@ dcc_env = self.setup_env(dcc_env)  # ✅ Pass the env dict
 
 ### 5. Add Type Hints Throughout
 **Issue:** Most functions and methods lack type hints, making the code harder to understand and maintain.
-**Recommendation:** Add type hints using Python 3.11+ syntax:
+**Recommendation:** Add type hints using Python 3.12+ syntax:
 ```python
 from typing import Optional, Dict, List
 
@@ -244,7 +244,7 @@ with open(path, 'w') as f:
 ### 28. Dependency Management
 **Issue:** `pkg_resources` is deprecated in favor of `importlib.metadata`.
 **Location:** `_main_window.py:28`
-**Recommendation:** Migrate to `importlib.metadata` for Python 3.11+.
+**Recommendation:** Migrate to `importlib.metadata` for Python 3.12+.
 
 ### 29. Improve Plugin Discovery
 **Location:** `src/deda/core/_plugin.py:41-64`

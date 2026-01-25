@@ -13,7 +13,7 @@ Dedaverse is a Python-based asset management system for visual media projects (f
 - Qt-based UI (PySide6)
 
 **Key Technologies:**
-- Python 3.11+
+- Python 3.12+
 - PySide6 (Qt for Python)
 - dataclasses_json for configuration
 - Click for CLI
@@ -31,7 +31,7 @@ Dedaverse is a Python-based asset management system for visual media projects (f
 
 #### Type Hints
 - **Always add type hints** to new functions and methods
-- Use Python 3.11+ syntax: `str | None` instead of `Optional[str]`
+- Use Python 3.12+ syntax: `str | None` instead of `Optional[str]`
 - Use `from typing import` for complex types (Dict, List, Tuple, etc.)
 - Example:
 ```python
@@ -434,5 +434,5 @@ When asked to modify or add code:
 ---
 
 **Last Updated:** 2025-01-24
-**Python Version:** 3.11+
+**Python Version:** 3.12+
 **Qt Version:** PySide6 6.6+

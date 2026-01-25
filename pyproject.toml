@@ -11,7 +11,7 @@ dependencies = [
   "psutil",
   "dataclasses_json"
 ]
-requires-python = ">= 3.11"
+requires-python = ">= 3.12"
 authors = [
   {name = "Ben Deda"}
 ]

@@ -132,6 +132,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# OpenUSD installation (large binary distribution from NVIDIA)
+usd_root/
+usd-*/
+
 # Spyder project settings
 .spyderproject
 .spyproject

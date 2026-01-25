@@ -32,7 +32,7 @@ https://www.qtcentre.org/threads/33027-How-to-create-a-slide-out-window
 
 Installing dedaverse
 
-py -3.11 -m pip install git+https://github.com/bdeda/dedaverse.git@dev
+py -3.12 -m pip install git+https://github.com/bdeda/dedaverse.git@dev
 
 
 https://stackoverflow.com/questions/1551605/how-to-set-applications-taskbar-icon-in-windows-7/1552105#1552105
