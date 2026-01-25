@@ -2,16 +2,16 @@
 name = "dedaverse"
 dynamic = ["version"]
 dependencies = [
-  "usd-core==25.11",
+  "usd-core>=25.11",
   "PySide6>=6.6",
   "p4python>=2024.2",
   "coloredlogs",
   "click",
   "packaging",
   "psutil",
-  "dataclasses_json "
+  "dataclasses_json"
 ]
-requires-python = ">= 3.9"
+requires-python = ">= 3.11"
 authors = [
   {name = "Ben Deda"}
 ]
@@ -22,3 +22,47 @@ readme = "README.md"
 
 [project.scripts]
 dedaverse = "dedaverse.__main__:dedaverse"
+
+[tool.setuptools.package-data]
+"deda" = ["app/icons/*.png"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
+
+[tool.coverage.run]
+source = ["src/deda"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/site-packages/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
+show_missing = true
+skip_covered = false
+precision = 2
+
+[tool.coverage.html]
+directory = "htmlcov"

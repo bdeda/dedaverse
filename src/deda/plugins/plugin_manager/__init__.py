@@ -1,6 +1,6 @@
 # ###################################################################################
 #
-# Copyright 2024 Ben Deda
+# Copyright 2025 Ben Deda
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -74,7 +74,7 @@ class PluginWidget(QtWidgets.QFrame):
         layout.addWidget(image_lbl, 0, 0, -1, 1)
         
         self._title_lbl = QtWidgets.QLabel(title, parent=self)  
-        layout.addWidget(self._title_lblself._title_lbl, 0, 1, 1, -1)
+        layout.addWidget(self._title_lbl, 0, 1, 1, -1)
         
         self._desc_lbl = QtWidgets.QLabel(description, parent=self)
         layout.addWidget(self._desc_lbl, 1, 1)

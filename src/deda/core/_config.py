@@ -1,6 +1,6 @@
 # ###################################################################################
 #
-# Copyright 2024 Ben Deda
+# Copyright 2025 Ben Deda
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ class AppConfig:
         return self.name == other.name and self.version == other.version
     
     def __hash__(self):
-        return hash(self.name, self.version)
+        return hash((self.name, self.version))
     
 
 @dataclass_json
@@ -64,7 +64,7 @@ class PluginConfig:
         return self.name == other.name and self.version == other.version 
     
     def __hash__(self):
-        return hash(self.name, self.version)    
+        return hash((self.name, self.version))    
     
 
 @dataclass_json
@@ -82,7 +82,7 @@ class ServiceConfig:
         return self.name == other.name  
     
     def __hash__(self):
-        return hash(self.name, self.version)    
+        return hash(self.name)  # ServiceConfig only compares by name, no version field    
     
 
 @dataclass_json

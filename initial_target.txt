@@ -1,0 +1,58 @@
+plugin manager UI (plugin widgets)
+Project settings dialog
+Config modifications for site/project/user
+logging to file with file rotation in users .dedaverse dir
+
+Main window, load panels for loaded plugins (assets, apps, services, tasks)
+
+
+Milestone 1:
+
+1. Clean install and startup
+2. Install startup script
+3. run dedaverse without the cmd prompt visible
+4. Create initial project with no apps, services, or task management
+    a. Set project name
+    b. set project type (game, film, audio, concept, more?)
+    c. set the asset types and element types to be produced on the project (default to sane things for the given project type)
+5. add/configure the asset manager plugin (file system, perforce, more?)
+    a. configure the root directory to store the assets
+    b. turn on perforce as the backend version management
+    c. configure p4 settings and test connection
+6. add application plugins from list of available apps
+    a. find on local machine
+    b. allow user to find (use godot install as example)
+    c. allow custom apps with custom executable strings (for BL)
+7. use app panel to launch the apps
+8. create a few assets and publish them
+7. review asset changes ??? see historical publish comments/user/timestamp and preview
+8. Ability to load an existing project and be able to toggle between the two projects
+9. allow restart of the computer and preserve the user settings for the current project
+
+
+
+
+
+future: allow custom variables set in the config layers to be passed to app commands, (for BL pipeline settings on the project)
+
+
+
+Milestone 2:
+
+1. Jira integration for task management
+2. Maya integration
+3. Photoshop integration
+4. Houdini integration
+5. AI service to generate mesh from image
+6. AI service to generate improved image from sketch and text
+
+
+
+Milestone 3:
+
+1. Substance integration
+2. zbrush integration
+3. Marvelous Designer integration
+4. Blender integration
+5. Nuke integration
+6. Katana integration

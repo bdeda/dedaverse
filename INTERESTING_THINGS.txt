@@ -1,0 +1,52 @@
+# interesting github projects
+
+
+# This is a glf to usd converter from google
+https://github.com/google/usd_from_gltf/tree/master
+
+# gltf windows extensions for the file explorer context menu
+https://github.com/bghgary/glTF-Shell-Extensions
+
+
+# file format plugins to help aide conversion between various file formats to usd
+https://github.com/adobe/USD-Fileformat-plugins
+
+# 3d mesh generator using AI to make 3d mesh from images
+https://github.com/microsoft/TRELLIS
+
+
+# python scripting in UE5.5
+https://dev.epicgames.com/documentation/en-us/unreal-engine/scripting-the-unreal-editor-using-python
+
+# load a usd stage in unreal
+https://forums.unrealengine.com/t/load-usd-stage-from-python/624785
+
+
+# screen capture using PySide6
+https://doc.qt.io/qtforpython-6/examples/example_multimedia_screencapture.html
+
+# animate a slide out window -- this did not work well with two monitors
+https://www.qtcentre.org/threads/33027-How-to-create-a-slide-out-window
+
+
+
+Installing dedaverse
+
+py -3.11 -m pip install git+https://github.com/bdeda/dedaverse.git@dev
+
+
+https://stackoverflow.com/questions/1551605/how-to-set-applications-taskbar-icon-in-windows-7/1552105#1552105
+
+https://ian.io/code-snippets/jira-icons.html
+
+
+https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
+
+
+pip install https://github.com/NVIDIA/warp/releases/download/v1.4.2/warp_lang-1.4.2+cu11-py3-none-win_amd64.whl
+
+
+https://huggingface.co/meta-llama/CodeLlama-7b-Python-hf
+
+
+https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_win64.exe.zip

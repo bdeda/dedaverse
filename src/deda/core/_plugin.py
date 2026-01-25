@@ -1,6 +1,6 @@
 # ###################################################################################
 #
-# Copyright 2024 Ben Deda
+# Copyright 2025 Ben Deda
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -56,11 +56,18 @@ def initialize_plugins():
         log.debug('Loading {}'.format(module_name))
         try:
             spec = loader.find_spec(module_name, loader.path)
+            if spec is None or spec.loader is None:
+                log.warning(f'Could not find spec or loader for plugin module: {module_name}')
+                continue
             module = spec.loader.load_module(module_name)
             sys.modules[f'dedaverse.plugins.{module_name}'] = module
             # The loading of the module should have registered the plugin with the deda.core.PluginRegistry
             log.debug(module)
+        except (ImportError, ModuleNotFoundError, AttributeError) as err:
+            log.error(f'Failed to import plugin module {module_name}: {err}')
+            log.exception(err)
         except Exception as err:
+            log.error(f'Unexpected error loading plugin module {module_name}: {err}')
             log.exception(err)
 
 
@@ -236,7 +243,7 @@ class Application(Plugin):
             cmd.append(f'{key}={value}')
         dcc_env = os.environ.copy()
         # modify env if required for the subprocess
-        dcc_env = self.setup_env()
+        dcc_env = self.setup_env(dcc_env)
         return subprocess.run(cmd, capture_output=True, env=dcc_env)
     
     

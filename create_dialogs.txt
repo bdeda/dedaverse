@@ -1,0 +1,29 @@
+dialog for creating a thing
+
+for assets:
+name it
+give it a type
+callback to create the thing on ui btn press
+...
+
+for apps:
+name
+icon
+executable command string
+add icon to panel
+...
+
+for services:
+name
+icon
+server address (and port)
+argument list 
+add icon to panel
+...
+
+
+task creation
+link to web interface, open webpage
+add widget to panel, link task with asset context if necessary
+
+
