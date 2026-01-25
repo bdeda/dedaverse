@@ -79,16 +79,25 @@ class TestDedaverseMain(unittest.TestCase):
         mock_open.assert_called_once()
 
     @patch('dedaverse.__main__.platform.system')
-    def test_install_command_non_windows(self, mock_platform):
+    def test_install_command_non_windows(self, mock_platform_system):
         """Test the install command on non-Windows systems."""
-        from dedaverse.__main__ import dedaverse
+        mock_platform_system.return_value = 'Linux'
         
-        mock_platform.return_value = 'Linux'
+        from dedaverse.__main__ import dedaverse
         
         # Use CliRunner to properly invoke the Click command
         result = self.runner.invoke(dedaverse, ['install'])
         # Should return 1 (not implemented) on non-Windows
-        self.assertEqual(result.exit_code, 1)
+        # Click commands return the function's return value as exit_code
+        # If exit_code is 0, check if it's because the function returned 0 or an exception occurred
+        if result.exit_code != 1:
+            # Debug: check what actually happened
+            print(f"DEBUG: exit_code={result.exit_code}, output={result.output}, exception={result.exception}")
+        
+        self.assertEqual(result.exit_code, 1, 
+                        f"Expected exit_code 1, got {result.exit_code}. Output: {result.output}")
+        # Also verify the output message indicates it's not implemented
+        self.assertIn('not yet implemented', result.output.lower() or '')
 
 
 if __name__ == '__main__':

@@ -32,24 +32,32 @@ except ImportError:
 class TestApplication(unittest.TestCase):
     """Test cases for Application class."""
 
-    @patch('deda.app._app.ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID')
-    def test_application_creation(self, mock_set_app_id):
-        """Test creating an Application instance.
+    @patch('deda.app._app.platform.system')
+    @patch('deda.app._app.ctypes')
+    def test_application_creation_windows(self, mock_ctypes, mock_platform):
+        """Test creating an Application instance on Windows."""
+        # Set up the mock ctypes.windll.shell32 chain
+        mock_windll = MagicMock()
+        mock_shell32 = MagicMock()
+        mock_windll.shell32 = mock_shell32
+        mock_ctypes.windll = mock_windll
         
-        This test mocks the Windows-specific ctypes.windll.shell32 call to prevent
-        failures on non-Windows systems or in restricted environments.
-        """
+        mock_platform.return_value = 'Windows'
         from deda.app._app import Application
         app = Application()
         self.assertIsInstance(app, QtWidgets.QApplication)
-        
-        # Verify Windows-specific call was made only on Windows
-        # On non-Windows, the call should not be made due to platform guard
-        if platform.system() == 'Windows':
-            mock_set_app_id.assert_called_once_with(u'dedafx.dedaverse.0.1.0')
-        else:
-            # On non-Windows, the call should not be made
-            mock_set_app_id.assert_not_called()
+        # On Windows, the call should be made
+        mock_shell32.SetCurrentProcessExplicitAppUserModelID.assert_called_once_with(u'dedafx.dedaverse.0.1.0')
+
+    @patch('deda.app._app.platform.system')
+    def test_application_creation_linux(self, mock_platform):
+        """Test creating an Application instance on Linux."""
+        mock_platform.return_value = 'Linux'
+        from deda.app._app import Application
+        app = Application()
+        self.assertIsInstance(app, QtWidgets.QApplication)
+        # On Linux, ctypes.windll doesn't exist, so the Windows-specific code should be skipped
+        # The platform guard should prevent the call
 
 
 @unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 not available")

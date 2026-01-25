@@ -163,7 +163,11 @@ class TestSiteConfig(unittest.TestCase):
     def test_site_config_load_nonexistent(self):
         """Test loading SiteConfig when file doesn't exist."""
         site = SiteConfig.load()
-        self.assertIsNone(site)
+        # When file doesn't exist, SiteConfig.load() returns an empty SiteConfig instance, not None
+        self.assertIsNotNone(site)
+        self.assertIsInstance(site, SiteConfig)
+        self.assertIsNone(site.name)
+        self.assertEqual(len(site.plugins), 0)
 
     def test_site_config_save_no_env(self):
         """Test saving SiteConfig when env var is not set."""
