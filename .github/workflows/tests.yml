@@ -102,7 +102,7 @@ jobs:
                   fi
 
             - name: Upload coverage HTML report
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v6
               if: always()
               with:
                   name: coverage-report-${{ matrix.python-version }}
