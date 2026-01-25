@@ -9,7 +9,8 @@ dependencies = [
   "click",
   "packaging",
   "psutil",
-  "dataclasses_json"
+  "dataclasses_json",
+  "requests"
 ]
 requires-python = ">= 3.12"
 authors = [
