@@ -25,7 +25,7 @@ jobs:
               run: |
                   sudo apt-get update
                   sudo apt-get install -y \
-                      libegl1-mesa \
+                      libegl1 \
                       libxkbcommon-x11-0 \
                       libxcb-xinerama0 \
                       libxcb-cursor0 \
@@ -35,9 +35,10 @@ jobs:
                       libxcb-randr0 \
                       libxcb-render-util0 \
                       libxcb-xfixes0 \
-                      libxcb-xinerama0 \
                       libxcb-xinput0 \
-                      libxcb-xkb1
+                      libxcb-xkb1 \
+                      libgl1-mesa-glx \
+                      libglib2.0-0
 
             - name: Install Python dependencies
               run: |
