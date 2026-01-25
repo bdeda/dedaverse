@@ -1,0 +1,1 @@
+Icons from https://ian.io/code-snippets/jira-icons.html

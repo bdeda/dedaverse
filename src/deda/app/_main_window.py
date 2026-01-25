@@ -33,6 +33,7 @@ from deda.core import LayeredConfig
 
 from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
+from ._dialogs import AddItemDialog
 #from ._usd_viewer import UsdViewWidget
 
 
@@ -134,7 +135,10 @@ class Panel(QtWidgets.QFrame):
     close_clicked = QtCore.Signal()
     add_item = QtCore.Signal(str)
     
-    def __init__(self, type_name, name, show_scroll_area=True, parent=None, **kwargs):
+    def __init__(self, type_name, name, 
+                 view=None, # instance of the view to put into the panel
+                 show_scroll_area=True, 
+                 parent=None, **kwargs):
         super().__init__(parent=parent)
         
         self.setObjectName(type_name)
@@ -143,6 +147,8 @@ class Panel(QtWidgets.QFrame):
             self._type_name = type_name[:-1]
         
         self.setStyleSheet("Panel{background-color: rgb(20,20,20); border: 1px solid rgb(40,40,40); border-radius: 5px;}")
+        
+        self._scroll_area = None
         
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -168,10 +174,7 @@ class Panel(QtWidgets.QFrame):
             self._scroll_area.customContextMenuRequested.connect(self._show_context_menu)        
             
     def __repr__(self):
-        return f'<{self.__class__} {self.objectName()}>'
-            
-    def __repr__(self):
-        return f'<{self.__class__} {self.objectName()}>'
+        return f'<{self.__class__.__name__} {self.objectName()}>'
         
     def close(self):        
         super().close() 
@@ -179,6 +182,22 @@ class Panel(QtWidgets.QFrame):
         
     def _add_item(self):
         self.add_item.emit(self._type_name)
+        dlg = AddItemDialog(self._type_name, parent=self._scroll_area)
+        dlg.item_created.connect(self._on_item_created)
+        if self._scroll_area:
+            rect = self._scroll_area.geometry()
+            dlg_rect = dlg.geometry()
+            pt = QtCore.QPoint((rect.width()/2) - (dlg_rect.width()/2),
+                               (rect.height()/2) - (dlg_rect.height()/2))
+            dlg.move(self._scroll_area.mapToGlobal(pt))
+        dlg.exec()
+        
+    def _on_item_created(self, item):
+        """Handle creating the item, as the user has chosen to create 
+        the given item in the Add Item dialog.
+        
+        """
+        
         
     def _on_minimized(self, minimized):
         self._scroll_area.setVisible(not minimized)    
