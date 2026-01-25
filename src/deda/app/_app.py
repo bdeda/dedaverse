@@ -68,7 +68,11 @@ def run(loglevel='DEBUG'):
     for plugin in deda.core.PluginRegistry():
         try:
             plugin.load()
+        except (ImportError, AttributeError, ModuleNotFoundError) as err:
+            log.error(f'Failed to load plugin {plugin.name}: {err}')
+            log.exception(err)
         except Exception as err:
+            log.error(f'Unexpected error loading plugin {plugin.name}: {err}')
             log.exception(err)
     ret = app.exec_()
     log.debug(f'Returning {ret}')
