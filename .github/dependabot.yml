@@ -1,0 +1,50 @@
+# Dependabot configuration for Dedaverse
+# https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/configuring-dependabot-security-updates
+
+version: 2
+updates:
+  # Enable version updates for Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "bdeda"
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    # Group updates to reduce PR noise
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+      production-dependencies:
+        dependency-type: "production"
+    # Ignore major version updates for critical dependencies
+    ignore:
+      # Ignore major version updates for PySide6 (Qt) - may have breaking changes
+      - dependency-name: "PySide6"
+        update-types: ["version-update:semver-major"]
+      # Ignore major version updates for usd-core - may have breaking changes
+      - dependency-name: "usd-core"
+        update-types: ["version-update:semver-major"]
+      # Ignore major version updates for p4python - may have breaking changes
+      - dependency-name: "p4python"
+        update-types: ["version-update:semver-major"]
+
+  # Enable security updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
