@@ -24,11 +24,13 @@ __all__ = ["Application", "run", "get_proc_under_mouse", "is_venv"]
 
 import sys
 import logging
+import platform
 try:
     import win32gui
     import win32process
+    WIN32_AVAILABLE = True
 except ImportError:
-    pass
+    WIN32_AVAILABLE = False
 import psutil
 import ctypes
 
@@ -51,10 +53,26 @@ class Application(QtWidgets.QApplication):
         QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_ShareOpenGLContexts, True)
-        super().__init__(['-platform', 'windows:darkmode=2'], **kwargs)
-        self.setStyle('Fusion')        
-        myappid = u'dedafx.dedaverse.0.1.0' 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        
+        # Platform-specific initialization
+        if platform.system() == 'Windows':
+            # Windows-specific platform argument for dark mode
+            super().__init__(['-platform', 'windows:darkmode=2'], **kwargs)
+        else:
+            # Linux/macOS: use default platform
+            super().__init__(*args, **kwargs)
+        
+        self.setStyle('Fusion')
+        
+        # Windows-specific: Set application user model ID for taskbar
+        if platform.system() == 'Windows':
+            try:
+                myappid = u'dedafx.dedaverse.0.1.0'
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+            except (AttributeError, OSError) as err:
+                # windll may not be available or shell32 may not exist
+                log.debug(f'Could not set Windows app user model ID: {err}')
+        
         log.debug("Dedaverse main application created.")
 
 
@@ -80,13 +98,21 @@ def run(loglevel='DEBUG'):
 
 
 def get_proc_under_mouse():
-    """Get the process under the mouse on Windows."""
-    hwnd = win32gui.WindowFromPoint(win32gui.GetCursorPos())
+    """Get the process under the mouse on Windows.
+    
+    Note: This function is Windows-specific and will return None on other platforms.
+    """
+    if platform.system() != 'Windows' or not WIN32_AVAILABLE:
+        log.warning('get_proc_under_mouse() is only available on Windows')
+        return None
+    
     try:
+        hwnd = win32gui.WindowFromPoint(win32gui.GetCursorPos())
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
         return psutil.Process(pid)
     except Exception as err:
         log.error(err)
+        return None
 
 
 def is_venv():

@@ -17,6 +17,7 @@
 # ###################################################################################
 import sys
 import os
+import platform
 import click
 import getpass
 
@@ -44,19 +45,37 @@ def run():
     
 @dedaverse.command()
 def install():
-    """Install the dedaverse startup script."""
+    """Install the dedaverse startup script.
+    
+    On Windows: Creates a startup script in the user's Startup folder.
+    On Linux/macOS: Creates a systemd user service or launchd agent (not yet implemented).
+    """
     
     # TODO: This should create a venv if one does not already exist for the current dedaverse git clone.
     
-    cmd_path = fr'C:\Users\{getpass.getuser()}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\dedaverse.cmd'
-    bat_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'bin', 'dedaverse.bat'))
-    if os.path.isfile(bat_path):
-        with open(cmd_path, 'w') as f:
-            f.write(f'@echo off\nstart {bat_path}\n')
-        print(f'Startup script installed to {cmd_path}')
-        return 0
-    print('Install errors!')
-    return 1
+    if platform.system() == 'Windows':
+        # Windows: Install to Startup folder
+        startup_dir = os.path.join(
+            os.path.expanduser('~'),
+            'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'
+        )
+        os.makedirs(startup_dir, exist_ok=True)
+        cmd_path = os.path.join(startup_dir, 'dedaverse.cmd')
+        bat_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'bin', 'dedaverse.bat'))
+        
+        if os.path.isfile(bat_path):
+            with open(cmd_path, 'w') as f:
+                f.write(f'@echo off\nstart {bat_path}\n')
+            print(f'Startup script installed to {cmd_path}')
+            return 0
+        else:
+            print(f'Error: Could not find dedaverse.bat at {bat_path}')
+            return 1
+    else:
+        # Linux/macOS: Not yet implemented
+        print(f'Autostart installation is not yet implemented for {platform.system()}.')
+        print('You can manually add dedaverse to your system startup.')
+        return 1
     
 
 if __name__ == '__main__':
