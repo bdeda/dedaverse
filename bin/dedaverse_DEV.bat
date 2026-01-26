@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 @rem The Dedaverse application installer and startup script
 @rem RESTART_CODE = 1212333
 @rem UPDATE_CODE = 1212444
@@ -28,8 +29,8 @@ if exist "%USD_ROOT%" (
     echo OpenUSD found at: %USD_ROOT%
     @rem Set up OpenUSD environment
     if exist "%USD_ROOT%\bin" (
-        set PATH=%USD_ROOT%\bin;%USD_ROOT%\lib;%PATH%
-        set PYTHONPATH=%USD_ROOT%\lib\python;%PYTHONPATH%
+        set "PATH=%USD_ROOT%\bin;%USD_ROOT%\lib;!PATH!"
+        set "PYTHONPATH=%USD_ROOT%\lib\python;!PYTHONPATH!"
     )
 ) else (
     echo Note: OpenUSD not found. You can install it with: bin\install_openusd.bat
