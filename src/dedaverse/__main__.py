@@ -81,7 +81,7 @@ def install():
         # Linux/macOS: Not yet implemented
         print(f'Autostart installation is not yet implemented for {platform.system()}.')
         print('You can manually add dedaverse to your system startup.')
-        return 1
+        raise click.ClickException('Autostart installation is not yet implemented for this platform.')
     
 
 if __name__ == '__main__':

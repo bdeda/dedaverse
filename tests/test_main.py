@@ -104,12 +104,7 @@ class TestDedaverseMain(unittest.TestCase):
         # Use CliRunner to properly invoke the Click command
         result = self.runner.invoke(dedaverse, ['install'])
         # Should return 1 (not implemented) on non-Windows
-        # Click commands return the function's return value as exit_code
-        # If exit_code is 0, check if it's because the function returned 0 or an exception occurred
-        if result.exit_code != 1:
-            # Debug: check what actually happened
-            print(f"DEBUG: exit_code={result.exit_code}, output={result.output}, exception={result.exception}")
-        
+        # Click commands that raise ClickException will have exit_code 1
         self.assertEqual(result.exit_code, 1, 
                         f"Expected exit_code 1, got {result.exit_code}. Output: {result.output}")
         # Also verify the output message indicates it's not implemented

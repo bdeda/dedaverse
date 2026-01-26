@@ -246,19 +246,24 @@ class TestInitializePlugins(unittest.TestCase):
     """Test cases for initialize_plugins function."""
 
     @patch.dict(os.environ, {}, clear=True)
-    @patch('deda.core._plugin.pkgutil.walk_packages')
-    @patch('deda.core._plugin.sys.modules')
-    def test_initialize_plugins_no_env(self, mock_modules, mock_walk):
+    @patch('pkgutil.walk_packages')
+    def test_initialize_plugins_no_env(self, mock_walk):
         """Test initializing plugins when DEDAVERSE_PLUGIN_DIRS is not set."""
         mock_walk.return_value = []
+        from deda.core._plugin import initialize_plugins
         initialize_plugins()
+        # walk_packages should be called with paths list
         mock_walk.assert_called_once()
+        # Verify it was called with a list containing the standard plugin path
+        call_args = mock_walk.call_args[0][0]
+        self.assertIsInstance(call_args, list)
 
     @patch.dict(os.environ, {'DEDAVERSE_PLUGIN_DIRS': '/path1:/path2'})
-    @patch('deda.core._plugin.pkgutil.walk_packages')
+    @patch('pkgutil.walk_packages')
     def test_initialize_plugins_with_env(self, mock_walk):
         """Test initializing plugins with DEDAVERSE_PLUGIN_DIRS set."""
         mock_walk.return_value = []
+        from deda.core._plugin import initialize_plugins
         initialize_plugins()
         mock_walk.assert_called_once()
 
