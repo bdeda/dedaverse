@@ -384,8 +384,17 @@ def load_project(self, proj_name: str) -> ProjectConfig | None:
 ### 15. Git Workflow
 
 #### Branch Naming
-- Use descriptive branch names: `feature/plugin-name`, `fix/bug-description`
-- For improvements: `improvements/critical-fixes`
+- **Feature branches** - For new features, enhancements, or development work
+  - Format: `feature/descriptive-name`
+  - Examples: `feature/plugin-name`, `feature/new-dialog`, `feature/usd-viewer-integration`
+  
+- **Bug branches** - For bugfixes targeting the main branch
+  - Format: `bug/bug-description` or `fix/bug-description`
+  - Examples: `bug/memory-leak-fix`, `fix/hash-implementation`, `bug/cross-platform-paths`
+  
+- **Improvement branches** - For code improvements and refactoring
+  - Format: `improvements/description`
+  - Examples: `improvements/critical-fixes`, `improvements/type-hints`, `improvements/code-cleanup`
 
 #### Commit Messages
 - Use clear, descriptive commit messages
