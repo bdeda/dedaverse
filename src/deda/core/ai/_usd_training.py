@@ -155,9 +155,10 @@ def _main():
     faces = tfg_simplified_logo.mesh['faces']
     num_vertices = vertices.shape[0]
     
-    model_path = r"D:\my_ai_models\my_model.keras"
-    if os.path.isfile(model_path):
-        model = keras.saving.load_model(model_path)
+    # Model path - use home directory for cross-platform compatibility
+    model_path = Path.home() / 'my_ai_models' / 'my_model.keras'
+    if model_path.is_file():
+        model = keras.saving.load_model(str(model_path))
     else:    
         # Constructs the model.
         model = keras.Sequential()

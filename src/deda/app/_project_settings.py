@@ -19,6 +19,7 @@ __all__ = ['ProjectSettingsDialog', 'StartProjectDialog']
 
 import os
 import logging
+from pathlib import Path
 
 from PySide6 import QtWidgets, QtCore, QtGui
 
@@ -57,7 +58,9 @@ class StartProjectDialog(QtWidgets.QDialog):
         
         self._config = config
         name = _uniquify_proj_name('Untitled Project', self._config.projects)
-        self._project = deda.core.ProjectConfig(name=name, rootdir='C:\dedaverse')
+        # Default project rootdir - use home directory for cross-platform compatibility
+        default_root = Path.home() / 'dedaverse'
+        self._project = deda.core.ProjectConfig(name=name, rootdir=str(default_root))
         
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -116,16 +119,17 @@ class StartProjectDialog(QtWidgets.QDialog):
         ret = QtWidgets.QFileDialog.getExistingDirectory(self, 'Choose Project Directory', self._project.rootdir)
         if not ret:
             return
-        rootdir = os.path.abspath(ret).replace('\\', '/')
+        rootdir_path = Path(ret).resolve()
+        rootdir = rootdir_path.as_posix()
         # TODO: move these two cfg_path calculations to a function call on the ProjectConfig class
-        cfg_path = os.path.join(rootdir, '.dedaverse', 'project.cfg').replace('\\', '/')
-        if os.path.isfile(cfg_path):
+        cfg_path = (rootdir_path / '.dedaverse' / 'project.cfg').as_posix()
+        if Path(cfg_path).is_file():
             self._project = deda.core.ProjectConfig.load(cfg_path)
             if self._project:
                 self._name_editor.setText(self._project.name)
         else:
-            self._project.rootdir = ret
-            self._project.cfg_path = os.path.join(self._project.rootdir, '.dedaverse', 'project.cfg').replace('\\', '/')                
+            self._project.rootdir = rootdir
+            self._project.cfg_path = (rootdir_path / '.dedaverse' / 'project.cfg').as_posix()                
         self._rootdir_editor.setText(ret)
         self._validate_proj_root()
         

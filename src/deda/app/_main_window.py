@@ -26,6 +26,7 @@ import logging
 import json
 import functools
 import pkg_resources
+from pathlib import Path
 
 from PySide6 import QtWidgets, QtCore, QtGui
 
@@ -86,8 +87,8 @@ class PanelHeader(QtWidgets.QWidget):
         hbox.addStretch()
         
         if not PanelHeader.gear_icon:
-            icon_path = os.path.join(os.path.dirname(__file__), 'icons', 'gear_icon_32.png')
-            PanelHeader.gear_icon = QtGui.QIcon(icon_path)
+            icon_path = Path(__file__).parent / 'icons' / 'gear_icon_32.png'
+            PanelHeader.gear_icon = QtGui.QIcon(str(icon_path))
         gear_btn = QtWidgets.QPushButton(PanelHeader.gear_icon, '')
         gear_btn.setToolTip('Settings')
         gear_btn.setFlat(True)
@@ -205,8 +206,8 @@ class Panel(QtWidgets.QFrame):
     def _show_context_menu(self, position):
         menu = QtWidgets.QMenu(parent=self)
         
-        icon_path = os.path.join(os.path.dirname(__file__), 'icons', 'green_plus.png')
-        plus_icon = QtGui.QIcon(icon_path)        
+        icon_path = Path(__file__).parent / 'icons' / 'green_plus.png'
+        plus_icon = QtGui.QIcon(str(icon_path))        
         action = menu.addAction(plus_icon, f'Add {self._type_name}')
         action.triggered.connect(self._add_item)
         
@@ -256,8 +257,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setFixedHeight(geo.height())
         self.setGeometry(size.width()-self.width(), 0, width, geo.height()) 
         
-        icon_path = os.path.join(os.path.dirname(__file__), 'icons', 'star_icon.png')
-        icon = QtGui.QIcon(icon_path)
+        icon_path = Path(__file__).parent / 'icons' / 'star_icon.png'
+        icon = QtGui.QIcon(str(icon_path))
         self.setWindowIcon(icon)
         
         self._icon = TaskbarIcon(icon, parent=self)

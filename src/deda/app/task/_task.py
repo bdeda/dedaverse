@@ -48,7 +48,7 @@ class TaskList:
     tasks = None
     
 
-class TaskListModel(QtWidgets.QAbstractTableModel):
+class TaskListModel(QtCore.QAbstractTableModel):
     
     def __init__(self, task_list, parent=None):
         super().__init__(parent=parent)

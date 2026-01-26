@@ -22,6 +22,7 @@ __all__ = ['LayeredConfig', 'ProjectConfig']
 import os
 import json
 import logging
+from pathlib import Path
 
 from dataclasses import dataclass, field
 from dataclasses_json import dataclass_json
@@ -108,8 +109,9 @@ class SiteConfig:
         site_config_path = os.getenv('DEDAVERSE_SITE_CONFIG')
         if not site_config_path:
             return        
-        if os.path.isfile(site_config_path):
-            with open(site_config_path, 'r') as f:
+        site_config_file = Path(site_config_path)
+        if site_config_file.is_file():
+            with open(site_config_file, 'r') as f:
                 data = f.read()
             return cls.from_json(data)            
         return cls()
@@ -118,13 +120,14 @@ class SiteConfig:
         site_config_path = os.getenv('DEDAVERSE_SITE_CONFIG')
         if not site_config_path:
             return
-        site_config_dir = os.path.dirname(site_config_path)
+        site_config_file = Path(site_config_path)
+        site_config_dir = site_config_file.parent
         try:
-            os.makedirs(site_config_dir)
+            site_config_dir.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
         # TODO: check if we can write to the file
-        with open(site_config_path, 'w') as f:
+        with open(site_config_file, 'w') as f:
             #f.write(self.to_json())    
             json.dump(self.to_dict(), f, sort_keys=True, indent=4)
 
@@ -171,7 +174,7 @@ class ProjectConfig:
     def is_writable(self):
         if not self.cfg_path:
             return True
-        if not os.path.isfile(self.cfg_path):
+        if not Path(self.cfg_path).is_file():
             return True
         return os.access(self.cfg_path, os.W_OK)
     
@@ -180,16 +183,18 @@ class ProjectConfig:
         if not path:
             log.error('Project must have a config path to load from.')
             return
-        if os.path.isdir(path):
-            path = os.path.join(path, '.dedaverse', 'project.cfg').replace('\\', '/')
-        if not os.path.isfile(path):
-            log.warning(f'Project config does not exist. {path}')
+        path_obj = Path(path)
+        if path_obj.is_dir():
+            path_obj = path_obj / '.dedaverse' / 'project.cfg'
+        path_str = path_obj.as_posix()
+        if not path_obj.is_file():
+            log.warning(f'Project config does not exist. {path_str}')
             return
-        with open(path, 'r') as f:
+        with open(path_obj, 'r') as f:
             data = f.read()
         project = cls.from_json(data) 
         # Ensure future saves will go to the same file on disk.
-        project.cfg_path = path
+        project.cfg_path = path_str
         return project
     
     def save(self):
@@ -199,10 +204,12 @@ class ProjectConfig:
             if not self.rootdir:
                 log.error('Cannot save the project config file because neither rootdir or cfg_path are set for the project.')
                 return
-            self.cfg_path = os.path.join(self.rootdir, '.dedaverse', 'project.cfg').replace('\\', '/')
-        project_config_dir = os.path.dirname(self.cfg_path)
+            cfg_path_obj = Path(self.rootdir) / '.dedaverse' / 'project.cfg'
+            self.cfg_path = cfg_path_obj.as_posix()
+        project_config_path = Path(self.cfg_path)
+        project_config_dir = project_config_path.parent
         try:
-            os.makedirs(project_config_dir)
+            project_config_dir.mkdir(parents=True, exist_ok=True)
         except OSError as err:
             if 'already exists' not in str(err):
                 log.error(err)
@@ -227,8 +234,8 @@ class UserConfig:
     
     @classmethod
     def load(cls):
-        user_config_path = os.path.expanduser('~/.dedaverse/user.cfg')
-        if os.path.isfile(user_config_path):
+        user_config_path = Path.home() / '.dedaverse' / 'user.cfg'
+        if user_config_path.is_file():
             with open(user_config_path, 'r') as f:
                 data = f.read()
             return cls.from_json(data)            
@@ -255,10 +262,10 @@ class UserConfig:
                 self.current_proj = self.projects[proj_name].name
     
     def save(self):
-        user_config_path = os.path.expanduser('~/.dedaverse/user.cfg')
-        user_config_dir = os.path.expanduser('~/.dedaverse')
+        user_config_path = Path.home() / '.dedaverse' / 'user.cfg'
+        user_config_dir = user_config_path.parent
         try:
-            os.makedirs(user_config_dir)
+            user_config_dir.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
         with open(user_config_path, 'w') as f:

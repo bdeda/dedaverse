@@ -18,6 +18,7 @@
 __all__ = ['AddButton']
 
 import os
+from pathlib import Path
 
 from PySide6 import QtWidgets, QtGui, QtCore
 
@@ -31,8 +32,8 @@ class AddButton(QtWidgets.QPushButton):
         super().__init__(parent=None)
         
         if not AddButton._ICON:
-            path = os.path.join(os.path.dirname(__file__), 'icons', 'green_plus.png')
-            AddButton._ICON = QtGui.QIcon(path)
+            path = Path(__file__).parent / 'icons' / 'green_plus.png'
+            AddButton._ICON = QtGui.QIcon(str(path))
             
         self.setIcon(AddButton._ICON)
         size_hint = self.sizeHint()

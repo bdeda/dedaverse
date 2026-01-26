@@ -13,7 +13,7 @@ Dedaverse is a Python-based asset management system for visual media projects (f
 - Qt-based UI (PySide6)
 
 **Key Technologies:**
-- Python 3.11+
+- Python 3.12+
 - PySide6 (Qt for Python)
 - dataclasses_json for configuration
 - Click for CLI
@@ -31,7 +31,7 @@ Dedaverse is a Python-based asset management system for visual media projects (f
 
 #### Type Hints
 - **Always add type hints** to new functions and methods
-- Use Python 3.11+ syntax: `str | None` instead of `Optional[str]`
+- Use Python 3.12+ syntax: `str | None` instead of `Optional[str]`
 - Use `from typing import` for complex types (Dict, List, Tuple, etc.)
 - Example:
 ```python
@@ -259,6 +259,23 @@ PluginRegistry().register(MyAppPlugin())
 - Test imports, configuration, and core functionality
 - UI tests are optional (can be complex)
 
+#### PySide6 Availability in Tests
+- **PySide6 is always assumed to be available** in test files
+- **Do NOT** add try-except blocks to check for PySide6 availability
+- **Do NOT** use `@unittest.skipIf(not PYSIDE6_AVAILABLE, ...)` decorators
+- Simply import PySide6 directly: `from PySide6 import QtWidgets`
+- If PySide6 is not available, the test should fail (this indicates a dependency issue that needs to be fixed)
+- Example:
+```python
+import unittest
+from PySide6 import QtWidgets  # ✅ Direct import, no try-except
+
+class TestMyWidget(unittest.TestCase):
+    def test_widget_creation(self):
+        widget = QtWidgets.QWidget()
+        self.assertIsNotNone(widget)
+```
+
 #### Running Tests
 ```bash
 python -m pytest tests/
@@ -434,5 +451,5 @@ When asked to modify or add code:
 ---
 
 **Last Updated:** 2025-01-24
-**Python Version:** 3.11+
+**Python Version:** 3.12+
 **Qt Version:** PySide6 6.6+

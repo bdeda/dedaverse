@@ -26,6 +26,7 @@ locations can be found using the Project Manager tool too.
 """
 import os
 import logging
+from pathlib import Path
 
 import deda.core
 
@@ -42,7 +43,7 @@ class Godot(deda.core.Application):
     
     """
     
-    icon_path = os.path.join(os.path.dirname(__file__), 'godot_icon_128.png')
+    icon_path = str(Path(__file__).parent / 'godot_icon_128.png')
     
     def load(self):
         """Load the plugin."""

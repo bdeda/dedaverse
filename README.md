@@ -63,19 +63,19 @@ Generic plugin icon from Vecteezy.com
 
 ## Getting Started
 
-Dataverse currently runs in Python 3.11 on Windows. 
+Dataverse currently runs in Python 3.12 on Windows. 
 
-To check if you have Python 3.11 installed on your machine, open a cmd prompt and run 
+To check if you have Python 3.12 installed on your machine, open a cmd prompt and run 
 ```
 py --list
 ```
-If there is not an installed version 3.11 or higher (3.12 or 3.13), [install Python 3.11 or higher](https://www.python.org/downloads/)
+If there is not an installed version 3.12 or higher (3.13), [install Python 3.12 or higher](https://www.python.org/downloads/)
 
 It is highly recommended that you use a virtual environment for the main Dedaverse application. 
 It should be created in a directory that can store several Gb of python package dependencies, as this area will grow as plugins are installed into the system.
 ```
 mkdir D:\dedaverse_app
-py -3.11 -m venv D:\dedaverse_app\.venv
+py -3.12 -m venv D:\dedaverse_app\.venv
 ```
 Next, in the venv, we will pip install Dedaverse from github. This will download and install all of the necessary python dependencies.
 ```

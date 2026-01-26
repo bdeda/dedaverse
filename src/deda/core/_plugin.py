@@ -31,6 +31,7 @@ import sys
 import logging
 import pkgutil
 from collections import OrderedDict
+from pathlib import Path
 import packaging.version
 import subprocess
 
@@ -46,8 +47,8 @@ def initialize_plugins():
     else:
         paths = paths.split(os.pathsep)
     
-    standard_plugin_path = os.path.realpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'plugins'))
-    paths.insert(0, standard_plugin_path)
+    standard_plugin_path = Path(__file__).resolve().parent.parent / 'plugins'
+    paths.insert(0, str(standard_plugin_path))
            
     for loader, module_name, is_pkg in pkgutil.walk_packages(paths):
         if f'dedaverse.plugins.{module_name}' in sys.modules:

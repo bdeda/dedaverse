@@ -33,13 +33,18 @@ class Project:
     def __eq__(self, other):
         if isinstance(other, Project) and self.name == other.name:
             return True
+        # Project should not be equal to a string, even if the name matches
+        # This maintains type safety and prevents accidental comparisons
+        if isinstance(other, str):
+            return False
         try:
             return self.name == other['name']
-        except KeyError:
+        except (KeyError, TypeError):
             pass
         return False
         
     def as_dict(self):
-        data = copy.deepcopy(self._data)
+        data = copy.deepcopy(self._data) if self._data else {}
         data['name'] = self._name
+        return data
         
