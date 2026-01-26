@@ -33,8 +33,10 @@ class Project:
     def __eq__(self, other):
         if isinstance(other, Project) and self.name == other.name:
             return True
+        # Project should not be equal to a string, even if the name matches
+        # This maintains type safety and prevents accidental comparisons
         if isinstance(other, str):
-            return self.name == other
+            return False
         try:
             return self.name == other['name']
         except (KeyError, TypeError):
