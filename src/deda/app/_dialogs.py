@@ -22,6 +22,7 @@ Graphics views for panels and browsers.
 __all__ = ["AddItemDialog"]
 
 import os
+from pathlib import Path
 
 from PySide6 import QtWidgets, QtGui, QtCore
 
@@ -56,8 +57,8 @@ class AddItemDialog(QtWidgets.QDialog):
         super().__init__(parent=parent)
         
         self.setWindowTitle(f'Add {type_name}')
-        icon_path = os.path.join(os.path.dirname(__file__), 'icons', 'green_plus.png')
-        plus_icon = QtGui.QIcon(icon_path)   
+        icon_path = Path(__file__).parent / 'icons' / 'green_plus.png'
+        plus_icon = QtGui.QIcon(str(icon_path))   
         self.setWindowIcon(plus_icon)
         
         self._type_name = type_name
@@ -69,8 +70,8 @@ class AddItemDialog(QtWidgets.QDialog):
         vbox.addLayout(grid)
                 
         # default icon for type
-        icon_path = os.path.join(os.path.dirname(__file__), 'icons', 'questionmark_small.png')
-        questionmark_icon = QtGui.QPixmap(icon_path)          
+        icon_path = Path(__file__).parent / 'icons' / 'questionmark_small.png'
+        questionmark_icon = QtGui.QPixmap(str(icon_path))          
         # customization of icon allows drag and drop, resize and store icon on drop
         self._icon_lbl = ClickableLabel()
         self._icon_lbl.setPixmap(questionmark_icon)

@@ -18,15 +18,21 @@
 import os
 import sys
 import time
+import platform
+from pathlib import Path
 
-import sys
-try:
-    sys.path.insert(0, r'C:\Program Files\Wing Pro 10')
-    import wingdbstub
-except ImportError:
-    pass
-finally:
-    sys.path = sys.path[1:]
+# Conditional debugger import (only on Windows and when WING_DEBUG env var is set)
+if platform.system() == 'Windows' and os.getenv('WING_DEBUG'):
+    try:
+        wing_path = Path(r'C:\Program Files\Wing Pro 10')
+        if wing_path.exists():
+            sys.path.insert(0, str(wing_path))
+            import wingdbstub
+    except ImportError:
+        pass
+    finally:
+        if sys.path and sys.path[0] == str(wing_path):
+            sys.path = sys.path[1:]
     
 from marionette_driver.errors import MarionetteException
 from marionette_driver.expected import element_displayed, element_not_displayed

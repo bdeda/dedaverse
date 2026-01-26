@@ -18,16 +18,22 @@
 import sys
 import os
 import platform
+from pathlib import Path
 import click
 import getpass
 
-try:
-    sys.path.insert(0, r'C:\Program Files\Wing Pro 10')
-    import wingdbstub
-except ImportError:
-    pass
-finally:
-    sys.path = sys.path[1:]
+# Conditional debugger import (only on Windows and when WING_DEBUG env var is set)
+if platform.system() == 'Windows' and os.getenv('WING_DEBUG'):
+    try:
+        wing_path = Path(r'C:\Program Files\Wing Pro 10')
+        if wing_path.exists():
+            sys.path.insert(0, str(wing_path))
+            import wingdbstub
+    except ImportError:
+        pass
+    finally:
+        if sys.path and sys.path[0] == str(wing_path):
+            sys.path = sys.path[1:]
 
 import deda.app
 
@@ -55,17 +61,17 @@ def install():
     
     if platform.system() == 'Windows':
         # Windows: Install to Startup folder
-        startup_dir = os.path.join(
-            os.path.expanduser('~'),
-            'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'
-        )
-        os.makedirs(startup_dir, exist_ok=True)
-        cmd_path = os.path.join(startup_dir, 'dedaverse.cmd')
-        bat_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'bin', 'dedaverse.bat'))
+        startup_dir = Path.home() / 'AppData' / 'Roaming' / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs' / 'Startup'
+        startup_dir.mkdir(parents=True, exist_ok=True)
+        cmd_path = startup_dir / 'dedaverse.cmd'
         
-        if os.path.isfile(bat_path):
+        # Get bat_path relative to this file
+        bat_path = Path(__file__).parent.parent.parent / 'bin' / 'dedaverse.bat'
+        bat_path = bat_path.resolve()
+        
+        if bat_path.is_file():
             with open(cmd_path, 'w') as f:
-                f.write(f'@echo off\nstart {bat_path}\n')
+                f.write(f'@echo off\nstart "{bat_path}"\n')
             print(f'Startup script installed to {cmd_path}')
             return 0
         else:

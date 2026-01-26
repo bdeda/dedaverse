@@ -23,6 +23,7 @@ repo only available to internal employees.
 """
 import os
 import logging
+from pathlib import Path
 
 import deda.core
 import deda.app
@@ -36,12 +37,12 @@ __vendor__ = 'Deda'
 log = logging.getLogger('deda.plugins.plugin_manager')
 
 
-DEFAULT_IMAGE_PATH = os.path.join(os.path.dirname(__file__), 'plug.png')
+DEFAULT_IMAGE_PATH = Path(__file__).parent / 'plug.png'
 
 class PluginWidget(QtWidgets.QFrame):
     """Widget for a single plugin."""
     
-    DEFAULT_IMAGE = QtGui.QImage(DEFAULT_IMAGE_PATH)
+    DEFAULT_IMAGE = QtGui.QImage(str(DEFAULT_IMAGE_PATH))
     
     def __init__(self, plugin, parent=None):
         super().__init__(parent=parent)
@@ -58,7 +59,7 @@ class PluginWidget(QtWidgets.QFrame):
         
         layout = QtWidgets.QGridLayout()
         self.setLayout(layout)        
-        if plugin.image and os.path.isfile(plugin.image):
+        if plugin.image and Path(plugin.image).is_file():
             image = QtGui.QImage(plugin.image)
         else:
             image = self.DEFAULT_IMAGE

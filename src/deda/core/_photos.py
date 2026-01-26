@@ -17,16 +17,24 @@
 # ###################################################################################
 
 import sys
-try:
-    sys.path.insert(0, r'C:\Program Files\Wing Pro 10')
-    import wingdbstub
-except ImportError:
-    pass
-finally:
-    sys.path = sys.path[1:]
+import os
+import platform
+from pathlib import Path
+
+# Conditional debugger import (only on Windows and when WING_DEBUG env var is set)
+if platform.system() == 'Windows' and os.getenv('WING_DEBUG'):
+    try:
+        wing_path = Path(r'C:\Program Files\Wing Pro 10')
+        if wing_path.exists():
+            sys.path.insert(0, str(wing_path))
+            import wingdbstub
+    except ImportError:
+        pass
+    finally:
+        if sys.path and sys.path[0] == str(wing_path):
+            sys.path = sys.path[1:]
 
 import exifread
-import os
 import colorama
 import shutil
 
@@ -55,7 +63,7 @@ def main():
                 continue
             index += 1
             extentions.add(ext)
-            path = os.path.join(root, f)
+            path = Path(root) / f
             print(path)
             
             with open(path, "rb") as fh:
@@ -69,8 +77,8 @@ def main():
                     continue
             date, time = str(dt).split()
             name = f"{date.replace(':', '-')}_{time.replace(':', '.')}{ext}"
-            new_name = os.path.join(destdir, name)
-            if os.path.isfile(new_name):
+            new_name = Path(destdir) / name
+            if new_name.is_file():
                 print(f'{colorama.Fore.RED}{index}/{count}  {new_name}{colorama.Style.RESET_ALL}')
             else:
                 print(f'{index}/{count}  {new_name}')

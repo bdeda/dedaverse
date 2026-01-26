@@ -17,6 +17,7 @@
 # ###################################################################################
 
 import os
+from pathlib import Path
 
 import torch
 import pandas
@@ -38,8 +39,8 @@ class UsdDataset(Dataset):
         return len(self.img_labels)
 
     def __getitem__(self, idx):
-        data_path = os.path.join(self._rootdir, self._labels.iloc[idx, 0])
-        image = decode_image(img_path)
+        data_path = Path(self._rootdir) / self._labels.iloc[idx, 0]
+        image = decode_image(str(data_path))
         label = self.img_labels.iloc[idx, 1]
         if self.transform:
             image = self.transform(image)

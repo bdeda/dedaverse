@@ -17,8 +17,23 @@
 # ###################################################################################
 __all__ = []
 
+import platform
+from pathlib import Path
 import glob
+
 
 def iter_unreal_installs():
     """Find all installs of Unreal Engine on the system."""
-    search_str = r'C:\Program Files\Epic Games\*\Engine\Binaries\Win64\UnrealEditor.exe'
+    if platform.system() != 'Windows':
+        return
+    # Look in the normal install location
+    epic_games_dir = Path('C:/Program Files/Epic Games')
+    if not epic_games_dir.exists():
+        return
+    # Search for UnrealEditor.exe in Engine/Binaries/Win64 subdirectories
+    for engine_dir in epic_games_dir.iterdir():
+        if not engine_dir.is_dir():
+            continue
+        editor_exe = engine_dir / 'Engine' / 'Binaries' / 'Win64' / 'UnrealEditor.exe'
+        if editor_exe.is_file():
+            yield engine_dir.name, str(editor_exe)

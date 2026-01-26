@@ -18,8 +18,8 @@
 
 __all__ = ['iter_photoshop_installs']
 
-import os
 import platform
+from pathlib import Path
 
 
 def iter_photoshop_installs():
@@ -27,15 +27,14 @@ def iter_photoshop_installs():
     if platform.system() != 'Windows':
         return
     # look in the normal install location
-    rootdir = r'C:\Program Files\Adobe'
-    for item in os.listdir(rootdir):
-        if 'Photoshop' not in item:
+    rootdir = Path('C:/Program Files/Adobe')
+    if not rootdir.exists():
+        return
+    for item in rootdir.iterdir():
+        if not item.is_dir() or 'Photoshop' not in item.name:
             continue
-        d = os.path.join(rootdir, item)
-        if not os.path.isdir(d):
-            continue
-        expected = os.path.join(d, 'Photoshop.exe')
-        if os.path.isfile(expected):
-            yield item, expected
+        expected = item / 'Photoshop.exe'
+        if expected.is_file():
+            yield item.name, str(expected)
             
         

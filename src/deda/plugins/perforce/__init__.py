@@ -22,6 +22,7 @@ The builtin Asset Manager plugin connects to perforce and uses p4python to handl
 import os
 import logging
 from contextlib import contextmanager
+from pathlib import Path
 import P4
 
 import deda.core
@@ -51,7 +52,7 @@ class PerforceFileManager(deda.core.FileManager):
     
     """
     
-    icon_path = os.path.join(os.path.dirname(__file__), 'p4_icon_128.png')
+    icon_path = str(Path(__file__).parent / 'p4_icon_128.png')
     
     def load(self):
         """Load the plugin."""        
