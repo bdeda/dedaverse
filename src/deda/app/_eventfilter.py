@@ -29,7 +29,7 @@ import json
 
 from PySide6 import QtGui, QtCore, QtWidgets
 
-from ._app import get_top_window
+from ._main_window import get_top_window
 
 
 log = logging.getLogger('deda.eventfilter')

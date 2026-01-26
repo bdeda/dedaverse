@@ -59,17 +59,33 @@ class TestDedaverseMain(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         mock_run.assert_called_once()
 
-    @patch('dedaverse.__main__.os.path.isfile')
+    @patch('dedaverse.__main__.Path')
     @patch('dedaverse.__main__.open', create=True)
-    @patch('dedaverse.__main__.getpass.getuser')
     @patch('dedaverse.__main__.platform.system')
-    def test_install_command_windows(self, mock_platform, mock_getuser, mock_open, mock_isfile):
+    def test_install_command_windows(self, mock_platform, mock_open, mock_path_class):
         """Test the install command on Windows."""
         from dedaverse.__main__ import dedaverse
         
         mock_platform.return_value = 'Windows'
-        mock_getuser.return_value = 'testuser'
-        mock_isfile.return_value = True
+        
+        # Mock Path objects
+        mock_bat_path = MagicMock()
+        mock_bat_path.is_file.return_value = True
+        mock_bat_path.resolve.return_value = mock_bat_path
+        
+        mock_cmd_path = MagicMock()
+        mock_startup_dir = MagicMock()
+        mock_startup_dir.__truediv__.return_value = mock_cmd_path
+        mock_startup_dir.mkdir = MagicMock()
+        
+        # Mock Path(__file__) chain
+        mock_file_path = MagicMock()
+        mock_file_path.parent.parent.parent.__truediv__.return_value = mock_bat_path
+        
+        # Set up Path.home() and Path(__file__)
+        mock_path_class.home.return_value = mock_startup_dir
+        mock_path_class.return_value = mock_file_path
+        
         mock_file = MagicMock()
         mock_open.return_value.__enter__.return_value = mock_file
         

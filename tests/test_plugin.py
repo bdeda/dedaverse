@@ -99,7 +99,7 @@ class TestPluginRegistry(unittest.TestCase):
     def test_plugin_registry_iter_plugins(self):
         """Test iterating over plugins of specific type."""
         registry = PluginRegistry()
-        app_plugin = Application(name='AppPlugin', executable='app.exe')
+        app_plugin = Application(app_name='AppPlugin', executable='app.exe')
         file_plugin = FileManager(name='FilePlugin')
         registry.register(app_plugin)
         registry.register(file_plugin)
@@ -115,7 +115,7 @@ class TestApplication(unittest.TestCase):
     def test_application_creation(self):
         """Test creating an Application instance."""
         app = Application(
-            name='TestApp',
+            app_name='TestApp',
             executable='/path/to/app.exe',
         )
         self.assertEqual(app.name, 'TestApp')
@@ -123,25 +123,25 @@ class TestApplication(unittest.TestCase):
 
     def test_application_set_executable(self):
         """Test setting executable path."""
-        app = Application(name='TestApp')
+        app = Application(app_name='TestApp')
         app.set_executable('/path/to/app.exe')
         self.assertEqual(app._executable, '/path/to/app.exe')
 
     def test_application_set_executable_invalid_type(self):
         """Test setting invalid executable type raises TypeError."""
-        app = Application(name='TestApp')
+        app = Application(app_name='TestApp')
         with self.assertRaises(TypeError):
             app.set_executable(123)
 
     def test_application_find_not_implemented(self):
         """Test that Application.find() raises NotImplementedError."""
-        app = Application(name='TestApp')
+        app = Application(app_name='TestApp')
         with self.assertRaises(NotImplementedError):
             app.find()
 
     def test_application_setup_env(self):
         """Test setup_env returns env dict."""
-        app = Application(name='TestApp')
+        app = Application(app_name='TestApp')
         env = {'TEST': 'value'}
         result = app.setup_env(env)
         self.assertEqual(result, env)
@@ -153,7 +153,7 @@ class TestApplication(unittest.TestCase):
         mock_env_copy.return_value = {'TEST': 'value'}
         mock_subprocess.return_value = MagicMock(returncode=0)
         
-        app = Application(name='TestApp', executable='/path/to/app.exe')
+        app = Application(app_name='TestApp', executable='/path/to/app.exe')
         result = app.launch('arg1', 'arg2', key='value')
         
         mock_subprocess.assert_called_once()
