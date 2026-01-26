@@ -18,15 +18,9 @@
 """Unit tests for deda.app._dialogs module."""
 
 import unittest
-
-try:
-    from PySide6 import QtWidgets
-    PYSIDE6_AVAILABLE = True
-except ImportError:
-    PYSIDE6_AVAILABLE = False
+from PySide6 import QtWidgets
 
 
-@unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 not available")
 class TestDialogs(unittest.TestCase):
     """Test cases for _dialogs module."""
 

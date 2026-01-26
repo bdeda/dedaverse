@@ -18,15 +18,8 @@
 """Unit tests for deda.app._graphics_view module."""
 
 import unittest
+from PySide6 import QtWidgets
 
-try:
-    from PySide6 import QtWidgets
-    PYSIDE6_AVAILABLE = True
-except ImportError:
-    PYSIDE6_AVAILABLE = False
-
-
-@unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 not available")
 class TestGraphicsView(unittest.TestCase):
     """Test cases for _graphics_view module."""
 

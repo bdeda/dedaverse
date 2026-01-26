@@ -20,15 +20,9 @@
 import unittest
 import platform
 from unittest.mock import patch, MagicMock
-
-try:
-    from PySide6 import QtWidgets
-    PYSIDE6_AVAILABLE = True
-except ImportError:
-    PYSIDE6_AVAILABLE = False
+from PySide6 import QtWidgets
 
 
-@unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 not available")
 class TestApplication(unittest.TestCase):
     """Test cases for Application class."""
 
@@ -60,7 +54,6 @@ class TestApplication(unittest.TestCase):
         # The platform guard should prevent the call
 
 
-@unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 not available")
 class TestRun(unittest.TestCase):
     """Test cases for run function."""
 

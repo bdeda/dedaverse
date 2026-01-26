@@ -259,6 +259,23 @@ PluginRegistry().register(MyAppPlugin())
 - Test imports, configuration, and core functionality
 - UI tests are optional (can be complex)
 
+#### PySide6 Availability in Tests
+- **PySide6 is always assumed to be available** in test files
+- **Do NOT** add try-except blocks to check for PySide6 availability
+- **Do NOT** use `@unittest.skipIf(not PYSIDE6_AVAILABLE, ...)` decorators
+- Simply import PySide6 directly: `from PySide6 import QtWidgets`
+- If PySide6 is not available, the test should fail (this indicates a dependency issue that needs to be fixed)
+- Example:
+```python
+import unittest
+from PySide6 import QtWidgets  # ✅ Direct import, no try-except
+
+class TestMyWidget(unittest.TestCase):
+    def test_widget_creation(self):
+        widget = QtWidgets.QWidget()
+        self.assertIsNotNone(widget)
+```
+
 #### Running Tests
 ```bash
 python -m pytest tests/
