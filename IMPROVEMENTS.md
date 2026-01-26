@@ -6,23 +6,30 @@ This document outlines suggested improvements for the Dedaverse codebase, organi
 
 **Last Updated:** 2025-01-24
 
+**Recent Updates:**
+- ✅ Fixed all README.md typos (Dataverse → Dedaverse, nstall → install, added -m pip install)
+- ✅ Completed pathlib.Path migration in `__main__.py` and throughout codebase
+- ✅ Made debugger code conditional (WING_DEBUG env var)
+- ✅ Fixed batch file PATH handling with delayed expansion
+- ✅ Added GitHub Pages deployment for coverage reports
+
 ### ✅ Completed Improvements
 - **Critical Issues:** 3 of 4 resolved (duplicate `__repr__`, `__hash__` implementations, `setup_env()` call)
 - **Test Coverage:** Expanded from 2 files to 50+ test files covering major components
-- **CI/CD:** Comprehensive GitHub Actions workflow added (tests, linting, coverage)
-- **Platform Compatibility:** Platform detection added in multiple locations
-- **Documentation:** AGENTS.md created for AI code generation guidance
+- **CI/CD:** Comprehensive GitHub Actions workflow added (tests, linting, coverage, GitHub Pages deployment)
+- **Platform Compatibility:** Platform detection added in multiple locations, Windows-specific code properly guarded
+- **Documentation:** AGENTS.md created for AI code generation guidance, README.md typos fixed
 - **Code Quality:** Apache 2.0 license headers added to all Python files
 - **Python Version:** Standardized to Python 3.12+ across project
-
-### ⚠️ Partially Completed
-- **Windows Path Handling:** Platform detection added, but still uses `os.path` instead of `pathlib.Path`
-- **Documentation:** Some improvements made, but typos remain in README.md
+- **Path Handling:** ✅ Migrated from `os.path` to `pathlib.Path` throughout codebase (core functionality complete)
+- **Debugger Code:** ✅ Made conditional (only runs on Windows when `WING_DEBUG` env var is set)
+- **Cross-Platform:** ✅ Windows-specific code properly guarded, batch files use delayed expansion for PATH handling
+- **GitHub Pages:** ✅ Coverage reports automatically deployed to GitHub Pages
 
 ### ❌ Pending
-- **Debugger Code:** Still present in `__main__.py` (should be conditional)
-- **Type Hints:** Still needed throughout codebase
+- **Type Hints:** Still needed throughout codebase (ongoing improvement)
 - **Input Validation:** Still needed in dialogs and configuration
+- **Bare Exception Handling:** Some `Exception` catches need to be more specific
 
 ## 🔴 Critical Issues
 
@@ -63,38 +70,46 @@ def get_project(self, name: str) -> Optional[ProjectConfig]:
     ...
 ```
 
-### 6. ⚠️ PARTIALLY FIXED: Windows-Specific Code Hardcoding
-**Location:** `src/dedaverse/__main__.py`
-**Status:** Platform detection added, but still uses `os.path.join` instead of `pathlib.Path`
-**Current:**
-```python
-if platform.system() == 'Windows':
-    startup_dir = os.path.join(
-        os.path.expanduser('~'),
-        'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'
-    )
-```
-**Remaining Fix:** Use `pathlib.Path` for better cross-platform compatibility:
+### 6. ✅ FIXED: Windows-Specific Code Hardcoding
+**Status:** Resolved - All Windows-specific paths now use `pathlib.Path`:
 ```python
 from pathlib import Path
 import platform
 
 if platform.system() == 'Windows':
     startup_dir = Path.home() / 'AppData' / 'Roaming' / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs' / 'Startup'
+    startup_dir.mkdir(parents=True, exist_ok=True)
+    cmd_path = startup_dir / 'dedaverse.cmd'
+    bat_path = Path(__file__).parent.parent.parent / 'bin' / 'dedaverse.bat'
 ```
 
-### 7. Debugger Code in Production
-**Location:** `src/dedaverse/__main__.py:23-29`
-**Issue:** Wing IDE debugger code is included in production code.
-**Fix:** Use environment variable or conditional import:
+**Additional Fixes:**
+- All icon paths migrated to `pathlib.Path`
+- Plugin paths use `Path(__file__).resolve()`
+- Configuration paths use `Path.home()` and `Path.as_posix()`
+- Batch files use delayed expansion (`!PATH!`) to handle paths with spaces
+
+### 7. ✅ FIXED: Debugger Code in Production
+**Status:** Resolved - Debugger code is now conditional and only runs when explicitly enabled:
 ```python
-if os.getenv('WING_DEBUG'):
+# Conditional debugger import (only on Windows and when WING_DEBUG env var is set)
+if platform.system() == 'Windows' and os.getenv('WING_DEBUG'):
     try:
-        sys.path.insert(0, r'C:\Program Files\Wing Pro 10')
-        import wingdbstub
+        wing_path = Path(r'C:\Program Files\Wing Pro 10')
+        if wing_path.exists():
+            sys.path.insert(0, str(wing_path))
+            import wingdbstub
     except ImportError:
         pass
+    finally:
+        if sys.path and sys.path[0] == str(wing_path):
+            sys.path = sys.path[1:]
 ```
+
+**Applied to:**
+- `src/dedaverse/__main__.py`
+- `src/deda/core/_photos.py`
+- `src/deda/core/_amazon_photos.py`
 
 ### 8. Incomplete Error Handling in Plugin Loading
 **Location:** `src/deda/app/_app.py:68-72`
@@ -129,18 +144,15 @@ def instance(cls):
 ```
 **Recommendation:** Use a decorator or standardize on one approach.
 
-### 11. Inconsistent Path Handling
-**Issue:** Mix of `os.path` and string manipulation for paths.
-**Recommendation:** Standardize on `pathlib.Path` throughout:
-```python
-from pathlib import Path
+### 11. ✅ SIGNIFICANTLY IMPROVED: Inconsistent Path Handling
+**Status:** Major improvement - Most path handling migrated to `pathlib.Path`:
+- ✅ All icon paths use `Path(__file__).parent / 'icons' / ...`
+- ✅ Configuration paths use `Path.home()` and `Path.as_posix()`
+- ✅ Plugin paths use `Path(__file__).resolve().parent.parent`
+- ✅ Windows-specific finders use `Path('C:/Program Files/...')`
+- ✅ Project paths use `Path` operations throughout
 
-# Instead of:
-path = os.path.join(os.path.dirname(__file__), 'icons', 'gear_icon.png')
-
-# Use:
-path = Path(__file__).parent / 'icons' / 'gear_icon.png'
-```
+**Remaining:** Some legacy `os.path` usage may remain in less critical areas, but core functionality is fully migrated.
 
 ### 12. Missing Docstrings
 **Issue:** Many methods lack docstrings or have incomplete ones.
@@ -251,14 +263,16 @@ with open(path, 'w') as f:
 
 **Note:** Some Windows-specific code (like `ctypes.windll`) has been commented out for cross-platform compatibility.
 
-### 27. ⚠️ PARTIALLY FIXED: Improve Documentation
-**Status:** Some improvements made, but typos remain
-**Remaining Issues:**
-- "Dataverse" instead of "Dedaverse" (line 66 in README.md)
-- "nstall" instead of "install" (line 84 in README.md)
-- Missing `-m pip install` in installation command (line 82)
+### 27. ✅ FIXED: Improve Documentation
+**Status:** Resolved - All identified typos fixed:
+- ✅ "Dataverse" → "Dedaverse" (line 66)
+- ✅ "nstall" → "install" (line 84)
+- ✅ Added `-m pip install` to installation command (line 82)
 
-**Recommendation:** Fix remaining typos and improve installation instructions.
+**Additional Improvements:**
+- ✅ AGENTS.md created with comprehensive AI agent guidance
+- ✅ Branch naming conventions documented
+- ✅ GitHub Pages deployment added for coverage reports
 
 ### 28. Dependency Management
 **Issue:** `pkg_resources` is deprecated in favor of `importlib.metadata`.
@@ -284,14 +298,14 @@ with open(path, 'w') as f:
 
 ### Short-term (High Priority)
 5. Add type hints to public APIs
-6. ⚠️ Replace remaining `os.path` with `pathlib.Path` in `__main__.py`
-7. Remove/conditionalize debugger code (still present in `__main__.py`)
+6. ✅ Replace `os.path` with `pathlib.Path` (completed in `__main__.py` and throughout codebase)
+7. ✅ Conditionalize debugger code (completed - now uses `WING_DEBUG` env var)
 8. Add input validation
 9. Improve error messages
 
 ### Medium-term (Medium Priority)
 10. Refactor singleton pattern
-11. Standardize on `pathlib.Path`
+11. ✅ Standardize on `pathlib.Path` (majority completed, core functionality migrated)
 12. Add comprehensive docstrings
 13. Address or track TODOs
 14. Improve logging consistency
@@ -318,9 +332,12 @@ with open(path, 'w') as f:
 - Plugin architecture is well-designed
 - Configuration management is comprehensive but could use validation
 - UI code follows Qt best practices
-- ✅ CI/CD pipeline added with GitHub Actions (tests, linting, coverage)
+- ✅ CI/CD pipeline added with GitHub Actions (tests, linting, coverage, GitHub Pages deployment)
 - ✅ Comprehensive test suite added (50+ test files)
-- ✅ Cross-platform compatibility improved with platform detection
+- ✅ Cross-platform compatibility improved with platform detection and pathlib.Path migration
 - ✅ Python 3.12+ requirement standardized across project
 - ✅ Apache 2.0 license headers added to all Python files
 - ✅ AGENTS.md created for AI code generation guidance
+- ✅ Windows path handling fixed (delayed expansion in batch files, pathlib.Path in Python)
+- ✅ Debugger code made conditional (WING_DEBUG env var)
+- ✅ Documentation typos fixed in README.md
