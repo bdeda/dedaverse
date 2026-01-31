@@ -25,7 +25,7 @@ import os
 import logging
 import json
 import functools
-import pkg_resources
+from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
 
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -242,8 +242,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if app_name is None:
             app_name = "Dedaverse"
         self._settings = QtCore.QSettings("DedaFX", app_name)
-        version = pkg_resources.get_distribution('dedaverse').version
-        self._window_title_context = f"{app_name} [deda@{version}]"
+        try:
+            package_version = version('dedaverse')
+        except PackageNotFoundError:
+            # Fallback if package is not installed (e.g., running from source)
+            package_version = 'dev'
+        self._window_title_context = f"{app_name} [deda@{package_version}]"
         self.setWindowTitle(self._window_title_context)
         self.setObjectName('DedaverseMainWindow')
         
