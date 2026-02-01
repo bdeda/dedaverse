@@ -33,11 +33,15 @@ from pxr.Usdviewq.common import CameraMaskModes
 from deda.app._usd_viewer import UsdViewWidget
 
 from . import _annotation
+from . import _playbar
 from . import _reticle
 from . import _slate
 
 # Directory containing HDR/EXR environment textures for the dome light
 HDR_IMAGES_DIR = Path(r'F:\hdri')
+
+# Default FPS when stage does not explicitly set timeCodesPerSecond
+_DEFAULT_FPS = 24
 
 # QSettings keys for persisted view options
 _SETTINGS_ORG = 'DedaFX'
@@ -50,6 +54,9 @@ _KEY_ASPECT_LOCKED = 'view/aspectRatioLocked'
 _KEY_ASPECT_RATIO = 'view/aspectRatio'
 _KEY_ENV_TEXTURE = 'view/environmentTexturePath'
 _KEY_GEOMETRY = 'window/geometry'
+_KEY_RECENT_FILES = 'file/recentFiles'
+
+_MAX_RECENT_FILES = 10
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -67,6 +74,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self._settings = QtCore.QSettings(_SETTINGS_ORG, _SETTINGS_APP)
         self._env_texture_path = None  # Track selected environment texture for persistence
+        self._recent_files = self._load_recent_files()
         
         self.setWindowTitle('Dedaverse')
         
@@ -77,7 +85,20 @@ class MainWindow(QtWidgets.QMainWindow):
         w.setLayout(vbox)
         
         self._viewer = UsdViewWidget(stage=None, parent=self)
-        vbox.addWidget(self._viewer)
+        vbox.addWidget(self._viewer, 1)
+        
+        self._playbar = _playbar.Playbar(parent=self)
+        self._playbar.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed
+        )
+        self._playbar.frameChanged.connect(self._on_playbar_frame_changed)
+        self._playbar.playClicked.connect(self._on_play_clicked)
+        self._playbar.stopClicked.connect(self._on_stop_clicked)
+        vbox.addWidget(self._playbar, 0)
+        
+        self._play_timer = QtCore.QTimer(self)
+        self._play_timer.timeout.connect(self._on_play_tick)
         
         self._build_menu_bar()
         self._restore_view_settings()
@@ -90,6 +111,8 @@ class MainWindow(QtWidgets.QMainWindow):
         open_action = file_menu.addAction('&Open...')
         open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self._on_open_file)
+        self._recent_files_menu = file_menu.addMenu('Recent &Files')
+        self._update_recent_files_menu()
         view_menu = menu_bar.addMenu('&View')
         frame_all_action = view_menu.addAction('Frame &All')
         frame_all_action.setShortcut(QtGui.QKeySequence(QtCore.Qt.Key_F))
@@ -159,6 +182,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         s.setValue(_KEY_ENV_TEXTURE, self._env_texture_path or '')
         s.setValue(_KEY_GEOMETRY, self.saveGeometry())
+        s.setValue(_KEY_RECENT_FILES, self._recent_files)
 
     def _restore_view_settings(self):
         """Restore view options from QSettings."""
@@ -241,32 +265,123 @@ class MainWindow(QtWidgets.QMainWindow):
         self._env_texture_path = str(texture_path) if texture_path else None
         self._viewer.set_dome_light_texture(self._env_texture_path)
 
+    def _load_recent_files(self):
+        """Load recent files list from QSettings."""
+        paths = self._settings.value(_KEY_RECENT_FILES, [])
+        if isinstance(paths, str):
+            paths = [paths] if paths else []
+        return paths[:] if paths else []
+
+    def _save_recent_files(self):
+        """Save recent files list to QSettings."""
+        self._settings.setValue(_KEY_RECENT_FILES, self._recent_files)
+
+    def _add_to_recent_files(self, file_path):
+        """Add file to recent list (front), remove duplicates, limit to _MAX_RECENT_FILES."""
+        path = str(Path(file_path).resolve())
+        if path in self._recent_files:
+            self._recent_files.remove(path)
+        self._recent_files.insert(0, path)
+        self._recent_files = self._recent_files[:_MAX_RECENT_FILES]
+        self._save_recent_files()
+        self._update_recent_files_menu()
+
+    def _update_recent_files_menu(self):
+        """Rebuild the Recent Files submenu from _recent_files."""
+        self._recent_files_menu.clear()
+        for path in self._recent_files:
+            action = self._recent_files_menu.addAction(Path(path).name)
+            action.setToolTip(path)
+            action.triggered.connect(
+                (lambda p: lambda: self._on_open_recent_file(p))(path)
+            )
+
+    def _on_open_recent_file(self, file_path):
+        """Open a USD file from the recent files list."""
+        path = Path(file_path)
+        if not path.exists():
+            QtWidgets.QMessageBox.warning(
+                self,
+                'Open Failed',
+                f'File no longer exists:\n{file_path}'
+            )
+            self._recent_files = [p for p in self._recent_files if Path(p).exists()]
+            self._save_recent_files()
+            self._update_recent_files_menu()
+            return
+        self._open_stage_file(str(path))
+
+    def _open_stage_file(self, file_path):
+        """Load a USD stage from file_path and update the viewer. Used by Open and Recent Files."""
+        try:
+            stage = Usd.Stage.Open(file_path)
+            if stage:
+                self._play_timer.stop()
+                self._viewer.stage = stage
+                self.setWindowTitle(f'Asset Viewer - {Path(file_path).name}')
+                start_frame = int(stage.GetStartTimeCode())
+                end_frame = int(stage.GetEndTimeCode())
+                if end_frame <= start_frame:
+                    start_frame, end_frame = 0, max(100, start_frame + 1)
+                self._playbar.setFrameRange(start_frame, end_frame)
+                self._playbar.setFrame(start_frame)
+                self._viewer.set_dome_light_texture(self._env_texture_path)
+                self._add_to_recent_files(file_path)
+            else:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    'Open Failed',
+                    f'Could not open USD file:\n{file_path}'
+                )
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(
+                self,
+                'Open Failed',
+                f'Could not open USD file:\n{file_path}\n\n{e}'
+            )
+
     def _on_open_file(self):
         """Open a file dialog and load the selected USD stage."""
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             'Open USD File',
             '',
-            'USD Files (*.usd *.usda *.usdc);;All Files (*)'
+            'USD Files (*.usd *.usda *.usdc *.usdz);;All Files (*)'
         )
         if file_path:
-            try:
-                stage = Usd.Stage.Open(file_path)
-                if stage:
-                    self._viewer.stage = stage
-                    self.setWindowTitle(f'Asset Viewer - {Path(file_path).name}')
-                else:
-                    QtWidgets.QMessageBox.warning(
-                        self,
-                        'Open Failed',
-                        f'Could not open USD file:\n{file_path}'
-                    )
-            except Exception as e:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    'Open Failed',
-                    f'Could not open USD file:\n{file_path}\n\n{e}'
-                )
+            self._open_stage_file(file_path)
+
+    def _on_playbar_frame_changed(self, frame):
+        """Sync the stage view to the playbar's current frame."""
+        self._viewer.set_current_frame(frame)
+
+    def _get_stage_fps(self):
+        """Return the stage's frames per second, or _DEFAULT_FPS if not set."""
+        stage = self._viewer.stage
+        if not stage:
+            return _DEFAULT_FPS
+        fps = stage.GetTimeCodesPerSecond()
+        return _DEFAULT_FPS if not fps or fps <= 0 else fps
+
+    def _on_play_clicked(self):
+        """Start playback at the stage's FPS."""
+        self._play_timer.stop()
+        fps = self._get_stage_fps()
+        interval_ms = max(1, int(1000.0 / fps))
+        self._play_timer.start(interval_ms)
+
+    def _on_stop_clicked(self):
+        """Stop playback."""
+        self._play_timer.stop()
+
+    def _on_play_tick(self):
+        """Advance playbar by one frame; loop to first frame when reaching the end."""
+        frame_min, frame_max = self._playbar.frameRange()
+        current = self._playbar.frame()
+        if current >= frame_max:
+            self._playbar.setFrame(frame_min)
+        else:
+            self._playbar.setFrame(current + 1)
 
     def _on_frame_all(self):
         """Frame the view to fit all geometry."""

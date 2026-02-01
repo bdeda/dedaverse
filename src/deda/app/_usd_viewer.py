@@ -23,7 +23,7 @@ from pathlib import Path
 
 from PySide6 import QtWidgets, QtCore, QtGui
 
-from pxr import Usd, Sdf, UsdLux
+from pxr import Gf, Usd, Sdf, UsdLux
 from pxr.Usdviewq.stageView import StageView
 from pxr.Usdviewq.common import CameraMaskModes
 
@@ -175,6 +175,7 @@ class UsdViewWidget(QtWidgets.QWidget):
 
         self.viewSettings.domeLightEnabled = True
         self.viewSettings.domeLightTexturesVisible = True
+        self.viewSettings.ambientLightOnly = True  # Disable default camera/headlamp light
         self.viewSettings._cameraMaskMode = CameraMaskModes.FULL
 
     @property
@@ -218,10 +219,12 @@ class UsdViewWidget(QtWidgets.QWidget):
 
             # Configure view settings
             self.viewSettings.domeLightEnabled = True
-            self.viewSettings.domeLightTexturesVisible = True 
+            self.viewSettings.domeLightTexturesVisible = True
+            self.viewSettings.ambientLightOnly = True  # Disable default camera/headlamp light
 
             # Update the view
             self.update_view(resetCam=True, forceComputeBBox=True)
+            self._set_clipping_planes_from_stage_bounds()
         except Exception as err:
             log.error(f'Error setting stage: {err}')
             raise
@@ -307,6 +310,43 @@ class UsdViewWidget(QtWidgets.QWidget):
             light.CreateTextureFileAttr(texture_path)
         self._view.closeRenderer()
         self.update_view(resetCam=False, forceComputeBBox=False)
+
+    def _set_clipping_planes_from_stage_bounds(self):
+        """Set camera near/far clipping planes from stage bbox so all geometry is visible when zoomed in."""
+        if not self._view._dataModel.stage:
+            return
+        bbox = self._view._bbox
+        r = bbox.ComputeAlignedRange()
+        if r.IsEmpty():
+            return
+        mn, mx = r.GetMin(), r.GetMax()
+        size = mx - mn
+        diagonal = size.GetLength()
+        if diagonal <= 0:
+            return
+        # Near: very small so zooming in does not clip; scale with scene size for numerical stability
+        near = max(0.001, diagonal / 1e6)
+        # Far: encompass entire scene from any camera angle; use 2.5x diagonal for margin
+        far = max(diagonal * 2.5, 100.0)
+        vs = self.viewSettings
+        vs.freeCameraOverrideNear = near
+        vs.freeCameraOverrideFar = far
+        self.update_view(resetCam=False, forceComputeBBox=False)
+
+    def set_current_frame(self, frame):
+        """Set the stage view's current frame (time code) and refresh the display.
+
+        Before rendering, updates the camera clipping planes to encompass the
+        bounding box of all geometry at the current frame, so animated geometry
+        is not clipped during playback.
+
+        Args:
+            frame: Frame number to display.
+        """
+        if self._view._dataModel.stage:
+            self._view._dataModel.currentFrame = Usd.TimeCode(frame)
+            self.update_view(resetCam=False, forceComputeBBox=True)
+            self._set_clipping_planes_from_stage_bounds()
 
     def update_view(self, resetCam=False, forceComputeBBox=False):
         if self._view._dataModel.stage:
