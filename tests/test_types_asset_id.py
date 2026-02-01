@@ -15,11 +15,11 @@
 # limitations under the License.
 #
 # ###################################################################################
-"""Unit tests for AssetID in deda.core.types._entity module."""
+"""Unit tests for AssetID in deda.core.types._asset_id module."""
 
 import unittest
 
-from deda.core.types._entity import AssetID
+from deda.core.types._asset_id import AssetID
 
 
 class TestAssetIDInit(unittest.TestCase):
