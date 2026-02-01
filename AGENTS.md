@@ -363,7 +363,7 @@ else:
 
 #### Docstrings
 - Use Google or NumPy style docstrings
-- Include Args, Returns, Raises sections
+- **Add Args, Returns, and Raises sections to docstrings where appropriate.** When improving or writing docstrings, include these sections whenever the function or method has parameters, returns a value, or may raise exceptions.
 - Example:
 ```python
 def load_project(self, proj_name: str) -> ProjectConfig | None:

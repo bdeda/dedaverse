@@ -1,4 +1,3 @@
-
 # ###################################################################################
 #
 # Copyright 2025 Ben Deda
@@ -16,27 +15,179 @@
 # limitations under the License.
 #
 # ###################################################################################
+"""Entity types for the asset system.
 
-class Entity(object):
-    """Base type for all types."""
-    
-    def __init__(self, name, parent):
-        super().__init__()
-        
+Entity is the base class for all asset system types (Element, Asset, etc.).
+Each entity is backed by a USD file where the default prim is the location
+from which metadata is serialized.
+"""
+
+import re
+from functools import total_ordering
+from typing import Self
+
+__all__ = ['AssetID', 'Entity']
+
+# USD prim names: start with letter or underscore, then alphanumeric or underscore
+_USD_PRIM_NAME_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+@total_ordering
+class AssetID:
+    """String identifier for an Entity, unique per project.
+
+    Used for asset lookup and as a reference to an Entity from other systems.
+    Format: ``asset_name:sub_asset_name::element_type/relative_path``,
+            ``asset_name::``.
+            ``asset_name:sub_asset_name::
+            ``project_name:asset_name:sub_asset_name::
+    Supports hashing (dict keys), ordering (sortable), and string conversion.
+    """
+
+    def __init__(self, asset_id: str) -> None:
+        """Initialize the asset ID.
+
+        Args:
+            asset_id: String identifier in format
+                ``asset_name:sub_asset_name::element_type/relative_path`` or
+                ``asset_name::``. Must contain ``::``. The prefix (before ``::``)
+                must consist of USD-valid prim name segments separated by single
+                ``:`` delimiters.
+
+        Raises:
+            ValueError: If asset_id does not contain ``::``, or if the prefix
+                contains invalid characters or segment structure.
+        """
+        self._asset_id = self._validate_asset_id(asset_id)
+
+    @staticmethod
+    def _validate_asset_id(asset_id: str) -> str:
+        """Validate asset_id format and return the trimmed string.
+
+        Args:
+            asset_id: Raw string to validate.
+
+        Returns:
+            Trimmed asset_id string if valid.
+
+        Raises:
+            TypeError: If asset_id is not a string.
+            ValueError: If asset_id lacks "::", has empty prefix, empty
+                segment, or invalid USD prim name characters in prefix.
+        """
+        if not isinstance(asset_id, str):
+            raise TypeError(f'asset_id must be str, got {type(asset_id).__name__}')
+        asset_id = asset_id.strip()
+        if '::' not in asset_id:
+            raise ValueError(
+                f'asset_id must contain "::" separator, got {asset_id!r}'
+            )
+        prefix, _ = asset_id.split('::', 1)
+        if not prefix:
+            raise ValueError(
+                f'asset_id prefix (before "::") must be non-empty, got {asset_id!r}'
+            )
+        segments = prefix.split(':')
+        for i, seg in enumerate(segments):
+            if not seg:
+                raise ValueError(
+                    f'asset_id prefix segment {i} is empty (double colon or leading '
+                    f'trailing ":"), got {asset_id!r}'
+                )
+            if not _USD_PRIM_NAME_RE.match(seg):
+                raise ValueError(
+                    f'asset_id prefix segment {i!r} contains invalid characters for '
+                    f'USD prim name (use [A-Za-z_][A-Za-z0-9_]*), got {seg!r}'
+                )
+        return asset_id
+
+    def __str__(self) -> str:
+        """Return the string value of the asset ID.
+
+        Returns:
+            The underlying asset ID string.
+        """
+        return str(self._asset_id)
+
+    def __repr__(self) -> str:
+        """Return a repr showing the AssetID type and its string value.
+
+        Returns:
+            String of the form ``AssetID('value')``.
+        """
+        return f"AssetID({self._asset_id!r})"
+
+    def __hash__(self) -> int:
+        """Return hash for use as dict key or in sets.
+
+        Returns:
+            Hash of the asset ID string.
+        """
+        return hash(self._asset_id)
+
+    def __eq__(self, other: object) -> bool:
+        """Return True if other has the same string value.
+
+        Args:
+            other: AssetID or str to compare against. Strings are compared
+                directly to the asset ID value.
+
+        Returns:
+            True if equal, False otherwise. Returns NotImplemented if other
+            is not an AssetID or str.
+        """
+        if isinstance(other, AssetID):
+            return self._asset_id == other._asset_id
+        if isinstance(other, str):
+            return self._asset_id == other
+        return NotImplemented
+
+    def __lt__(self, other: object) -> bool:
+        """Compare by string value for sorting.
+
+        Args:
+            other: AssetID or str to compare against. Strings are compared
+                directly to the asset ID value.
+
+        Returns:
+            True if this asset ID sorts before other. Returns NotImplemented
+            if other is not an AssetID or str.
+        """
+        if isinstance(other, AssetID):
+            return self._asset_id < other._asset_id
+        if isinstance(other, str):
+            return self._asset_id < other
+        return NotImplemented
+
+
+class Entity:
+    """Base class for all asset system types (Element, Asset, etc.)."""
+
+    def __init__(self, name: str, parent: Self | None) -> None:
+        """Initialize the entity.
+
+        Args:
+            name: Display name of the entity.
+            parent: Parent entity, or None if this is a root entity.
+        """
         self._name = name
         self._parent = parent
-        
-        
+
     @classmethod
-    def from_path(cls, path):
-        """Get the entity of a certain type from the given path. It the path is not 
-        something that represents a given type, return None.
-        
+    def from_path(cls, path: str) -> Self | None:
+        """Create an entity instance from a file path.
+
+        If the path does not represent a valid entity of this type, returns None.
+        Subclasses must override to implement type-specific path parsing.
+
         Args:
-            path: (str) The file path string.
-            
+            path: File path string (e.g., USD file path).
+
         Returns:
-            Entity subclass instance or None.
-        
+            Instance of the entity subclass, or None if the path is invalid.
+
+        Raises:
+            NotImplementedError: When called on the base Entity class.
+                Subclasses must override this method.
         """
         raise NotImplementedError
