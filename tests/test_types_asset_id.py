@@ -96,6 +96,114 @@ class TestAssetIDInit(unittest.TestCase):
             AssetID('asset-name::')
         self.assertIn('invalid', str(ctx.exception).lower())
 
+    def test_valid_version_suffix(self):
+        """Valid format: asset::#5"""
+        aid = AssetID('asset::#5')
+        self.assertEqual(str(aid), 'asset::#5')
+        self.assertEqual(aid.version, 5)
+        self.assertIsNone(aid.changelist)
+
+    def test_valid_changelist_suffix(self):
+        """Valid format: asset::@12345"""
+        aid = AssetID('asset::@12345')
+        self.assertEqual(str(aid), 'asset::@12345')
+        self.assertIsNone(aid.version)
+        self.assertEqual(aid.changelist, 12345)
+
+    def test_valid_version_only_on_path(self):
+        """Valid format: asset::element/path#12"""
+        aid = AssetID('asset::element/path#12')
+        self.assertEqual(aid.version, 12)
+        self.assertIsNone(aid.changelist)
+
+    def test_valid_empty_path_version_suffix(self):
+        """Valid format: asset::#1"""
+        aid = AssetID('asset::#1')
+        self.assertEqual(aid.version, 1)
+        self.assertIsNone(aid.changelist)
+
+    def test_value_error_invalid_version_suffix(self):
+        """Invalid # suffix (non-digit) raises ValueError."""
+        with self.assertRaises(ValueError) as ctx:
+            AssetID('asset::#abc')
+        self.assertIn('#', str(ctx.exception))
+
+    def test_value_error_invalid_changelist_suffix(self):
+        """Invalid @ suffix (non-digit) raises ValueError."""
+        with self.assertRaises(ValueError) as ctx:
+            AssetID('asset::@xyz')
+        self.assertIn('@', str(ctx.exception))
+
+    def test_value_error_both_version_and_changelist(self):
+        """Both # and @ suffixes raises ValueError."""
+        with self.assertRaises(ValueError) as ctx:
+            AssetID('asset::path#5@12345')
+        self.assertIn('both', str(ctx.exception).lower())
+        with self.assertRaises(ValueError) as ctx:
+            AssetID('asset::path@12345#5')
+        self.assertIn('both', str(ctx.exception).lower())
+
+
+class TestAssetIDVersionChangelistProperties(unittest.TestCase):
+    """Test cases for version and changelist properties."""
+
+    def test_version_none_without_suffix(self):
+        """version is None when no # suffix."""
+        aid = AssetID('asset::')
+        self.assertIsNone(aid.version)
+
+    def test_changelist_none_without_suffix(self):
+        """changelist is None when no @ suffix."""
+        aid = AssetID('asset::')
+        self.assertIsNone(aid.changelist)
+
+    def test_version_and_changelist_both_none(self):
+        """Both None for base asset ID."""
+        aid = AssetID('proj:asset:sub::element/path')
+        self.assertIsNone(aid.version)
+        self.assertIsNone(aid.changelist)
+
+
+class TestAssetIDScope(unittest.TestCase):
+    """Test cases for the scope property."""
+
+    def test_scope_returns_asset_id(self):
+        """scope returns an AssetID instance."""
+        aid = AssetID('asset_name::')
+        scope = aid.scope
+        self.assertIsInstance(scope, AssetID)
+
+    def test_scope_simple(self):
+        """scope for asset_name:: is asset_name::"""
+        aid = AssetID('asset_name::')
+        self.assertEqual(aid.scope, 'asset_name::')
+        self.assertEqual(str(aid.scope), 'asset_name::')
+
+    def test_scope_with_sub_asset(self):
+        """scope for asset:sub:: is asset:sub::"""
+        aid = AssetID('asset_name:sub_asset_name::')
+        self.assertEqual(str(aid.scope), 'asset_name:sub_asset_name::')
+
+    def test_scope_with_path_strips_path(self):
+        """scope for asset::element/path is asset::"""
+        aid = AssetID('asset_name:sub::element_type/relative_path')
+        self.assertEqual(str(aid.scope), 'asset_name:sub::')
+
+    def test_scope_with_version_strips_version(self):
+        """scope for asset::path#5 is asset::"""
+        aid = AssetID('asset::path#5')
+        self.assertEqual(str(aid.scope), 'asset::')
+
+    def test_scope_with_changelist_strips_changelist(self):
+        """scope for asset::path@12345 is asset::"""
+        aid = AssetID('asset::path@12345')
+        self.assertEqual(str(aid.scope), 'asset::')
+
+    def test_scope_project_asset_sub(self):
+        """scope for project:asset:sub:: is project:asset:sub::"""
+        aid = AssetID('project_name:asset_name:sub_asset_name::')
+        self.assertEqual(str(aid.scope), 'project_name:asset_name:sub_asset_name::')
+
 
 class TestAssetIDStrRepr(unittest.TestCase):
     """Test cases for __str__ and __repr__."""
