@@ -15,23 +15,36 @@
 # limitations under the License.
 #
 # ###################################################################################
-"""Unit tests for deda.core.viewer._usd_viewer module."""
+"""CLI entry point for the Dedaverse application.
 
-import unittest
-from PySide6 import QtWidgets
+This module provides the command-line interface for the main application.
+Run with: python -m deda.app
+"""
 
-class TestUsdViewer(unittest.TestCase):
-    """Test cases for _usd_viewer module."""
+import sys
 
-    def test_module_imports(self):
-        """Test that the module can be imported."""
-        try:
-            import deda.core.viewer._usd_viewer
-            self.assertTrue(True)
-        except (ImportError, ModuleNotFoundError) as e:
-            # Optional dependencies (pxr.Usdviewq, etc.) may not be available
-            self.skipTest(f"Optional dependencies not available: {e}")
+import click
+
+
+@click.group()
+def app():
+    """Dedaverse application CLI."""
+    pass
+
+
+@app.command()
+def viewer():
+    """Launch the MainWindow from deda.core.viewer._window."""
+    from deda.app import Application
+    from deda.core.viewer import _window
+
+    qapp = Application.instance()
+    if qapp is None:
+        qapp = Application()
+    w = _window.MainWindow()
+    w.show()
+    sys.exit(qapp.exec())
 
 
 if __name__ == '__main__':
-    unittest.main()
+    sys.exit(app())

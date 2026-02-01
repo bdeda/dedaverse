@@ -175,7 +175,7 @@ class UsdViewWidget(QtWidgets.QWidget):
 
         self.viewSettings.domeLightEnabled = True
         self.viewSettings.domeLightTexturesVisible = True
-        self.viewSettings.ambientLightOnly = True  # Disable default camera/headlamp light
+        self.viewSettings.ambientLightOnly = False  # Disable default camera/headlamp light
         self.viewSettings._cameraMaskMode = CameraMaskModes.FULL
 
     @property
@@ -220,7 +220,7 @@ class UsdViewWidget(QtWidgets.QWidget):
             # Configure view settings
             self.viewSettings.domeLightEnabled = True
             self.viewSettings.domeLightTexturesVisible = True
-            self.viewSettings.ambientLightOnly = True  # Disable default camera/headlamp light
+            self.viewSettings.ambientLightOnly = False  # Disable default camera/headlamp light
 
             # Update the view
             self.update_view(resetCam=True, forceComputeBBox=True)
