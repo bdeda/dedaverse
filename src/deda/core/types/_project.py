@@ -15,3 +15,27 @@
 # limitations under the License.
 #
 # ###################################################################################
+"""Project type for the asset system."""
+
+from pathlib import Path
+
+from ._collection import Collection
+
+__all__ = ['Project']
+
+
+class Project(Collection):
+    """Root entity representing a Dedaverse project.
+
+    A Project is the top-level Collection that contains all assets, sequences,
+    and shots. Has a rootdir that points to the project directory on disk.
+    """
+
+    @property
+    def rootdir(self) -> Path | str:
+        """Project root directory on the file system.
+
+        Returns:
+            Path or string to the project root. TODO: load from project cfg.
+        """
+        return Path('F:/dedaverse')

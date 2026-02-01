@@ -22,17 +22,21 @@ Each entity is backed by a USD file where the default prim is the location
 from which metadata is serialized.
 """
 
-from typing import Self
+from pathlib import Path
 
 from ._asset_id import AssetID
 
-__all__ = ['AssetID', 'Entity']
+__all__ = ['Entity']
 
 
 class Entity:
-    """Base class for all asset system types (Element, Asset, etc.)."""
+    """Base class for all asset system types (Element, Asset, etc.).
 
-    def __init__(self, name: str, parent: Self | None) -> None:
+    Provides common attributes: name, parent, project, path, and metadata_path.
+    Subclasses must override from_path() to implement type-specific path parsing.
+    """
+
+    def __init__(self, name: str, parent: 'Entity | None') -> None:
         """Initialize the entity.
 
         Args:
@@ -41,9 +45,54 @@ class Entity:
         """
         self._name = name
         self._parent = parent
+        
+    @property
+    def metadata_path(self) -> Path | None:
+        """The dedaverse metadata path relative to the project rootdir.
+
+        Returns:
+            Path to the metadata file, or None if not yet resolved.
+        """
+        return None
+
+    @property
+    def name(self) -> str:
+        """Display name of the entity."""
+        return self._name
+
+    @property
+    def parent(self) -> 'Entity | None':
+        """Parent entity, or None if this is a root entity."""
+        return self._parent
+
+    @property
+    def path(self) -> Path:
+        """File system path for this entity.
+
+        For the project root, returns the project rootdir. For children,
+        returns the path relative to the project (implementation pending).
+
+        Returns:
+            Path to the entity on disk.
+        """
+        proj = self.project
+        if self is proj and hasattr(proj, 'rootdir'):
+            rootdir = proj.rootdir
+            return Path(rootdir) if isinstance(rootdir, str) else rootdir
+        return Path()
+
+    @property
+    def project(self) -> 'Entity':
+        """The root (project) entity, found by walking up the parent chain."""
+        item: Entity | None = self
+        while item is not None:
+            if item.parent is None:
+                return item
+            item = item.parent
+        return self  
 
     @classmethod
-    def from_path(cls, path: str) -> Self | None:
+    def from_path(cls, path: str) -> 'Entity | None':
         """Create an entity instance from a file path.
 
         If the path does not represent a valid entity of this type, returns None.

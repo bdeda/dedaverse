@@ -19,9 +19,12 @@
 
 import unittest
 
+from deda.core.types._collection import Collection
+from deda.core.types._entity import Entity
+
 
 class TestCollection(unittest.TestCase):
-    """Test cases for Collection module."""
+    """Test cases for Collection class."""
 
     def test_module_imports(self):
         """Test that the module can be imported."""
@@ -30,6 +33,14 @@ class TestCollection(unittest.TestCase):
             self.assertTrue(True)
         except ImportError:
             self.fail("Failed to import deda.core.types._collection")
+
+    def test_collection_creation_entity_api(self):
+        """Collection supports Entity API: name, parent, project, path."""
+        coll = Collection(name='TestCollection', parent=None)
+        self.assertEqual(coll.name, 'TestCollection')
+        self.assertIsNone(coll.parent)
+        self.assertIs(coll.project, coll)
+        _ = coll.path
 
 
 if __name__ == '__main__':

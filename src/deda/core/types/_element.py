@@ -15,9 +15,16 @@
 # limitations under the License.
 #
 # ###################################################################################
+"""Element type for the asset system."""
 
 from ._entity import Entity
 
+__all__ = ['Element']
+
 
 class Element(Entity):
-    pass
+    """Leaf entity representing a single asset element (e.g. model, texture).
+
+    An Element has no children. It inherits the full Entity API including
+    name, parent, project, path, and from_path().
+    """

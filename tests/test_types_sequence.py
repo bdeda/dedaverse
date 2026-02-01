@@ -19,9 +19,11 @@
 
 import unittest
 
+from deda.core.types._sequence import Sequence
+
 
 class TestSequence(unittest.TestCase):
-    """Test cases for Sequence module."""
+    """Test cases for Sequence class."""
 
     def test_module_imports(self):
         """Test that the module can be imported."""
@@ -30,6 +32,14 @@ class TestSequence(unittest.TestCase):
             self.assertTrue(True)
         except ImportError:
             self.fail("Failed to import deda.core.types._sequence")
+
+    def test_sequence_creation_entity_api(self):
+        """Sequence supports Entity API: name, parent, project, path."""
+        seq = Sequence(name='TestSequence', parent=None)
+        self.assertEqual(seq.name, 'TestSequence')
+        self.assertIsNone(seq.parent)
+        self.assertIs(seq.project, seq)
+        _ = seq.path
 
 
 if __name__ == '__main__':

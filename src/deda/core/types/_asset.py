@@ -15,3 +15,16 @@
 # limitations under the License.
 #
 # ###################################################################################
+"""Asset type for the asset system."""
+
+from ._entity import Entity
+
+__all__ = ['Asset']
+
+
+class Asset(Entity):
+    """Entity representing an asset that may contain Elements or Collections.
+
+    An Asset groups related elements (e.g. character, prop) and can nest
+    Collections. Inherits the full Entity API.
+    """

@@ -15,3 +15,16 @@
 # limitations under the License.
 #
 # ###################################################################################
+"""Shot type for the asset system."""
+
+from ._collection import Collection
+
+__all__ = ['Shot']
+
+
+class Shot(Collection):
+    """Collection representing a single shot within a sequence.
+
+    A Shot groups assets and elements for a specific shot. Typically
+    contained by a Sequence. Inherits the full Entity API.
+    """

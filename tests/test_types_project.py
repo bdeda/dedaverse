@@ -19,9 +19,11 @@
 
 import unittest
 
+from deda.core.types._project import Project
 
-class TestProjectType(unittest.TestCase):
-    """Test cases for Project type module."""
+
+class TestProject(unittest.TestCase):
+    """Test cases for Project class."""
 
     def test_module_imports(self):
         """Test that the module can be imported."""
@@ -30,6 +32,15 @@ class TestProjectType(unittest.TestCase):
             self.assertTrue(True)
         except ImportError:
             self.fail("Failed to import deda.core.types._project")
+
+    def test_project_creation_entity_api(self):
+        """Project supports Entity API: name, parent, project, path, rootdir."""
+        proj = Project(name='TestProject', parent=None)
+        self.assertEqual(proj.name, 'TestProject')
+        self.assertIsNone(proj.parent)
+        self.assertIs(proj.project, proj)
+        _ = proj.path
+        _ = proj.rootdir
 
 
 if __name__ == '__main__':

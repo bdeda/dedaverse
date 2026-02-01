@@ -15,3 +15,16 @@
 # limitations under the License.
 #
 # ###################################################################################
+"""Collection type for the asset system."""
+
+from ._asset import Asset
+
+__all__ = ['Collection']
+
+
+class Collection(Asset):
+    """Asset that groups other Assets, Sequences, or Shots.
+
+    A Collection organizes assets hierarchically. Project and Sequence are
+    specializations. Inherits the full Entity API.
+    """

@@ -19,9 +19,11 @@
 
 import unittest
 
+from deda.core.types._shot import Shot
+
 
 class TestShot(unittest.TestCase):
-    """Test cases for Shot module."""
+    """Test cases for Shot class."""
 
     def test_module_imports(self):
         """Test that the module can be imported."""
@@ -30,6 +32,14 @@ class TestShot(unittest.TestCase):
             self.assertTrue(True)
         except ImportError:
             self.fail("Failed to import deda.core.types._shot")
+
+    def test_shot_creation_entity_api(self):
+        """Shot supports Entity API: name, parent, project, path."""
+        shot = Shot(name='TestShot', parent=None)
+        self.assertEqual(shot.name, 'TestShot')
+        self.assertIsNone(shot.parent)
+        self.assertIs(shot.project, shot)
+        _ = shot.path
 
 
 if __name__ == '__main__':
