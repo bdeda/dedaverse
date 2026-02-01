@@ -18,6 +18,7 @@
 """Shot type for the asset system."""
 
 from ._collection import Collection
+from ._sequence import Sequence
 
 __all__ = ['Shot']
 
@@ -28,3 +29,8 @@ class Shot(Collection):
     A Shot groups assets and elements for a specific shot. Typically
     contained by a Sequence. Inherits the full Entity API.
     """
+
+    def __init__(self, name: str, parent: Sequence):
+        if not isinstance(parent, Sequence):
+            raise TypeError('Shot parent must be a sequence!')
+        super().__init__(name, parent)
