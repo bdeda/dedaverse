@@ -21,9 +21,6 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, r'C:\Program Files\Wing Pro 10')
-import wingdbstub
-
 from pxr import Usd, UsdUtils
 
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -77,6 +74,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._recent_files = self._load_recent_files()
         
         self.setWindowTitle('Dedaverse')
+        import deda.app as _deda_app
+        icon_path = Path(_deda_app.__file__).resolve().parent / 'icons' / 'star_icon.png'
+        if icon_path.is_file():
+            self.setWindowIcon(QtGui.QIcon(str(icon_path)))
         
         w = QtWidgets.QWidget(parent=self)
         self.setCentralWidget(w)
@@ -318,7 +319,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if stage:
                 self._play_timer.stop()
                 self._viewer.stage = stage
-                self.setWindowTitle(f'Asset Viewer - {Path(file_path).name}')
+                self.setWindowTitle(f'Dedaverse - {Path(file_path).name}')
                 start_frame = int(stage.GetStartTimeCode())
                 end_frame = int(stage.GetEndTimeCode())
                 if end_frame <= start_frame:
