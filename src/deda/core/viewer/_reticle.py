@@ -15,9 +15,4 @@
 # limitations under the License.
 #
 # ###################################################################################
-"""USDView plugins for Dedaverse."""
-
-__all__ = ['CameraReticlePlugin', 'Playbar']
-
-from ._camera_reticle import CameraReticlePlugin
-from ._playbar import Playbar
+"""Reticle overlay functionality for the USD viewer."""

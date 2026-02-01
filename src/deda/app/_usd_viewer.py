@@ -18,10 +18,142 @@
 __all__ = ['UsdViewWidget']
 
 
-from PySide6 import QtWidgets, QtCore
+import logging
+from pathlib import Path
 
-from pxr import Usd
+from PySide6 import QtWidgets, QtCore, QtGui
+
+from pxr import Gf, Usd, Sdf, UsdLux
 from pxr.Usdviewq.stageView import StageView
+from pxr.Usdviewq.common import CameraMaskModes
+
+
+log = logging.getLogger(__name__)
+
+
+def _create_engine_wrapper(engine, view_settings_getter):
+    """Wrap UsdImagingGL.Engine to inject dome light texture from viewSettings."""
+
+    original_set_lighting = engine.SetLightingState
+
+    def wrapped_set_lighting(lights, material, scene_ambient):
+        texture_path = getattr(view_settings_getter(), 'domeLightTexturePath', None)
+        if texture_path and Path(texture_path).exists():
+            for light in lights:
+                if hasattr(light, 'IsDomeLight') and light.IsDomeLight():
+                    light.SetDomeLightTextureFile(Sdf.AssetPath(texture_path))
+                    break
+        return original_set_lighting(lights, material, scene_ambient)
+
+    engine.SetLightingState = wrapped_set_lighting
+    return engine
+
+
+def _collect_prims_with_variant_sets(prim):
+    """Walk up from prim and collect all prims (including prim) that have variant sets."""
+    result = []
+    p = prim
+    while p and p.IsValid():
+        variant_sets = p.GetVariantSets()
+        if variant_sets and variant_sets.GetNames():
+            result.append(p)
+        p = p.GetParent()
+    return result
+
+
+class _StageView(StageView):
+    """StageView that overrides DrawAxis and adds a right-click context menu for variant switching."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__draw_axis = StageView.DrawAxis
+        self._axis_enabled = False
+
+    def DrawAxis(self, viewProjectionMatrix):
+        if self._axis_enabled:
+            self.__draw_axis(viewProjectionMatrix)
+        return
+
+    def contextMenuEvent(self, event):
+        """Show context menu at click point with variant switching for the picked prim."""
+        pos = event.pos()
+        global_pos = self.mapToGlobal(pos)
+
+        if not self._dataModel or not self._dataModel.stage:
+            super().contextMenuEvent(event)
+            return
+
+        try:
+            in_bounds, pick_frustum = self.computePickFrustum(pos.x(), pos.y())
+            if not in_bounds:
+                super().contextMenuEvent(event)
+                return
+
+            pick_results = self.pick(pick_frustum)
+            if not pick_results or len(pick_results) < 3:
+                super().contextMenuEvent(event)
+                return
+
+            selected_prim_path = pick_results[2]
+            if not selected_prim_path or selected_prim_path == Sdf.Path.emptyPath:
+                super().contextMenuEvent(event)
+                return
+
+            stage = self._dataModel.stage
+            prim = stage.GetPrimAtPath(selected_prim_path)
+            if not prim or not prim.IsValid():
+                super().contextMenuEvent(event)
+                return
+
+            prims_with_variants = _collect_prims_with_variant_sets(prim)
+            if not prims_with_variants:
+                super().contextMenuEvent(event)
+                return
+
+            menu = QtWidgets.QMenu(self)
+            for p in prims_with_variants:
+                variant_sets = p.GetVariantSets()
+                for vs_name in variant_sets.GetNames():
+                    vs = variant_sets.GetVariantSet(vs_name)
+                    variant_names = vs.GetVariantNames()
+                    if not variant_names:
+                        continue
+                    submenu = menu.addMenu(f'{p.GetPath()} / {vs_name}')
+                    current = vs.GetVariantSelection()
+                    for vname in variant_names:
+                        action = submenu.addAction(vname)
+                        action.setCheckable(True)
+                        action.setChecked(vname == current)
+                        action.triggered.connect(
+                            (lambda prim_path, vsn, vn: lambda: self._set_variant(
+                                prim_path, vsn, vn
+                            ))(p.GetPath(), vs_name, vname)
+                        )
+            if menu.isEmpty():
+                super().contextMenuEvent(event)
+                return
+            menu.exec(global_pos)
+        except Exception as err:
+            log.warning(f'Context menu pick failed: {err}')
+            super().contextMenuEvent(event)
+
+    def _set_variant(self, prim_path, variant_set_name, variant_name):
+        """Set the variant selection for a prim's variant set."""
+        stage = self._dataModel.stage if self._dataModel else None
+        if not stage:
+            return
+        prim = stage.GetPrimAtPath(prim_path)
+        if not prim or not prim.IsValid():
+            return
+        variant_sets = prim.GetVariantSets()
+        if not variant_sets.HasVariantSet(variant_set_name):
+            return
+        vs = variant_sets.GetVariantSet(variant_set_name)
+        if variant_name not in vs.GetVariantNames():
+            return
+        stage.SetEditTarget(stage.GetSessionLayer())
+        vs.SetVariantSelection(variant_name)
+        self.updateView()
 
 
 class UsdViewWidget(QtWidgets.QWidget):
@@ -30,7 +162,7 @@ class UsdViewWidget(QtWidgets.QWidget):
     def __init__(self, stage=None, parent=None):
         super().__init__(parent=parent)
         
-        self._view = StageView(parent=self)
+        self._view = _StageView(parent=self)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self._view)
@@ -41,8 +173,10 @@ class UsdViewWidget(QtWidgets.QWidget):
         else:
             self.stage = Usd.Stage.CreateInMemory()
 
-        self._view._dataModel.viewSettings.domeLightEnabled = True
-        self._view._dataModel.viewSettings.domeLightTexturesVisible = True    
+        self.viewSettings.domeLightEnabled = True
+        self.viewSettings.domeLightTexturesVisible = True
+        self.viewSettings.ambientLightOnly = True  # Disable default camera/headlamp light
+        self.viewSettings._cameraMaskMode = CameraMaskModes.FULL
 
     @property
     def viewSettings(self):
@@ -54,24 +188,165 @@ class UsdViewWidget(QtWidgets.QWidget):
 
     @stage.setter
     def stage(self, stage):
-        self._view.closeRenderer()
-        self._view._dataModel.stage = None
+        """Set the USD stage for this viewport.
+        
+        Properly cleans up the previous stage and OpenGL resources before
+        setting a new stage to prevent GL_INVALID_OPERATION errors.
+        
+        Args:
+            stage: (Usd.Stage) The USD stage to display, or None to create an empty stage.
+        """
+        # Only cleanup if there's an existing stage
+        if self._view._dataModel.stage is not None:
+            try:
+                # Clear stage first to release USD resources
+                # This ensures OpenGL cleanup happens while context is still valid
+                self._view._dataModel.stage = None
+                # Then close renderer to clean up OpenGL resources
+                self._view.closeRenderer()
+            except Exception as err:
+                log.warning(f'Error during stage cleanup: {err}')
+        
+        # Set updates disabled during stage setup to prevent rendering issues
         self._view.setUpdatesEnabled(False)
         try:
+            # Set the new stage
             self._view._dataModel.stage = stage or Usd.Stage.CreateInMemory()
-            earliest = Usd.TimeCode.EarliestTime() # TODO: set to first frame of the stage time
+            
+            # Configure time code
+            earliest = Usd.TimeCode.EarliestTime()  # TODO: set to first frame of the stage time
             self._view._dataModel.currentFrame = Usd.TimeCode(earliest)
 
+            # Configure view settings
             self.viewSettings.domeLightEnabled = True
-            self.viewSettings.domeLightTexturesVisible = True 
+            self.viewSettings.domeLightTexturesVisible = True
+            self.viewSettings.ambientLightOnly = True  # Disable default camera/headlamp light
 
+            # Update the view
             self.update_view(resetCam=True, forceComputeBBox=True)
+            self._set_clipping_planes_from_stage_bounds()
+        except Exception as err:
+            log.error(f'Error setting stage: {err}')
+            raise
         finally:
             self._view.setUpdatesEnabled(True)
 
-
     def closeEvent(self, event):
+        """Handle widget close event with proper OpenGL cleanup.
+        
+        Ensures that OpenGL resources are cleaned up while the context
+        is still valid to prevent GL_INVALID_OPERATION errors during
+        HgiGLSampler destruction.
+        
+        Args:
+            event: (QCloseEvent) The close event.
+        """
+        if self._view:
+            try:
+                # Then close renderer to clean up OpenGL resources
+                # This must happen while the OpenGL context is still valid
+                self._view.closeRenderer()
+                
+                # Clear stage to release USD resources
+                # This triggers cleanup of USD objects that hold OpenGL references
+                self._view._dataModel.stage = None                
+                
+            except Exception as err:
+                # Log but don't prevent closing - context may already be destroyed
+                log.warning(f'Error during renderer cleanup in closeEvent: {err}')
+        
+        # Call parent closeEvent to ensure proper widget cleanup
+        super().closeEvent(event)
+
+    def set_fixed_aspect_ratio(self, width_ratio, height_ratio):
+        """Set the camera mask aspect ratio for the view, or unlock if both are None.
+        Uses the stage view's camera mask to letterbox/pillarbox the view to the
+        selected aspect ratio without resizing the widget.
+
+        Args:
+            width_ratio: Numerator of aspect ratio (width/height), or None to unlock.
+            height_ratio: Denominator of aspect ratio, or None to unlock.
+        """
+        vs = self.viewSettings
+        if width_ratio is None or height_ratio is None:
+            vs.lockFreeCameraAspect = False
+            vs.cameraMaskMode = CameraMaskModes.NONE
+            return
+        vs.lockFreeCameraAspect = True
+        vs.freeCameraAspect = width_ratio / height_ratio
+        vs.cameraMaskMode = CameraMaskModes.FULL
+        self.update_view(resetCam=False, forceComputeBBox=False)
+
+    def set_dome_light_enabled(self, enabled):
+        """Enable or disable the dome light.
+
+        Args:
+            enabled: Whether the dome light is on.
+        """
+        self.viewSettings.domeLightEnabled = bool(enabled)
         self._view.closeRenderer()
+        self.update_view(resetCam=False, forceComputeBBox=False)
+
+    def set_dome_light_texture(self, texture_path):
+        """Set the dome light environment texture (HDR/EXR) path.
+
+        Args:
+            texture_path: Path to HDR or EXR texture file, or None to clear.
+        """
+        #setattr(
+            #self.viewSettings,
+            #'domeLightTexturePath',
+            #None if texture_path is None else str(texture_path)
+        #)
+        prim = self.stage.GetPrimAtPath('/lights/dome_light')
+        light = None
+        if not prim:
+            self.stage.SetEditTarget(self.stage.GetSessionLayer())
+            light = UsdLux.DomeLight.Define(self.stage, '/lights/dome_light')
+        elif prim.IsA(UsdLux.DomeLight):
+            light = UsdLux.DomeLight(prim)
+        if light:
+            light.OrientToStageUpAxis()
+            light.CreateTextureFileAttr(texture_path)
+        self._view.closeRenderer()
+        self.update_view(resetCam=False, forceComputeBBox=False)
+
+    def _set_clipping_planes_from_stage_bounds(self):
+        """Set camera near/far clipping planes from stage bbox so all geometry is visible when zoomed in."""
+        if not self._view._dataModel.stage:
+            return
+        bbox = self._view._bbox
+        r = bbox.ComputeAlignedRange()
+        if r.IsEmpty():
+            return
+        mn, mx = r.GetMin(), r.GetMax()
+        size = mx - mn
+        diagonal = size.GetLength()
+        if diagonal <= 0:
+            return
+        # Near: very small so zooming in does not clip; scale with scene size for numerical stability
+        near = max(0.001, diagonal / 1e6)
+        # Far: encompass entire scene from any camera angle; use 2.5x diagonal for margin
+        far = max(diagonal * 2.5, 100.0)
+        vs = self.viewSettings
+        vs.freeCameraOverrideNear = near
+        vs.freeCameraOverrideFar = far
+        self.update_view(resetCam=False, forceComputeBBox=False)
+
+    def set_current_frame(self, frame):
+        """Set the stage view's current frame (time code) and refresh the display.
+
+        Before rendering, updates the camera clipping planes to encompass the
+        bounding box of all geometry at the current frame, so animated geometry
+        is not clipped during playback.
+
+        Args:
+            frame: Frame number to display.
+        """
+        if self._view._dataModel.stage:
+            self._view._dataModel.currentFrame = Usd.TimeCode(frame)
+            self.update_view(resetCam=False, forceComputeBBox=True)
+            self._set_clipping_planes_from_stage_bounds()
 
     def update_view(self, resetCam=False, forceComputeBBox=False):
         if self._view._dataModel.stage:

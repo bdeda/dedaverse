@@ -15,9 +15,14 @@
 # limitations under the License.
 #
 # ###################################################################################
-"""USDView plugins for Dedaverse."""
+"""Main entry point for the Dedaverse viewer application."""
 
-__all__ = ['CameraReticlePlugin', 'Playbar']
+from PySide6 import QtWidgets
 
-from ._camera_reticle import CameraReticlePlugin
-from ._playbar import Playbar
+from deda.core.viewer import _window
+
+if __name__ == '__main__':
+    app = QtWidgets.QApplication()
+    w = _window.MainWindow()
+    w.show()
+    app.exec()
