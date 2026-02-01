@@ -225,11 +225,27 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         
         lbl = QtWidgets.QLabel('Root Directory:')
         grid.addWidget(lbl, 1, 0)
+        rootdir_widget = QtWidgets.QWidget()
+        rootdir_hbox = QtWidgets.QHBoxLayout(rootdir_widget)
+        rootdir_hbox.setContentsMargins(0, 0, 0, 0)
         self._project_rootdir_le = QtWidgets.QLineEdit()
+        self._project_rootdir_le.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed
+        )
         if self._config.current_project:
-            self._project_rootdir_le.setText(self._config.current_project.rootdir)        
-        grid.addWidget(self._project_rootdir_le, 1, 1, 1, -1)  
-        # TODO add dir browser button
+            self._project_rootdir_le.setText(self._config.current_project.rootdir)
+        rootdir_hbox.addWidget(self._project_rootdir_le)
+        browse_btn = QtWidgets.QPushButton()
+        style = QtWidgets.QApplication.style()
+        browse_btn.setIcon(style.standardIcon(
+            QtWidgets.QStyle.StandardPixmap.SP_DirOpenIcon
+        ))
+        browse_btn.setFixedSize(self._add_proj_btn.size())
+        browse_btn.setToolTip('Choose project root directory')
+        browse_btn.clicked.connect(self._pick_project_rootdir)
+        rootdir_hbox.addWidget(browse_btn)
+        grid.addWidget(rootdir_widget, 1, 1, 1, -1)
         
         # TODO: check for perforce plugin
         #self._perforce_cb = QtWidgets.QCheckBox('Use Perforce')
@@ -280,6 +296,16 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
             self._project_name_le.blockSignals(val1)
             self._project_rootdir_le.blockSignals(val2)            
         
+    def _pick_project_rootdir(self):
+        """Open a directory browser to choose the project root directory."""
+        start_dir = self._project_rootdir_le.text() or str(Path.home())
+        ret = QtWidgets.QFileDialog.getExistingDirectory(
+            self, 'Choose Project Root Directory', start_dir
+        )
+        if ret:
+            self._project_rootdir_le.setText(ret)
+            self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(True)
+
     def _project_name_changed(self, proj_name):
         # do not trigger _current_project_changed
         orig_val = self._project_cb.blockSignals(True)
@@ -293,22 +319,50 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(True)
         
     def save_and_close(self):
-        # new project?
-        proj_name = self._project_name_le.text()
-        rootdir = self._project_rootdir_le.text()
-        if proj_name not in self._config.projects:
-            # confirm with user that they want to create a new project with the new name
-            ret = QtWidgets.QMessageBox.question(self, 'Create New Project?', 
-                                                 f'Do you want to create a new project named "{proj_name}"?')
+        proj_name = self._project_name_le.text().strip()
+        rootdir = self._project_rootdir_le.text().strip()
+        if not proj_name or not rootdir:
+            log.warning('Project name and root directory are required.')
+            return
+
+        proj = self._project_cb.currentData()
+        if proj is None:
+            proj = self._config.get_project(proj_name)
+        if proj is None:
+            rootdir_resolved = Path(rootdir).resolve().as_posix()
+            for p in self._config.projects:
+                if Path(p.rootdir).resolve().as_posix() == rootdir_resolved:
+                    proj = p
+                    break
+
+        if proj is not None:
+            # Editing existing project: update from form
+            old_name = proj.name
+            proj.name = proj_name
+            proj.rootdir = rootdir
+            proj.cfg_path = (Path(rootdir) / '.dedaverse' / 'project.cfg').as_posix()
+            if old_name != proj_name and old_name in self._config.user.projects:
+                del self._config.user.projects[old_name]
+            self._config.user.add_project(proj)
+        else:
+            # New project
+            ret = QtWidgets.QMessageBox.question(
+                self, 'Create New Project?',
+                f'Do you want to create a new project named "{proj_name}"?'
+            )
             if ret != QtWidgets.QMessageBox.Yes:
                 log.warning('Cancelled creating a new project.')
                 return
             proj = deda.core.ProjectConfig.load(rootdir)
             if not proj:
                 proj = deda.core.ProjectConfig(name=proj_name, rootdir=rootdir)
-        else:
-            proj = self._config.get_project(proj_name)
-        assert proj
+            else:
+                proj.name = proj_name
+                proj.rootdir = rootdir
+            proj.cfg_path = (Path(rootdir) / '.dedaverse' / 'project.cfg').as_posix()
+            self._config.user.add_project(proj)
+
+        proj.save()
         self._config.current_project = proj
         self._config.save()
         self.close()
