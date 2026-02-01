@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 # ###################################################################################
-"""Unit tests for deda.app._usd_viewer module."""
+"""Unit tests for deda.core.viewer._usd_viewer module."""
 
 import unittest
 from PySide6 import QtWidgets
@@ -26,7 +26,7 @@ class TestUsdViewer(unittest.TestCase):
     def test_module_imports(self):
         """Test that the module can be imported."""
         try:
-            import deda.app._usd_viewer
+            import deda.core.viewer._usd_viewer
             self.assertTrue(True)
         except (ImportError, ModuleNotFoundError) as e:
             # Optional dependencies (pxr.Usdviewq, etc.) may not be available

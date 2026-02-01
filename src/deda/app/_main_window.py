@@ -35,7 +35,7 @@ from deda.core import LayeredConfig
 from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
 from ._dialogs import AddItemDialog
-#from ._usd_viewer import UsdViewWidget
+#from deda.core.viewer import UsdViewWidget
 
 
 log = logging.getLogger(__name__)

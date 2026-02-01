@@ -17,7 +17,8 @@
 # ###################################################################################
 """USDView plugins for Dedaverse."""
 
-__all__ = ['CameraReticlePlugin', 'Playbar']
+__all__ = ['CameraReticlePlugin', 'Playbar', 'UsdViewWidget']
 
 from ._camera_reticle import CameraReticlePlugin
 from ._playbar import Playbar
+from ._usd_viewer import UsdViewWidget

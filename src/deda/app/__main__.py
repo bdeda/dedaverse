@@ -32,7 +32,18 @@ def app():
     pass
 
 
-# CLI commands will be added here
+@app.command()
+def viewer():
+    """Launch the MainWindow from deda.core.viewer._window."""
+    from deda.app import Application
+    from deda.core.viewer import _window
+
+    qapp = Application.instance()
+    if qapp is None:
+        qapp = Application()
+    w = _window.MainWindow()
+    w.show()
+    sys.exit(qapp.exec())
 
 
 if __name__ == '__main__':

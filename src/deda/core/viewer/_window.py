@@ -30,7 +30,7 @@ from PySide6 import QtWidgets, QtCore, QtGui
 
 from pxr.Usdviewq.common import CameraMaskModes
 
-from deda.app._usd_viewer import UsdViewWidget
+from ._usd_viewer import UsdViewWidget
 
 from . import _annotation
 from . import _playbar
