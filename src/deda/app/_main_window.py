@@ -383,7 +383,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 # TODO: Project panel also control drag positioning of main window
             panel_obj = Panel(panel, title, parent=self, **settings)
             vbox.addWidget(panel_obj)
-            panel_obj.close_clicked.connect(self._on_panel_closed)
+            if panel != 'Project':
+                panel_obj.close_clicked.connect(
+                    lambda p=panel_obj: self._on_panel_closed(p)
+                )
+                self._apply_view_state_to_panel(panel_obj)
+                self._connect_view_action_for_panel(panel_obj)
         
         #vbox.addWidget(AssetPanel(parent=self))
         #vbox.addWidget(AppPanel(parent=self))
@@ -413,13 +418,47 @@ class MainWindow(QtWidgets.QMainWindow):
                               'You must set up your project before starting work.', 
                               icon=QtWidgets.QSystemTrayIcon.Warning)     
                    
-    def _on_panel_closed(self):
+    def _action_for_panel_name(self, name):
+        """Return the View submenu action for the given panel name."""
+        mapping = {
+            'Assets': self._icon._action_assets,
+            'Apps': self._icon._action_apps,
+            'Services': self._icon._action_services,
+            'Tasks': self._icon._action_tasks,
+        }
+        return mapping.get(name)
+
+    def _apply_view_state_to_panel(self, panel_obj):
+        """Set panel visibility from the View submenu checked state."""
+        action = self._action_for_panel_name(panel_obj.objectName())
+        if action:
+            panel_obj.setVisible(action.isChecked())
+
+    def _connect_view_action_for_panel(self, panel_obj):
+        """Connect the View submenu action to show/hide this panel."""
+        action = self._action_for_panel_name(panel_obj.objectName())
+        if action:
+            action.triggered.connect(
+                lambda checked, p=panel_obj: p.setVisible(checked)
+            )
+
+    def _on_panel_closed(self, panel):
+        """When a panel is closed, uncheck the corresponding View submenu item."""
+        action = self._action_for_panel_name(panel.objectName())
+        if action:
+            action.setChecked(False)
+            self._icon._settings.setValue(
+                f'view/{panel.objectName().lower()}', False
+            )
         widget = self.centralWidget()
-        visible_panels = [p for p in widget.children() if isinstance(p, Panel) and p.isVisible()]
+        visible_panels = [
+            p for p in widget.children()
+            if isinstance(p, Panel) and p.isVisible()
+        ]
         if not visible_panels:
-            return        
-        elif len(visible_panels) == 1:
-            widget.layout().insertStretch(0)     
+            return
+        if len(visible_panels) == 1:
+            widget.layout().insertStretch(0)
     
     def _open_project_settings(self):
         
