@@ -37,7 +37,19 @@ from . import _reticle
 from . import _slate
 
 # Directory containing HDR/EXR environment textures for the dome light
-HDR_IMAGES_DIR = Path(r'D:\hdr_images')
+HDR_IMAGES_DIR = Path(r'F:\hdri')
+
+# QSettings keys for persisted view options
+_SETTINGS_ORG = 'DedaFX'
+_SETTINGS_APP = 'DedaverseViewer'
+_KEY_DOME_LIGHT = 'view/domeLightEnabled'
+_KEY_MASK_OPAQUE = 'view/maskOpaque'
+_KEY_SHOW_HUD = 'view/showHUD'
+_KEY_SHOW_BBOXES = 'view/showBBoxes'
+_KEY_ASPECT_LOCKED = 'view/aspectRatioLocked'
+_KEY_ASPECT_RATIO = 'view/aspectRatio'
+_KEY_ENV_TEXTURE = 'view/environmentTexturePath'
+_KEY_GEOMETRY = 'window/geometry'
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -53,7 +65,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         
-        self.setWindowTitle('Asset Viewer')
+        self._settings = QtCore.QSettings(_SETTINGS_ORG, _SETTINGS_APP)
+        self._env_texture_path = None  # Track selected environment texture for persistence
+        
+        self.setWindowTitle('Dedaverse')
         
         w = QtWidgets.QWidget(parent=self)
         self.setCentralWidget(w)
@@ -65,6 +80,8 @@ class MainWindow(QtWidgets.QMainWindow):
         vbox.addWidget(self._viewer)
         
         self._build_menu_bar()
+        self._restore_view_settings()
+        self._restore_geometry()
 
     def _build_menu_bar(self):
         """Create the main menu bar and menus."""
@@ -87,6 +104,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self._viewer.viewSettings.cameraMaskMode == CameraMaskModes.FULL
         )
         self._mask_opaque_action.triggered.connect(self._on_mask_opaque_toggled)
+        self._show_hud_action = view_menu.addAction('Show &HUD')
+        self._show_hud_action.setCheckable(True)
+        self._show_hud_action.setChecked(self._viewer.viewSettings.showHUD)
+        self._show_hud_action.triggered.connect(self._on_show_hud_toggled)
+        self._show_bboxes_action = view_menu.addAction('Show &BBoxes')
+        self._show_bboxes_action.setCheckable(True)
+        self._show_bboxes_action.setChecked(self._viewer.viewSettings.showBBoxes)
+        self._show_bboxes_action.triggered.connect(self._on_show_bboxes_toggled)
         view_menu.addSeparator()
         self._build_aspect_ratio_submenu(view_menu)
         self._build_environment_texture_submenu(view_menu)
@@ -116,6 +141,82 @@ class MainWindow(QtWidgets.QMainWindow):
         if width_ratio is not None and height_ratio is not None:
             self._mask_opaque_action.setChecked(True)
 
+    def _save_view_settings(self):
+        """Persist view options to QSettings."""
+        s = self._settings
+        s.setValue(_KEY_DOME_LIGHT, self._viewer.viewSettings.domeLightEnabled)
+        s.setValue(
+            _KEY_MASK_OPAQUE,
+            self._viewer.viewSettings.cameraMaskMode == CameraMaskModes.FULL
+        )
+        s.setValue(_KEY_SHOW_HUD, self._viewer.viewSettings.showHUD)
+        s.setValue(_KEY_SHOW_BBOXES, self._viewer.viewSettings.showBBoxes)
+        vs = self._viewer.viewSettings
+        s.setValue(_KEY_ASPECT_LOCKED, vs.lockFreeCameraAspect)
+        s.setValue(
+            _KEY_ASPECT_RATIO,
+            vs.freeCameraAspect if vs.lockFreeCameraAspect else 0.0
+        )
+        s.setValue(_KEY_ENV_TEXTURE, self._env_texture_path or '')
+        s.setValue(_KEY_GEOMETRY, self.saveGeometry())
+
+    def _restore_view_settings(self):
+        """Restore view options from QSettings."""
+        s = self._settings
+        # Dome light
+        if s.contains(_KEY_DOME_LIGHT):
+            enabled = s.value(_KEY_DOME_LIGHT, True, type=bool)
+            self._viewer.set_dome_light_enabled(enabled)
+            self._dome_light_action.setChecked(enabled)
+        # Mask opacity
+        if s.contains(_KEY_MASK_OPAQUE):
+            opaque = s.value(_KEY_MASK_OPAQUE, True, type=bool)
+            self._viewer.viewSettings.cameraMaskMode = (
+                CameraMaskModes.FULL if opaque else CameraMaskModes.PARTIAL
+            )
+            self._mask_opaque_action.setChecked(opaque)
+        # Show HUD
+        if s.contains(_KEY_SHOW_HUD):
+            show = s.value(_KEY_SHOW_HUD, True, type=bool)
+            self._viewer.viewSettings.showHUD = show
+            self._show_hud_action.setChecked(show)
+        # Show BBoxes
+        if s.contains(_KEY_SHOW_BBOXES):
+            show = s.value(_KEY_SHOW_BBOXES, True, type=bool)
+            self._viewer.viewSettings.showBBoxes = show
+            self._show_bboxes_action.setChecked(show)
+        # Aspect ratio (restore after mask opacity so opaque preference is preserved)
+        if s.contains(_KEY_ASPECT_LOCKED) and s.contains(_KEY_ASPECT_RATIO):
+            locked = s.value(_KEY_ASPECT_LOCKED, False, type=bool)
+            ar = s.value(_KEY_ASPECT_RATIO, 0.0, type=float)
+            if locked and ar > 0:
+                vs = self._viewer.viewSettings
+                vs.lockFreeCameraAspect = True
+                vs.freeCameraAspect = ar
+                # Use saved opaque mask preference; if not yet restored, default to FULL
+                opaque = (
+                    s.value(_KEY_MASK_OPAQUE, True, type=bool)
+                    if s.contains(_KEY_MASK_OPAQUE)
+                    else True
+                )
+                vs.cameraMaskMode = (
+                    CameraMaskModes.FULL if opaque else CameraMaskModes.PARTIAL
+                )
+                self._mask_opaque_action.setChecked(opaque)
+                self._viewer.update_view(resetCam=False, forceComputeBBox=False)
+        # Environment texture
+        if s.contains(_KEY_ENV_TEXTURE):
+            path = s.value(_KEY_ENV_TEXTURE, '', type=str)
+            if path and Path(path).exists():
+                self._env_texture_path = path
+                self._viewer.set_dome_light_texture(path)
+
+    def _restore_geometry(self):
+        """Restore window geometry (position and size) from QSettings."""
+        geom = self._settings.value(_KEY_GEOMETRY)
+        if geom:
+            self.restoreGeometry(geom)
+
     def _build_environment_texture_submenu(self, view_menu):
         """Add submenu to select dome light environment texture from D:\\hdr_images."""
         env_menu = view_menu.addMenu('&Environment Texture')
@@ -137,7 +238,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_set_environment_texture(self, texture_path):
         """Set the dome light environment texture."""
-        self._viewer.set_dome_light_texture(str(texture_path) if texture_path is not None else None)
+        self._env_texture_path = str(texture_path) if texture_path else None
+        self._viewer.set_dome_light_texture(self._env_texture_path)
 
     def _on_open_file(self):
         """Open a file dialog and load the selected USD stage."""
@@ -183,7 +285,18 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self._viewer.update_view(resetCam=False, forceComputeBBox=False)
 
+    def _on_show_hud_toggled(self):
+        """Show or hide the HUD overlay (camera, renderer, performance info)."""
+        self._viewer.viewSettings.showHUD = self._show_hud_action.isChecked()
+        self._viewer.update_view(resetCam=False, forceComputeBBox=False)
+
+    def _on_show_bboxes_toggled(self):
+        """Show or hide bounding boxes in the stage view."""
+        self._viewer.viewSettings.showBBoxes = self._show_bboxes_action.isChecked()
+        self._viewer.update_view(resetCam=False, forceComputeBBox=True)
+
     def closeEvent(self, event):
+        self._save_view_settings()
         self._viewer.closeEvent(event)
         super().closeEvent(event)
         

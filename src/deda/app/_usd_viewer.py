@@ -21,9 +21,9 @@ __all__ = ['UsdViewWidget']
 import logging
 from pathlib import Path
 
-from PySide6 import QtWidgets, QtCore
+from PySide6 import QtWidgets, QtCore, QtGui
 
-from pxr import Usd, Sdf
+from pxr import Usd, Sdf, UsdLux
 from pxr.Usdviewq.stageView import StageView
 from pxr.Usdviewq.common import CameraMaskModes
 
@@ -49,18 +49,111 @@ def _create_engine_wrapper(engine, view_settings_getter):
     return engine
 
 
-class _StageViewWithDomeTexture(StageView):
-    """StageView that applies domeLightTexturePath from viewSettings to the dome light."""
+def _collect_prims_with_variant_sets(prim):
+    """Walk up from prim and collect all prims (including prim) that have variant sets."""
+    result = []
+    p = prim
+    while p and p.IsValid():
+        variant_sets = p.GetVariantSets()
+        if variant_sets and variant_sets.GetNames():
+            result.append(p)
+        p = p.GetParent()
+    return result
 
-    def _getRenderer(self):
-        renderer = super()._getRenderer()
-        if renderer and not getattr(renderer, '_dome_texture_wrapper_applied', False):
-            _create_engine_wrapper(
-                renderer,
-                lambda: self._dataModel.viewSettings
-            )
-            renderer._dome_texture_wrapper_applied = True
-        return renderer
+
+class _StageView(StageView):
+    """StageView that overrides DrawAxis and adds a right-click context menu for variant switching."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__draw_axis = StageView.DrawAxis
+        self._axis_enabled = False
+
+    def DrawAxis(self, viewProjectionMatrix):
+        if self._axis_enabled:
+            self.__draw_axis(viewProjectionMatrix)
+        return
+
+    def contextMenuEvent(self, event):
+        """Show context menu at click point with variant switching for the picked prim."""
+        pos = event.pos()
+        global_pos = self.mapToGlobal(pos)
+
+        if not self._dataModel or not self._dataModel.stage:
+            super().contextMenuEvent(event)
+            return
+
+        try:
+            in_bounds, pick_frustum = self.computePickFrustum(pos.x(), pos.y())
+            if not in_bounds:
+                super().contextMenuEvent(event)
+                return
+
+            pick_results = self.pick(pick_frustum)
+            if not pick_results or len(pick_results) < 3:
+                super().contextMenuEvent(event)
+                return
+
+            selected_prim_path = pick_results[2]
+            if not selected_prim_path or selected_prim_path == Sdf.Path.emptyPath:
+                super().contextMenuEvent(event)
+                return
+
+            stage = self._dataModel.stage
+            prim = stage.GetPrimAtPath(selected_prim_path)
+            if not prim or not prim.IsValid():
+                super().contextMenuEvent(event)
+                return
+
+            prims_with_variants = _collect_prims_with_variant_sets(prim)
+            if not prims_with_variants:
+                super().contextMenuEvent(event)
+                return
+
+            menu = QtWidgets.QMenu(self)
+            for p in prims_with_variants:
+                variant_sets = p.GetVariantSets()
+                for vs_name in variant_sets.GetNames():
+                    vs = variant_sets.GetVariantSet(vs_name)
+                    variant_names = vs.GetVariantNames()
+                    if not variant_names:
+                        continue
+                    submenu = menu.addMenu(f'{p.GetPath()} / {vs_name}')
+                    current = vs.GetVariantSelection()
+                    for vname in variant_names:
+                        action = submenu.addAction(vname)
+                        action.setCheckable(True)
+                        action.setChecked(vname == current)
+                        action.triggered.connect(
+                            (lambda prim_path, vsn, vn: lambda: self._set_variant(
+                                prim_path, vsn, vn
+                            ))(p.GetPath(), vs_name, vname)
+                        )
+            if menu.isEmpty():
+                super().contextMenuEvent(event)
+                return
+            menu.exec(global_pos)
+        except Exception as err:
+            log.warning(f'Context menu pick failed: {err}')
+            super().contextMenuEvent(event)
+
+    def _set_variant(self, prim_path, variant_set_name, variant_name):
+        """Set the variant selection for a prim's variant set."""
+        stage = self._dataModel.stage if self._dataModel else None
+        if not stage:
+            return
+        prim = stage.GetPrimAtPath(prim_path)
+        if not prim or not prim.IsValid():
+            return
+        variant_sets = prim.GetVariantSets()
+        if not variant_sets.HasVariantSet(variant_set_name):
+            return
+        vs = variant_sets.GetVariantSet(variant_set_name)
+        if variant_name not in vs.GetVariantNames():
+            return
+        stage.SetEditTarget(stage.GetSessionLayer())
+        vs.SetVariantSelection(variant_name)
+        self.updateView()
 
 
 class UsdViewWidget(QtWidgets.QWidget):
@@ -69,7 +162,7 @@ class UsdViewWidget(QtWidgets.QWidget):
     def __init__(self, stage=None, parent=None):
         super().__init__(parent=parent)
         
-        self._view = _StageViewWithDomeTexture(parent=self)
+        self._view = _StageView(parent=self)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self._view)
@@ -134,7 +227,6 @@ class UsdViewWidget(QtWidgets.QWidget):
             raise
         finally:
             self._view.setUpdatesEnabled(True)
-
 
     def closeEvent(self, event):
         """Handle widget close event with proper OpenGL cleanup.
@@ -203,7 +295,17 @@ class UsdViewWidget(QtWidgets.QWidget):
             #'domeLightTexturePath',
             #None if texture_path is None else str(texture_path)
         #)
-        #self._view.closeRenderer()
+        prim = self.stage.GetPrimAtPath('/lights/dome_light')
+        light = None
+        if not prim:
+            self.stage.SetEditTarget(self.stage.GetSessionLayer())
+            light = UsdLux.DomeLight.Define(self.stage, '/lights/dome_light')
+        elif prim.IsA(UsdLux.DomeLight):
+            light = UsdLux.DomeLight(prim)
+        if light:
+            light.OrientToStageUpAxis()
+            light.CreateTextureFileAttr(texture_path)
+        self._view.closeRenderer()
         self.update_view(resetCam=False, forceComputeBBox=False)
 
     def update_view(self, resetCam=False, forceComputeBBox=False):
