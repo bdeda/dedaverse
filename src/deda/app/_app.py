@@ -31,8 +31,8 @@ try:
     WIN32_AVAILABLE = True
 except ImportError:
     WIN32_AVAILABLE = False
+import ctypes
 import psutil
-# import ctypes  # Commented out: no longer using ctypes.windll
 
 from PySide6 import QtWidgets, QtCore
 
@@ -63,17 +63,15 @@ class Application(QtWidgets.QApplication):
             super().__init__(*args, **kwargs)
         
         self.setStyle('Fusion')
-        
-        # Windows-specific: Set application user model ID for taskbar
-        # Commented out: ctypes.windll usage
-        # if platform.system() == 'Windows':
-        #     try:
-        #         myappid = u'dedafx.dedaverse.0.1.0'
-        #         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-        #     except (AttributeError, OSError) as err:
-        #         # windll may not be available or shell32 may not exist
-        #         log.debug(f'Could not set Windows app user model ID: {err}')
-        
+
+        # Windows-specific: Set application user model ID for taskbar icon grouping
+        if platform.system() == 'Windows':
+            try:
+                myappid = 'dedafx.dedaverse.0.1.0'
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+            except (AttributeError, OSError) as err:
+                log.debug(f'Could not set Windows app user model ID: {err}')
+
         log.debug("Dedaverse main application created.")
 
 
