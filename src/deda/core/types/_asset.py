@@ -81,4 +81,12 @@ class Asset(Entity):
         name = name.strip()
         if not name:
             return False
-        return Tf.IsValidIdentifier(name)    
+        return Tf.IsValidIdentifier(name) 
+    
+    def _from_prim(self, prim):
+        """Instantiate the asset from the given prim in the metadata. 
+        This is used internally from the Collection class."""
+        if prim.GetTypeName() == 'AssetInfo':
+            raise ValueError
+        # if prim has children that are Asset types, return a Collection
+        

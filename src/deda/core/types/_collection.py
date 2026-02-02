@@ -28,3 +28,7 @@ class Collection(Asset):
     A Collection organizes assets hierarchically. Project and Sequence are
     specializations. Inherits the full Entity API.
     """
+    
+    def iter_assets(self):
+        for prim in self.project.stage.TraverseAll():
+            yield Asset._from_prim(prim)

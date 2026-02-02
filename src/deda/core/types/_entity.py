@@ -46,6 +46,12 @@ class Entity:
         self._name = name
         self._parent = parent
         
+    
+        
+    @property 
+    def metadata(self):
+        return # TODO
+    
     @property
     def metadata_path(self) -> Path | None:
         """The dedaverse metadata path relative to the project rootdir.

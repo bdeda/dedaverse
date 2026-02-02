@@ -30,6 +30,26 @@ class Project(Collection):
     A Project is the top-level Collection that contains all assets, sequences,
     and shots. Has a rootdir that points to the project directory on disk.
     """
+    
+    @property
+    def metadata_dir(self) -> Path | None:
+        """The dedaverse metadata dir relative to the project rootdir.
+
+        Returns:
+            Path to the metadata file, or None if not yet resolved.
+        """
+        # Project metadata comes from .dedaverse directory under the project rootdir
+        return self.rootdir / '.dedaverse'      
+    
+    @property
+    def metadata_path(self) -> Path | None:
+        """The dedaverse metadata path relative to the project rootdir.
+
+        Returns:
+            Path to the metadata file, or None if not yet resolved.
+        """
+        # Project metadata comes from .dedaverse directory under the project rootdir
+        return self.metadata_dir / 'project.usda'     
 
     @property
     def rootdir(self) -> Path | str:

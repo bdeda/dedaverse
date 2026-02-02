@@ -16,9 +16,9 @@
 #
 # ###################################################################################
 from ._plugin import *
-from ._project import *
 from ._config import *
 from ._types import *
+from .types import *
 
 
 def initialize():
