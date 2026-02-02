@@ -152,6 +152,7 @@ class Panel(QtWidgets.QFrame):
                  parent=None, **kwargs):
         super().__init__(parent=parent)
         
+        self._visibility = True
         self.setObjectName(type_name)
         self._type_name = type_name
         if type_name.endswith('s'):
@@ -183,7 +184,16 @@ class Panel(QtWidgets.QFrame):
             self._on_minimized(header.minimized)
             
             self._scroll_area.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-            self._scroll_area.customContextMenuRequested.connect(self._show_context_menu)        
+            self._scroll_area.customContextMenuRequested.connect(self._show_context_menu)   
+            
+    @property
+    def visibility(self):
+        return self._visibility
+    
+    @visibility.setter
+    def visibility(self, value: bool):
+        self._visibility = bool(value)
+        self.setVisible(self._visibility)
             
     def __repr__(self):
         return f'<{self.__class__.__name__} {self.objectName()}>'
@@ -381,9 +391,11 @@ class MainWindow(QtWidgets.QMainWindow):
             # TODO: load the plugin panel info, etc...
             pass
         
+        self._panel_stack_has_top_stretch = False
         if tuple(panels.keys()) == ('Project',):
-            vbox.addStretch() # only a project with no other plugins loaded        
-        
+            vbox.addStretch()
+            self._panel_stack_has_top_stretch = True
+
         for panel, settings in panels.items():
             title = panel
             if panel == 'Project':
@@ -407,6 +419,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 panel_obj.minimized_changed.connect(self._on_panel_minimized_changed)
                 self._apply_view_state_to_panel(panel_obj)
                 self._connect_view_action_for_panel(panel_obj)
+
+        #if tuple(panels.keys()) != ('Project',):
+        self._update_panel_stack_layout()
         
         #vbox.addWidget(AssetPanel(parent=self))
         #vbox.addWidget(AppPanel(parent=self))
@@ -456,19 +471,26 @@ class MainWindow(QtWidgets.QMainWindow):
         """Set panel visibility from the View submenu checked state."""
         action = self._action_for_panel_name(panel_obj.objectName())
         if action:
-            panel_obj.setVisible(action.isChecked())
+            panel_obj.visibility = action.isChecked()
 
     def _connect_view_action_for_panel(self, panel_obj):
         """Connect the View submenu action to show/hide this panel."""
         action = self._action_for_panel_name(panel_obj.objectName())
         if action:
             action.triggered.connect(
-                lambda checked, p=panel_obj: p.setVisible(checked)
+                lambda checked, p=panel_obj: self._on_view_toggled_for_panel(checked, p)
             )
 
-    def _on_panel_minimized_changed(self, panel_name, minimized):
-        """Save the panel minimized state to QSettings."""
-        self._settings.setValue(f'view/{panel_name.lower()}_minimized', minimized)
+    def _all_non_project_panels_hidden(self):
+        """Return True if Assets, Apps, Services, and Tasks are all hidden."""
+        vbox = self.centralWidget().layout()
+        for i in range(vbox.count()):
+            item = vbox.itemAt(i)
+            w = item.widget() if item else None
+            if w and isinstance(w, Panel) and w.objectName() in ('Assets', 'Apps', 'Services', 'Tasks'):
+                if w.visibility:
+                    return False
+        return True
 
     def _on_panel_closed(self, panel):
         """When a panel is closed, uncheck the corresponding View submenu item."""
@@ -478,15 +500,32 @@ class MainWindow(QtWidgets.QMainWindow):
             self._icon._settings.setValue(
                 f'view/{panel.objectName().lower()}', False
             )
-        widget = self.centralWidget()
-        visible_panels = [
-            p for p in widget.children()
-            if isinstance(p, Panel) and p.isVisible()
-        ]
-        if not visible_panels:
+        #QtCore.QTimer.singleShot(0, self._update_panel_stack_layout)
+        self._update_panel_stack_layout()
+
+    def _on_panel_minimized_changed(self, panel_name, minimized):
+        """Save the panel minimized state to QSettings."""
+        self._settings.setValue(f'view/{panel_name.lower()}_minimized', minimized)
+
+    def _on_view_toggled_for_panel(self, checked, panel_obj):
+        """Handle View submenu toggle: show/hide panel and update layout."""
+        panel_obj.visibility = checked
+        self._update_panel_stack_layout()
+
+    def _update_panel_stack_layout(self):
+        """When all non-Project panels are hidden, add top stretch to pin Project at bottom."""
+        vbox = self.centralWidget().layout()
+        if vbox is None:
             return
-        if len(visible_panels) == 1:
-            widget.layout().insertStretch(0)
+        need_stretch = self._all_non_project_panels_hidden()
+        if need_stretch and not self._panel_stack_has_top_stretch:
+            vbox.insertStretch(0, 1)
+            self._panel_stack_has_top_stretch = True
+        elif not need_stretch and self._panel_stack_has_top_stretch:
+            item = vbox.takeAt(0)
+            if item:
+                del item
+            self._panel_stack_has_top_stretch = False
             
     def _on_asset_created(self, asset_info):
         """Handle the creation of the asset in the asset library."""
