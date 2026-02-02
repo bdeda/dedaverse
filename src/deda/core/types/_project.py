@@ -31,6 +31,14 @@ class Project(Collection):
     and shots. Has a rootdir that points to the project directory on disk.
     """
     
+    def __init__(self, name, rootdir):
+        super().__init__(name, None)
+        self._rootdir = rootdir
+        
+    @property
+    def rootdir(self):
+        return self._rootdir
+    
     @property
     def metadata_dir(self) -> Path | None:
         """The dedaverse metadata dir relative to the project rootdir.
@@ -59,3 +67,8 @@ class Project(Collection):
             Path or string to the project root. TODO: load from project cfg.
         """
         return Path('F:/dedaverse')
+    
+    @classmethod
+    def create(cls, name, rootdir):
+        """Create the usda file for the project."""
+        # TODO

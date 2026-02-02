@@ -172,7 +172,7 @@ class StartProjectDialog(QtWidgets.QDialog):
 
 class ProjectSettingsDialog(QtWidgets.QDialog):
     
-    project_changed = QtCore.Signal()
+    project_changed = QtCore.Signal(object)
     
     def __init__(self, config, parent=None):
         super().__init__(parent=parent)
@@ -366,7 +366,7 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         self._config.current_project = proj
         self._config.save()
         self.close()
-        self.project_changed.emit()
+        self.project_changed.emit(proj)
         
         
         

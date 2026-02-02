@@ -15,7 +15,18 @@
 # limitations under the License.
 #
 # ###################################################################################
-"""Asset type for the asset system."""
+"""Asset type for the asset system.
+
+Assets are backed by a usda file under the project root .dataverse directory.
+That directory follows the form:
+    <project_rootdir>/.dedaverse/project.cfg  -- config data for the project that exposes shared configureation
+    <project_rootdir>/.dedaverse/project.usda -- metadata about the Project, description, and children assets
+        -- contains sublayers for each top-level asset or collection
+        -- default prim with project metadata
+    <project_rootdir>/.dedaverse/collection.usda -- top level collection
+    
+    
+"""
 
 from pathlib import Path
 
