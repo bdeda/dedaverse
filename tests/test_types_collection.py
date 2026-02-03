@@ -19,17 +19,23 @@
 
 import unittest
 
+from deda.core.types._collection import Collection
+from deda.core.types._project import Project
+
 
 class TestCollection(unittest.TestCase):
     """Test cases for Collection module."""
 
-    def test_module_imports(self):
-        """Test that the module can be imported."""
-        try:
-            import deda.core.types._collection
-            self.assertTrue(True)
-        except ImportError:
-            self.fail("Failed to import deda.core.types._collection")
+    def test_collection_creation_requires_parent(self):
+        """Test that Collection requires a non-None parent."""
+        project = Project(name="TestProject")
+        collection = Collection(name="TestCollection", parent=project)
+        self.assertEqual(collection._parent, project)
+
+    def test_collection_parent_none_raises(self):
+        """Test that Collection cannot be created without a parent."""
+        with self.assertRaises(ValueError):
+            Collection(name="TestCollection", parent=None)
 
 
 if __name__ == '__main__':

@@ -15,3 +15,19 @@
 # limitations under the License.
 #
 # ###################################################################################
+
+"""Shot asset type."""
+
+__all__ = ["Shot"]
+
+from ._asset import Asset
+from ._sequence import Sequence
+
+
+class Shot(Asset):
+    """Shot asset that must belong to a sequence."""
+
+    def __init__(self, name, parent):
+        if not isinstance(parent, Sequence):
+            raise ValueError("Shot parent must be a Sequence.")
+        super().__init__(name, parent)
