@@ -20,6 +20,7 @@
 from pathlib import Path
 
 from ._collection import Collection
+from ._entity import Entity
 
 __all__ = ['Project']
 
@@ -31,11 +32,11 @@ class Project(Collection):
     and shots. Has a rootdir that points to the project directory on disk.
     """
     
-    def __init__(self, name, rootdir):
+    def __init__(self, name, rootdir, parent=None):
         if parent is not None:
             raise ValueError("Project parent must be None.")
-        super().__init__(name, None)
-        self._rootdir = rootdir
+        Entity.__init__(self, name, None)
+        self._rootdir = Path(rootdir) if isinstance(rootdir, str) else rootdir
         
     @property
     def rootdir(self):
@@ -61,15 +62,6 @@ class Project(Collection):
         # Project metadata comes from .dedaverse directory under the project rootdir
         return self.metadata_dir / 'project.usda'     
 
-    @property
-    def rootdir(self) -> Path | str:
-        """Project root directory on the file system.
-
-        Returns:
-            Path or string to the project root. TODO: load from project cfg.
-        """
-        return Path('F:/dedaverse')
-    
     @classmethod
     def create(cls, name, rootdir):
         """Create the usda file for the project."""

@@ -18,6 +18,7 @@
 """Unit tests for deda.core.types._sequence module."""
 
 import unittest
+from pathlib import Path
 
 from deda.core.types._project import Project
 from deda.core.types._sequence import Sequence
@@ -28,7 +29,7 @@ class TestSequence(unittest.TestCase):
 
     def test_sequence_creation_requires_parent(self):
         """Test that Sequence requires a non-None parent."""
-        project = Project(name="TestProject")
+        project = Project(name="TestProject", rootdir=Path("test_root"))
         sequence = Sequence(name="TestSequence", parent=project)
         self.assertEqual(sequence._parent, project)
 
@@ -39,10 +40,11 @@ class TestSequence(unittest.TestCase):
 
     def test_sequence_creation_entity_api(self):
         """Sequence supports Entity API: name, parent, project, path."""
-        seq = Sequence(name='TestSequence', parent=None)
+        project = Project(name="TestProject", rootdir=Path("test_root"))
+        seq = Sequence(name='TestSequence', parent=project)
         self.assertEqual(seq.name, 'TestSequence')
-        self.assertIsNone(seq.parent)
-        self.assertIs(seq.project, seq)
+        self.assertIs(seq.parent, project)
+        self.assertIs(seq.project, project)
         _ = seq.path
 
 

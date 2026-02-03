@@ -18,6 +18,7 @@
 """Unit tests for deda.core.types._shot module."""
 
 import unittest
+from pathlib import Path
 
 from deda.core.types._project import Project
 from deda.core.types._sequence import Sequence
@@ -29,7 +30,7 @@ class TestShot(unittest.TestCase):
 
     def test_shot_parent_is_sequence(self):
         """Test that Shot requires a Sequence parent."""
-        project = Project(name="TestProject")
+        project = Project(name="TestProject", rootdir=Path("test_root"))
         sequence = Sequence(name="TestSequence", parent=project)
         shot = Shot(name="TestShot", parent=sequence)
         self.assertEqual(shot._parent, sequence)
@@ -41,16 +42,18 @@ class TestShot(unittest.TestCase):
 
     def test_shot_parent_non_sequence_raises(self):
         """Test that Shot parent must be a Sequence."""
-        project = Project(name="TestProject")
+        project = Project(name="TestProject", rootdir=Path("test_root"))
         with self.assertRaises(ValueError):
             Shot(name="TestShot", parent=project)
 
     def test_shot_creation_entity_api(self):
         """Shot supports Entity API: name, parent, project, path."""
-        shot = Shot(name='TestShot', parent=None)
+        project = Project(name="TestProject", rootdir=Path("test_root"))
+        sequence = Sequence(name="TestSequence", parent=project)
+        shot = Shot(name='TestShot', parent=sequence)
         self.assertEqual(shot.name, 'TestShot')
-        self.assertIsNone(shot.parent)
-        self.assertIs(shot.project, shot)
+        self.assertIs(shot.parent, sequence)
+        self.assertIs(shot.project, project)
         _ = shot.path
 
 

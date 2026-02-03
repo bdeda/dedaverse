@@ -31,6 +31,8 @@ class Shot(Collection):
     """
 
     def __init__(self, name: str, parent: Sequence):
+        if parent is None:
+            raise ValueError('Shot parent cannot be None.')
         if not isinstance(parent, Sequence):
-            raise TypeError('Shot parent must be a sequence!')
+            raise ValueError('Shot parent must be a Sequence.')
         super().__init__(name, parent)
