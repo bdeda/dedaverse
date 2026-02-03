@@ -27,6 +27,7 @@ from pxr import Gf, Usd, Sdf, UsdLux
 from pxr.Usdviewq.stageView import StageView
 from pxr.Usdviewq.common import CameraMaskModes
 
+from ._annotation import AnnotationGlOverlay
 from ._reticle import CameraReticleGlOverlay
 from ._slate import SlateTextGlOverlay
 
@@ -73,8 +74,13 @@ class _StageView(StageView):
         super().__init__(*args, **kwargs)
         self.__draw_axis = StageView.DrawAxis
         self._axis_enabled = False
+        self._annotation_overlay = AnnotationGlOverlay()
         self._reticle_overlay = CameraReticleGlOverlay()
         self._slate_overlay = SlateTextGlOverlay()
+
+    @property
+    def annotation_overlay(self) -> AnnotationGlOverlay:
+        return self._annotation_overlay
 
     @property
     def reticle_overlay(self) -> CameraReticleGlOverlay:
@@ -94,6 +100,8 @@ class _StageView(StageView):
             StageView.paintGL(self)
         else:
             super().paintGL()
+        if self._annotation_overlay and self._annotation_overlay.enabled:
+            self._annotation_overlay.draw_from_stage_view(self)
         if self._reticle_overlay and self._reticle_overlay.enabled:
             self._reticle_overlay.draw_from_stage_view(self)
         if self._slate_overlay and self._slate_overlay.enabled:
