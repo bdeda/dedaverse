@@ -21,18 +21,22 @@ import unittest
 
 from deda.core.types._asset import Asset
 from deda.core.types._entity import Entity
+from deda.core.types._project import Project
 
 
 class TestAsset(unittest.TestCase):
     """Test cases for Asset class."""
 
-    def test_module_imports(self):
-        """Test that the module can be imported."""
-        try:
-            import deda.core.types._asset
-            self.assertTrue(True)
-        except ImportError:
-            self.fail("Failed to import deda.core.types._asset")
+    def test_asset_creation_requires_parent(self):
+        """Test that Asset requires a non-None parent."""
+        project = Project(name="TestProject")
+        asset = Asset(name="TestAsset", parent=project)
+        self.assertEqual(asset._parent, project)
+
+    def test_asset_parent_none_raises(self):
+        """Test that Asset cannot be created without a parent."""
+        with self.assertRaises(ValueError):
+            Asset(name="TestAsset", parent=None)
 
     def test_asset_creation_entity_api(self):
         """Asset supports Entity API: name, parent, project, path."""

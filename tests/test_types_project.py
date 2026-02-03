@@ -25,13 +25,15 @@ from deda.core.types._project import Project
 class TestProject(unittest.TestCase):
     """Test cases for Project class."""
 
-    def test_module_imports(self):
-        """Test that the module can be imported."""
-        try:
-            import deda.core.types._project
-            self.assertTrue(True)
-        except ImportError:
-            self.fail("Failed to import deda.core.types._project")
+    def test_project_parent_is_none(self):
+        """Test that Project parent is always None."""
+        project = Project(name="TestProject")
+        self.assertIsNone(project._parent)
+
+    def test_project_parent_non_none_raises(self):
+        """Test that Project cannot be created with a parent."""
+        with self.assertRaises(ValueError):
+            Project(name="TestProject", parent=object())
 
     def test_project_creation_entity_api(self):
         """Project supports Entity API: name, parent, project, path, rootdir."""

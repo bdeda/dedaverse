@@ -44,6 +44,11 @@ class Asset(Entity):
     Collections. Inherits the full Entity API.
     """
     
+    def __init__(self, name, parent):
+        if parent is None:
+            raise ValueError("Asset parent cannot be None.")
+        super().__init__(name, parent)
+    
     def children(self):
         # Only collections can have children assets.
         return None
@@ -100,4 +105,4 @@ class Asset(Entity):
         if prim.GetTypeName() == 'AssetInfo':
             raise ValueError
         # if prim has children that are Asset types, return a Collection
-        
+   

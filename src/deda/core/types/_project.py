@@ -32,6 +32,8 @@ class Project(Collection):
     """
     
     def __init__(self, name, rootdir):
+        if parent is not None:
+            raise ValueError("Project parent must be None.")
         super().__init__(name, None)
         self._rootdir = rootdir
         
@@ -72,3 +74,4 @@ class Project(Collection):
     def create(cls, name, rootdir):
         """Create the usda file for the project."""
         # TODO
+

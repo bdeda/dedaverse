@@ -19,19 +19,31 @@
 
 import unittest
 
+from deda.core.types._project import Project
+from deda.core.types._sequence import Sequence
 from deda.core.types._shot import Shot
 
 
 class TestShot(unittest.TestCase):
     """Test cases for Shot class."""
 
-    def test_module_imports(self):
-        """Test that the module can be imported."""
-        try:
-            import deda.core.types._shot
-            self.assertTrue(True)
-        except ImportError:
-            self.fail("Failed to import deda.core.types._shot")
+    def test_shot_parent_is_sequence(self):
+        """Test that Shot requires a Sequence parent."""
+        project = Project(name="TestProject")
+        sequence = Sequence(name="TestSequence", parent=project)
+        shot = Shot(name="TestShot", parent=sequence)
+        self.assertEqual(shot._parent, sequence)
+
+    def test_shot_parent_none_raises(self):
+        """Test that Shot cannot be created without a parent."""
+        with self.assertRaises(ValueError):
+            Shot(name="TestShot", parent=None)
+
+    def test_shot_parent_non_sequence_raises(self):
+        """Test that Shot parent must be a Sequence."""
+        project = Project(name="TestProject")
+        with self.assertRaises(ValueError):
+            Shot(name="TestShot", parent=project)
 
     def test_shot_creation_entity_api(self):
         """Shot supports Entity API: name, parent, project, path."""

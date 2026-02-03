@@ -28,3 +28,6 @@ class Sequence(Collection):
     A Sequence represents a logical grouping (e.g. a film sequence or
     episode) and typically contains Shots. Inherits the full Entity API.
     """
+
+    def __init__(self, name, parent):
+        super().__init__(name, parent)
