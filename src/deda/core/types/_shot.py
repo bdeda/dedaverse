@@ -15,19 +15,24 @@
 # limitations under the License.
 #
 # ###################################################################################
+"""Shot type for the asset system."""
 
-"""Shot asset type."""
-
-__all__ = ["Shot"]
-
-from ._asset import Asset
+from ._collection import Collection
 from ._sequence import Sequence
 
+__all__ = ['Shot']
 
-class Shot(Asset):
-    """Shot asset that must belong to a sequence."""
 
-    def __init__(self, name, parent):
+class Shot(Collection):
+    """Collection representing a single shot within a sequence.
+
+    A Shot groups assets and elements for a specific shot. Typically
+    contained by a Sequence. Inherits the full Entity API.
+    """
+
+    def __init__(self, name: str, parent: Sequence):
+        if parent is None:
+            raise ValueError('Shot parent cannot be None.')
         if not isinstance(parent, Sequence):
-            raise ValueError("Shot parent must be a Sequence.")
+            raise ValueError('Shot parent must be a Sequence.')
         super().__init__(name, parent)

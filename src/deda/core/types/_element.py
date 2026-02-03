@@ -15,9 +15,32 @@
 # limitations under the License.
 #
 # ###################################################################################
+"""Element type for the asset system."""
+
+from pathlib import Path
 
 from ._entity import Entity
 
+__all__ = ['Element']
+
 
 class Element(Entity):
-    pass
+    """Leaf entity representing a single asset element (e.g. model, texture).
+
+    An Element has no children. It inherits the full Entity API including
+    name, parent, project, path, and from_path().
+    """
+    
+    @property 
+    def metadata(self):
+        return # TODO
+    
+    @property
+    def metadata_path(self) -> Path | None:
+        """The dedaverse metadata path relative to the project rootdir.
+
+        Returns:
+            Path to the metadata file, or None if not yet resolved.
+        """
+        # Element metadata comes from the depot
+        return None    

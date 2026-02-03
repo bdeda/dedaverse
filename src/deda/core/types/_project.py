@@ -15,18 +15,55 @@
 # limitations under the License.
 #
 # ###################################################################################
+"""Project type for the asset system."""
 
-"""Project type definition."""
+from pathlib import Path
 
-__all__ = ["Project"]
-
+from ._collection import Collection
 from ._entity import Entity
 
+__all__ = ['Project']
 
-class Project(Entity):
-    """Project is the root asset and has no parent."""
 
-    def __init__(self, name, parent=None):
+class Project(Collection):
+    """Root entity representing a Dedaverse project.
+
+    A Project is the top-level Collection that contains all assets, sequences,
+    and shots. Has a rootdir that points to the project directory on disk.
+    """
+    
+    def __init__(self, name, rootdir, parent=None):
         if parent is not None:
             raise ValueError("Project parent must be None.")
-        super().__init__(name, None)
+        Entity.__init__(self, name, None)
+        self._rootdir = Path(rootdir) if isinstance(rootdir, str) else rootdir
+        
+    @property
+    def rootdir(self):
+        return self._rootdir
+    
+    @property
+    def metadata_dir(self) -> Path | None:
+        """The dedaverse metadata dir relative to the project rootdir.
+
+        Returns:
+            Path to the metadata file, or None if not yet resolved.
+        """
+        # Project metadata comes from .dedaverse directory under the project rootdir
+        return self.rootdir / '.dedaverse'      
+    
+    @property
+    def metadata_path(self) -> Path | None:
+        """The dedaverse metadata path relative to the project rootdir.
+
+        Returns:
+            Path to the metadata file, or None if not yet resolved.
+        """
+        # Project metadata comes from .dedaverse directory under the project rootdir
+        return self.metadata_dir / 'project.usda'     
+
+    @classmethod
+    def create(cls, name, rootdir):
+        """Create the usda file for the project."""
+        # TODO
+

@@ -1,4 +1,3 @@
-
 # ###################################################################################
 #
 # Copyright 2025 Ben Deda
@@ -16,27 +15,103 @@
 # limitations under the License.
 #
 # ###################################################################################
+"""Entity types for the asset system.
 
-class Entity(object):
-    """Base type for all types."""
-    
-    def __init__(self, name, parent):
-        super().__init__()
-        
+Entity is the base class for all asset system types (Element, Asset, etc.).
+Each entity is backed by a USD file where the default prim is the location
+from which metadata is serialized.
+"""
+
+from pathlib import Path
+
+from ._asset_id import AssetID
+
+__all__ = ['Entity']
+
+
+class Entity:
+    """Base class for all asset system types (Element, Asset, etc.).
+
+    Provides common attributes: name, parent, project, path, and metadata_path.
+    Subclasses must override from_path() to implement type-specific path parsing.
+    """
+
+    def __init__(self, name: str, parent: 'Entity | None') -> None:
+        """Initialize the entity.
+
+        Args:
+            name: Display name of the entity.
+            parent: Parent entity, or None if this is a root entity.
+        """
         self._name = name
         self._parent = parent
         
+    
         
-    @classmethod
-    def from_path(cls, path):
-        """Get the entity of a certain type from the given path. It the path is not 
-        something that represents a given type, return None.
-        
-        Args:
-            path: (str) The file path string.
-            
+    @property 
+    def metadata(self):
+        return # TODO
+    
+    @property
+    def metadata_path(self) -> Path | None:
+        """The dedaverse metadata path relative to the project rootdir.
+
         Returns:
-            Entity subclass instance or None.
-        
+            Path to the metadata file, or None if not yet resolved.
+        """
+        return None
+
+    @property
+    def name(self) -> str:
+        """Display name of the entity."""
+        return self._name
+
+    @property
+    def parent(self) -> 'Entity | None':
+        """Parent entity, or None if this is a root entity."""
+        return self._parent
+
+    @property
+    def path(self) -> Path:
+        """File system path for this entity.
+
+        For the project root, returns the project rootdir. For children,
+        returns the path relative to the project (implementation pending).
+
+        Returns:
+            Path to the entity on disk.
+        """
+        proj = self.project
+        if self is proj and hasattr(proj, 'rootdir'):
+            rootdir = proj.rootdir
+            return Path(rootdir) if isinstance(rootdir, str) else rootdir
+        return Path()
+
+    @property
+    def project(self) -> 'Entity':
+        """The root (project) entity, found by walking up the parent chain."""
+        item: Entity | None = self
+        while item is not None:
+            if item.parent is None:
+                return item
+            item = item.parent
+        return self  
+
+    @classmethod
+    def from_path(cls, path: str) -> 'Entity | None':
+        """Create an entity instance from a file path.
+
+        If the path does not represent a valid entity of this type, returns None.
+        Subclasses must override to implement type-specific path parsing.
+
+        Args:
+            path: File path string (e.g., USD file path).
+
+        Returns:
+            Instance of the entity subclass, or None if the path is invalid.
+
+        Raises:
+            NotImplementedError: When called on the base Entity class.
+                Subclasses must override this method.
         """
         raise NotImplementedError

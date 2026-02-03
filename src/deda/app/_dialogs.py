@@ -97,6 +97,15 @@ class AddItemDialog(QtWidgets.QDialog):
         elif type_name == 'Task':
             items = ['Work', 'Review', 'Notify']        
         self._types_cb.addItems(items)
+
+        # Restore last selected type from settings
+        self._settings = QtCore.QSettings('DedaFX', 'Dedaverse')
+        last_type = self._settings.value(f'AddItemDialog/{type_name}/lastType', '', type=str)
+        idx = self._types_cb.findText(last_type)
+        if idx >= 0:
+            self._types_cb.setCurrentIndex(idx)
+        self._types_cb.currentTextChanged.connect(self._on_type_changed)
+
         if type_name != 'App':
             grid.addWidget(self._types_cb, 1, 3, -1, 1)        
         else:
@@ -117,6 +126,10 @@ class AddItemDialog(QtWidgets.QDialog):
         self._btns.accepted.connect(self._create_item)
         self._btns.rejected.connect(self.close)
         
+    def _on_type_changed(self, text: str) -> None:
+        """Persist the selected type for this dialog category."""
+        self._settings.setValue(f'AddItemDialog/{self._type_name}/lastType', text)
+
     def _create_item(self):
         item = {
             'name': self._name_le.text().strip(),

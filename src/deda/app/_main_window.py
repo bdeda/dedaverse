@@ -21,6 +21,14 @@ MainWindow class definition, used for all Dedaverse tools.
 
 __all__ = ["MainWindow", "get_top_window", "get_main_menu"]
 
+import sys
+try:    
+    sys.path.insert(0, r'')
+    import wingdbstub # Do not remove this, agent!
+except ImportError:
+    pass
+finally:
+    sys.path = sys.path[1:]
 import os
 import logging
 import json
@@ -30,7 +38,7 @@ from pathlib import Path
 
 from PySide6 import QtWidgets, QtCore, QtGui
 
-from deda.core import LayeredConfig
+from deda.core import LayeredConfig, Project
 
 from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
@@ -61,7 +69,7 @@ class PanelHeader(QtWidgets.QWidget):
                  parent=None):
         super().__init__(parent=parent)
         
-        self._minimized = False
+        self._minimized = bool(minimized)
         self._settings_callback = settings_callback
         self._close_callback = close_callback
         
@@ -97,7 +105,7 @@ class PanelHeader(QtWidgets.QWidget):
         gear_btn.clicked.connect(self._on_settings_clicked)
         
         if show_minmax:
-            self._minmax_btn = QtWidgets.QPushButton('__')
+            self._minmax_btn = QtWidgets.QPushButton('[]' if self._minimized else '__')
             self._minmax_btn.setFlat(True)
             self._minmax_btn.setFixedSize(metrics.height(), metrics.height())
             hbox.addWidget(self._minmax_btn)
@@ -135,6 +143,8 @@ class Panel(QtWidgets.QFrame):
     
     close_clicked = QtCore.Signal()
     add_item = QtCore.Signal(str)
+    item_created = QtCore.Signal(object)
+    minimized_changed = QtCore.Signal(str, bool)
     
     def __init__(self, type_name, name, 
                  view=None, # instance of the view to put into the panel
@@ -142,6 +152,7 @@ class Panel(QtWidgets.QFrame):
                  parent=None, **kwargs):
         super().__init__(parent=parent)
         
+        self._visibility = True
         self.setObjectName(type_name)
         self._type_name = type_name
         if type_name.endswith('s'):
@@ -170,9 +181,19 @@ class Panel(QtWidgets.QFrame):
             #self._scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)        
             vbox.addWidget(self._scroll_area)
             header.minmax_clicked.connect(self._on_minimized)
+            self._on_minimized(header.minimized)
             
             self._scroll_area.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-            self._scroll_area.customContextMenuRequested.connect(self._show_context_menu)        
+            self._scroll_area.customContextMenuRequested.connect(self._show_context_menu)   
+            
+    @property
+    def visibility(self):
+        return self._visibility
+    
+    @visibility.setter
+    def visibility(self, value: bool):
+        self._visibility = bool(value)
+        self.setVisible(self._visibility)
             
     def __repr__(self):
         return f'<{self.__class__.__name__} {self.objectName()}>'
@@ -184,7 +205,7 @@ class Panel(QtWidgets.QFrame):
     def _add_item(self):
         self.add_item.emit(self._type_name)
         dlg = AddItemDialog(self._type_name, parent=self._scroll_area)
-        dlg.item_created.connect(self._on_item_created)
+        dlg.item_created.connect(self.item_created.emit) # propogate signal
         if self._scroll_area:
             rect = self._scroll_area.geometry()
             dlg_rect = dlg.geometry()
@@ -192,16 +213,10 @@ class Panel(QtWidgets.QFrame):
                                (rect.height()/2) - (dlg_rect.height()/2))
             dlg.move(self._scroll_area.mapToGlobal(pt))
         dlg.exec()
-        
-    def _on_item_created(self, item):
-        """Handle creating the item, as the user has chosen to create 
-        the given item in the Add Item dialog.
-        
-        """
-        
-        
+               
     def _on_minimized(self, minimized):
-        self._scroll_area.setVisible(not minimized)    
+        self._scroll_area.setVisible(not minimized)
+        self.minimized_changed.emit(self.objectName(), minimized)
         
     def _show_context_menu(self, position):
         menu = QtWidgets.QMenu(parent=self)
@@ -238,6 +253,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._config = None
         self._proj_settings_dlg = None
         self._force_close = False
+        self._asset_library = None
         
         if app_name is None:
             app_name = "Dedaverse"
@@ -275,6 +291,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.current_project:
             self._icon.setToolTip(f'Dedaverse :: {self.current_project.name}')
         
+    @property
+    def asset_library(self):
+        return self._asset_library
+    
     @property 
     def current_project(self):
         return self._config.current_project        
@@ -371,9 +391,11 @@ class MainWindow(QtWidgets.QMainWindow):
             # TODO: load the plugin panel info, etc...
             pass
         
+        self._panel_stack_has_top_stretch = False
         if tuple(panels.keys()) == ('Project',):
-            vbox.addStretch() # only a project with no other plugins loaded        
-        
+            vbox.addStretch()
+            self._panel_stack_has_top_stretch = True
+
         for panel, settings in panels.items():
             title = panel
             if panel == 'Project':
@@ -381,14 +403,25 @@ class MainWindow(QtWidgets.QMainWindow):
                 if current_project:
                     title = current_project.name
                 # TODO: Project panel also control drag positioning of main window
-            panel_obj = Panel(panel, title, parent=self, **settings)
+            panel_settings = dict(settings)
+            if panel != 'Project':
+                panel_settings['minimized'] = self._settings.value(
+                    f'view/{panel.lower()}_minimized', False, type=bool
+                )
+            panel_obj = Panel(panel, title, parent=self, **panel_settings)
+            if panel == 'Assets':
+                panel_obj.item_created.connect(self._on_asset_created)
             vbox.addWidget(panel_obj)
             if panel != 'Project':
                 panel_obj.close_clicked.connect(
                     lambda p=panel_obj: self._on_panel_closed(p)
                 )
+                panel_obj.minimized_changed.connect(self._on_panel_minimized_changed)
                 self._apply_view_state_to_panel(panel_obj)
                 self._connect_view_action_for_panel(panel_obj)
+
+        #if tuple(panels.keys()) != ('Project',):
+        self._update_panel_stack_layout()
         
         #vbox.addWidget(AssetPanel(parent=self))
         #vbox.addWidget(AppPanel(parent=self))
@@ -409,6 +442,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
     def _load_config(self):
         """Load the user settings from the local machine, or from the env configured user settings location."""
+        # This layered config is how we store teh user projects as well as shared projects with other people.
         self._config = LayeredConfig()
         if not self._config.current_project:
             # TODO: open the project settings dialog so the user can choose a project name 
@@ -416,7 +450,12 @@ class MainWindow(QtWidgets.QMainWindow):
             #log.warning('Choose a project to start.')        
             self.show_message('Choose a project.', 
                               'You must set up your project before starting work.', 
-                              icon=QtWidgets.QSystemTrayIcon.Warning)     
+                              icon=QtWidgets.QSystemTrayIcon.Warning)   
+            
+    def _initialize_project(self, project):
+        """Initialize the project with the new settings from the project arg."""
+        self._asset_library = Project(project.name, project.rootdir)
+        self._create_main_widget()
                    
     def _action_for_panel_name(self, name):
         """Return the View submenu action for the given panel name."""
@@ -432,15 +471,26 @@ class MainWindow(QtWidgets.QMainWindow):
         """Set panel visibility from the View submenu checked state."""
         action = self._action_for_panel_name(panel_obj.objectName())
         if action:
-            panel_obj.setVisible(action.isChecked())
+            panel_obj.visibility = action.isChecked()
 
     def _connect_view_action_for_panel(self, panel_obj):
         """Connect the View submenu action to show/hide this panel."""
         action = self._action_for_panel_name(panel_obj.objectName())
         if action:
             action.triggered.connect(
-                lambda checked, p=panel_obj: p.setVisible(checked)
+                lambda checked, p=panel_obj: self._on_view_toggled_for_panel(checked, p)
             )
+
+    def _all_non_project_panels_hidden(self):
+        """Return True if Assets, Apps, Services, and Tasks are all hidden."""
+        vbox = self.centralWidget().layout()
+        for i in range(vbox.count()):
+            item = vbox.itemAt(i)
+            w = item.widget() if item else None
+            if w and isinstance(w, Panel) and w.objectName() in ('Assets', 'Apps', 'Services', 'Tasks'):
+                if w.visibility:
+                    return False
+        return True
 
     def _on_panel_closed(self, panel):
         """When a panel is closed, uncheck the corresponding View submenu item."""
@@ -450,15 +500,38 @@ class MainWindow(QtWidgets.QMainWindow):
             self._icon._settings.setValue(
                 f'view/{panel.objectName().lower()}', False
             )
-        widget = self.centralWidget()
-        visible_panels = [
-            p for p in widget.children()
-            if isinstance(p, Panel) and p.isVisible()
-        ]
-        if not visible_panels:
+        #QtCore.QTimer.singleShot(0, self._update_panel_stack_layout)
+        self._update_panel_stack_layout()
+
+    def _on_panel_minimized_changed(self, panel_name, minimized):
+        """Save the panel minimized state to QSettings."""
+        self._settings.setValue(f'view/{panel_name.lower()}_minimized', minimized)
+
+    def _on_view_toggled_for_panel(self, checked, panel_obj):
+        """Handle View submenu toggle: show/hide panel and update layout."""
+        panel_obj.visibility = checked
+        self._update_panel_stack_layout()
+
+    def _update_panel_stack_layout(self):
+        """When all non-Project panels are hidden, add top stretch to pin Project at bottom."""
+        vbox = self.centralWidget().layout()
+        if vbox is None:
             return
-        if len(visible_panels) == 1:
-            widget.layout().insertStretch(0)
+        need_stretch = self._all_non_project_panels_hidden()
+        if need_stretch and not self._panel_stack_has_top_stretch:
+            vbox.insertStretch(0, 1)
+            self._panel_stack_has_top_stretch = True
+        elif not need_stretch and self._panel_stack_has_top_stretch:
+            item = vbox.takeAt(0)
+            if item:
+                del item
+            self._panel_stack_has_top_stretch = False
+            
+    def _on_asset_created(self, asset_info):
+        """Handle the creation of the asset in the asset library."""
+        if not self._asset_library:
+            rootdir = None # get this from the project config
+            self._asset_library = Project.create(self.current_project, rootdir)
     
     def _open_project_settings(self):
         
@@ -469,7 +542,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # show the dialog to create a new project
             if not self._proj_settings_dlg:
                 self._proj_settings_dlg = StartProjectDialog(self._config, parent=self)
-                self._proj_settings_dlg.project_changed.connect(self._create_main_widget)
+                self._proj_settings_dlg.project_changed.connect(self._initialize_project)
         else:
             if self._proj_settings_dlg and not isinstance (self._proj_settings_dlg, ProjectSettingsDialog):
                 self._proj_settings_dlg.close() 
@@ -477,7 +550,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # show the dialog to create a new project
             if not self._proj_settings_dlg:            
                 self._proj_settings_dlg = ProjectSettingsDialog(self._config, parent=self)
-                self._proj_settings_dlg.project_changed.connect(self._create_main_widget) 
+                self._proj_settings_dlg.project_changed.connect(self._initialize_project) 
         self._proj_settings_dlg.adjustSize()
         screen_geo = QtWidgets.QApplication.primaryScreen().availableGeometry()
         self._proj_settings_dlg.show()

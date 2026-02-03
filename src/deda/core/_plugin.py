@@ -234,16 +234,17 @@ class Application(Plugin):
     
     def launch(self, *args, **kwargs):
         """Launch the dcc application with the appropriate environment using the given args.
-        
+
+        Note: When using subprocess with a list, the executable path must not include
+        quotes. The list form avoids shell parsing; quotes in the path string cause
+        "X was unexpected at this time" errors on Windows.
         """
-        # TODO: Check if this needs to be wrapped in quotes or not, depending on the system.
-        cmd = [f'"{self._executable}"']
+        cmd = [self._executable]
         for arg in args:
-            cmd.append(arg)
+            cmd.append(str(arg))
         for key, value in kwargs.items():
             cmd.append(f'{key}={value}')
         dcc_env = os.environ.copy()
-        # modify env if required for the subprocess
         dcc_env = self.setup_env(dcc_env)
         return subprocess.run(cmd, capture_output=True, env=dcc_env)
     

@@ -18,22 +18,32 @@
 """Unit tests for deda.core.types._project module."""
 
 import unittest
+from pathlib import Path
 
 from deda.core.types._project import Project
 
 
-class TestProjectType(unittest.TestCase):
-    """Test cases for Project type module."""
+class TestProject(unittest.TestCase):
+    """Test cases for Project class."""
 
     def test_project_parent_is_none(self):
         """Test that Project parent is always None."""
-        project = Project(name="TestProject")
+        project = Project(name="TestProject", rootdir=Path("test_root"))
         self.assertIsNone(project._parent)
 
     def test_project_parent_non_none_raises(self):
         """Test that Project cannot be created with a parent."""
         with self.assertRaises(ValueError):
-            Project(name="TestProject", parent=object())
+            Project(name="TestProject", rootdir=Path("test_root"), parent=object())
+
+    def test_project_creation_entity_api(self):
+        """Project supports Entity API: name, parent, project, path, rootdir."""
+        proj = Project(name='TestProject', rootdir=Path("test_root"), parent=None)
+        self.assertEqual(proj.name, 'TestProject')
+        self.assertIsNone(proj.parent)
+        self.assertIs(proj.project, proj)
+        _ = proj.path
+        _ = proj.rootdir
 
 
 if __name__ == '__main__':

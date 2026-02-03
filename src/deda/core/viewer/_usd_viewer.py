@@ -94,6 +94,99 @@ class _StageView(StageView):
         if self._axis_enabled:
             self.__draw_axis(viewProjectionMatrix)
         return
+    
+    def drawHUD(self, renderer): # overriden from base class
+        """We will use this to draw all overlays for annotations layers, slate layer, and hud layers.
+        
+        """
+        # compute the time it took to render this frame,
+        # so we can display it in the HUD
+        #ms = self._renderTime * 1000.
+        #fps = float("inf")
+        #if not self._renderTime == 0:
+            #fps = 1./self._renderTime
+        ## put the result in the HUD string
+        #self.fpsHUDInfo['Render'] = "%.2f ms (%.2f FPS)" % (ms, fps)
+
+        #col = Gf.Vec3f(.733,.604,.333)
+
+        ## the subtree info does not update while animating, grey it out
+        #if not self._dataModel.playing:
+            #subtreeCol = col
+        #else:
+            #subtreeCol = Gf.Vec3f(.6,.6,.6)
+
+        ## Subtree Info
+        #if self._dataModel.viewSettings.showHUD_Info:
+            #self._hud.updateGroup("TopLeft", 0, 14, subtreeCol,
+                                 #self.upperHUDInfo,
+                                 #self.HUDStatKeys)
+        #else:
+            #self._hud.updateGroup("TopLeft", 0, 0, subtreeCol, {})
+
+        ## Complexity
+        #if self._dataModel.viewSettings.showHUD_Complexity:
+            ## Camera name
+            #camName = "Free%s" % (" AutoClip" if self.autoClip else "")
+            #if self._dataModel.viewSettings.cameraPrim:
+                #camName = self._dataModel.viewSettings.cameraPrim.GetName()
+
+            #toPrint = {"Complexity" : self._dataModel.viewSettings.complexity.name,
+                       #"Camera" : camName}
+            #self._hud.updateGroup("BottomRight",
+                                  #self.width()-210, self.height()-self._hud._HUDLineSpacing*2,
+                                  #col, toPrint)
+        #else:
+            #self._hud.updateGroup("BottomRight", 0, 0, col, {})
+
+        #if self._renderPauseState:
+            #toPrint = {"Hydra": "(paused)"}
+        #elif self._renderStopState:
+            #toPrint = {"Hydra": "(stopped)"}
+        #else:
+            #toPrint = {"Hydra": self._rendererDisplayName}
+            
+        #if self._rendererAovName != "color":
+            #toPrint["  AOV"] = self._rendererAovName
+        #self._hud.updateGroup("TopRight", self.width()-160, 14, col,
+                              #toPrint, toPrint.keys())
+
+        ## bottom left
+        #from collections import OrderedDict
+        #toPrint = OrderedDict()
+
+        ## GPU stats (TimeElapsed is in nano seconds)
+        #if self._dataModel.viewSettings.showHUD_GPUstats:
+
+            #def _addSizeMetric(toPrint, stats, label, key):
+                #if key in stats:
+                    #toPrint[label] = ReportMetricSize(stats[key])
+
+            #rStats = renderer.GetRenderStats()
+
+            #toPrint["GL prims "] = self._glPrimitiveGeneratedQuery.GetResult()
+            #if not (self._renderPauseState or self._renderStopState):
+                #toPrint["GPU time "] = "%.2f ms " % (self._glTimeElapsedQuery.GetResult() / 1000000.0)
+            #_addSizeMetric(toPrint, rStats, "GPU mem  ", "gpuMemoryUsed")
+            #_addSizeMetric(toPrint, rStats, " primvar ", "primvar")
+            #_addSizeMetric(toPrint, rStats, " topology", "topology")
+            #_addSizeMetric(toPrint, rStats, " shader  ", "drawingShader")
+            #_addSizeMetric(toPrint, rStats, " texture ", "textureMemory")
+            
+            #if "numCompletedSamples" in rStats:
+                #toPrint["Samples done "] = rStats["numCompletedSamples"]
+
+        ## Playback Rate
+        #if (not (self._renderPauseState or self._renderStopState)) and \
+                            #self._dataModel.viewSettings.showHUD_Performance:
+            #for key in self.fpsHUDKeys:
+                #toPrint[key] = self.fpsHUDInfo[key]
+        #self._hud.updateGroup("BottomLeft",
+                              #0, self.height()-len(toPrint)*self._hud._HUDLineSpacing,
+                              #col, toPrint, toPrint.keys())
+
+        ## draw HUD
+        #self._hud.draw(self)    
 
     def paintGL(self):
         if hasattr(StageView, "paintGL"):

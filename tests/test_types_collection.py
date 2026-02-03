@@ -18,17 +18,18 @@
 """Unit tests for deda.core.types._collection module."""
 
 import unittest
+from pathlib import Path
 
 from deda.core.types._collection import Collection
 from deda.core.types._project import Project
 
 
 class TestCollection(unittest.TestCase):
-    """Test cases for Collection module."""
+    """Test cases for Collection class."""
 
     def test_collection_creation_requires_parent(self):
         """Test that Collection requires a non-None parent."""
-        project = Project(name="TestProject")
+        project = Project(name="TestProject", rootdir=Path("test_root"))
         collection = Collection(name="TestCollection", parent=project)
         self.assertEqual(collection._parent, project)
 
@@ -36,6 +37,15 @@ class TestCollection(unittest.TestCase):
         """Test that Collection cannot be created without a parent."""
         with self.assertRaises(ValueError):
             Collection(name="TestCollection", parent=None)
+
+    def test_collection_creation_entity_api(self):
+        """Collection supports Entity API: name, parent, project, path."""
+        project = Project(name="TestProject", rootdir=Path("test_root"))
+        coll = Collection(name='TestCollection', parent=project)
+        self.assertEqual(coll.name, 'TestCollection')
+        self.assertIs(coll.parent, project)
+        self.assertIs(coll.project, project)
+        _ = coll.path
 
 
 if __name__ == '__main__':

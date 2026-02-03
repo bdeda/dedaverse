@@ -15,16 +15,19 @@
 # limitations under the License.
 #
 # ###################################################################################
-
-"""Sequence asset type."""
-
-__all__ = ["Sequence"]
+"""Sequence type for the asset system."""
 
 from ._collection import Collection
 
+__all__ = ['Sequence']
+
 
 class Sequence(Collection):
-    """Sequence asset that groups shots."""
+    """Collection of Shots, Assets, or nested Collections for a sequence.
+
+    A Sequence represents a logical grouping (e.g. a film sequence or
+    episode) and typically contains Shots. Inherits the full Entity API.
+    """
 
     def __init__(self, name, parent):
         super().__init__(name, parent)
