@@ -28,6 +28,9 @@ from pxr.Usdviewq.stageView import StageView
 from pxr.Usdviewq.common import CameraMaskModes
 
 from ._reticle import CameraReticleGlOverlay
+from ._slate import SlateTextGlOverlay
+
+from ._reticle import CameraReticleGlOverlay
 
 
 log = logging.getLogger(__name__)
@@ -71,10 +74,15 @@ class _StageView(StageView):
         self.__draw_axis = StageView.DrawAxis
         self._axis_enabled = False
         self._reticle_overlay = CameraReticleGlOverlay()
+        self._slate_overlay = SlateTextGlOverlay()
 
     @property
     def reticle_overlay(self) -> CameraReticleGlOverlay:
         return self._reticle_overlay
+
+    @property
+    def slate_overlay(self) -> SlateTextGlOverlay:
+        return self._slate_overlay
 
     def DrawAxis(self, viewProjectionMatrix):
         if self._axis_enabled:
@@ -88,6 +96,8 @@ class _StageView(StageView):
             super().paintGL()
         if self._reticle_overlay and self._reticle_overlay.enabled:
             self._reticle_overlay.draw_from_stage_view(self)
+        if self._slate_overlay and self._slate_overlay.enabled:
+            self._slate_overlay.draw_from_stage_view(self)
 
     def contextMenuEvent(self, event):
         """Show context menu at click point with variant switching for the picked prim."""
