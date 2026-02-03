@@ -19,17 +19,23 @@
 
 import unittest
 
+from deda.core.types._project import Project
+from deda.core.types._sequence import Sequence
+
 
 class TestSequence(unittest.TestCase):
     """Test cases for Sequence module."""
 
-    def test_module_imports(self):
-        """Test that the module can be imported."""
-        try:
-            import deda.core.types._sequence
-            self.assertTrue(True)
-        except ImportError:
-            self.fail("Failed to import deda.core.types._sequence")
+    def test_sequence_creation_requires_parent(self):
+        """Test that Sequence requires a non-None parent."""
+        project = Project(name="TestProject")
+        sequence = Sequence(name="TestSequence", parent=project)
+        self.assertEqual(sequence._parent, project)
+
+    def test_sequence_parent_none_raises(self):
+        """Test that Sequence cannot be created without a parent."""
+        with self.assertRaises(ValueError):
+            Sequence(name="TestSequence", parent=None)
 
 
 if __name__ == '__main__':

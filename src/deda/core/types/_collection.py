@@ -15,3 +15,16 @@
 # limitations under the License.
 #
 # ###################################################################################
+
+"""Collection asset type."""
+
+__all__ = ["Collection"]
+
+from ._asset import Asset
+
+
+class Collection(Asset):
+    """Collection of assets."""
+
+    def __init__(self, name, parent):
+        super().__init__(name, parent)

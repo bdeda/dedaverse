@@ -15,3 +15,16 @@
 # limitations under the License.
 #
 # ###################################################################################
+
+"""Sequence asset type."""
+
+__all__ = ["Sequence"]
+
+from ._collection import Collection
+
+
+class Sequence(Collection):
+    """Sequence asset that groups shots."""
+
+    def __init__(self, name, parent):
+        super().__init__(name, parent)

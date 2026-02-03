@@ -15,3 +15,18 @@
 # limitations under the License.
 #
 # ###################################################################################
+
+"""Asset type definitions."""
+
+__all__ = ["Asset"]
+
+from ._entity import Entity
+
+
+class Asset(Entity):
+    """Base class for asset types that require a parent."""
+
+    def __init__(self, name, parent):
+        if parent is None:
+            raise ValueError("Asset parent cannot be None.")
+        super().__init__(name, parent)

@@ -15,3 +15,18 @@
 # limitations under the License.
 #
 # ###################################################################################
+
+"""Project type definition."""
+
+__all__ = ["Project"]
+
+from ._entity import Entity
+
+
+class Project(Entity):
+    """Project is the root asset and has no parent."""
+
+    def __init__(self, name, parent=None):
+        if parent is not None:
+            raise ValueError("Project parent must be None.")
+        super().__init__(name, None)
