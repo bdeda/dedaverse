@@ -60,6 +60,31 @@ def _create_engine_wrapper(engine, view_settings_getter):
     return engine
 
 
+def _get_prim_info_for_hover(prim):
+    """Return (prim_path_str, spec_identifier_strings) for the given prim.
+
+    spec_identifier_strings is the list of prim spec identifiers (layer identifier
+    and path) that participate in composing this prim, in strength order. Each
+    entry is the Sdf.PrimSpec's layer identifier and path.
+    """
+    if not prim or not prim.IsValid():
+        return None
+    path_str = str(prim.GetPath())
+    identifiers = []
+    try:
+        prim_index = prim.GetPrimIndex()
+        if prim_index and hasattr(prim_index, 'primStack'):
+            for spec in prim_index.primStack:
+                if spec and spec.layer:
+                    lid = spec.layer.identifier
+                    path = spec.path
+                    if lid:
+                        identifiers.append(f"{lid} @ {path}")
+    except Exception as err:
+        log.debug("Prim stack iteration failed: %s", err)
+    return (path_str, identifiers)
+
+
 def _collect_prims_with_variant_sets(prim):
     """Walk up from prim and collect all prims (including prim) that have variant sets."""
     result = []
@@ -119,6 +144,64 @@ def _apply_viewport_gl_state():
         pass
 
 
+class _PrimInfoOverlay(QtWidgets.QFrame):
+    """Semi-transparent floating panel showing prim path and prim spec identifiers."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+        self.setWindowFlags(QtCore.Qt.FramelessWindowHint)
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, False)
+        self.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+        self.setStyleSheet(
+            "background-color: rgba(28, 28, 32, 230);"
+            " border: 1px solid rgba(80, 80, 90, 200);"
+            " border-radius: 4px;"
+            " padding: 6px;"
+            " font-family: Consolas, monospace;"
+            " font-size: 11px;"
+            " color: rgb(220, 220, 220);"
+        )
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
+        self._path_label = QtWidgets.QLabel()
+        self._path_label.setWordWrap(True)
+        self._path_label.setTextFormat(QtCore.Qt.RichText)
+        layout.addWidget(self._path_label)
+        spec_label = QtWidgets.QLabel("Prim specs (composition):")
+        spec_label.setStyleSheet("font-weight: bold; color: rgb(180, 180, 200);")
+        layout.addWidget(spec_label)
+        self._specs_text = QtWidgets.QTextEdit()
+        self._specs_text.setReadOnly(True)
+        self._specs_text.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self._specs_text.setMaximumHeight(120)
+        self._specs_text.setStyleSheet(
+            "background: transparent; color: rgb(200, 200, 200); font-size: 10px;"
+        )
+        layout.addWidget(self._specs_text)
+        self.setFixedSize(380, 200)
+        self.hide()
+
+    def set_prim_info(self, prim_path_str, spec_identifiers):
+        """Set the displayed prim path and list of prim spec identifiers."""
+        self._path_label.setText(f"<b>Prim:</b> {_escape_html(prim_path_str)}")
+        if spec_identifiers:
+            self._specs_text.setPlainText("\n".join(spec_identifiers))
+        else:
+            self._specs_text.setPlainText("(none)")
+        self._specs_text.moveCursor(QtGui.QTextCursor.MoveOperation.Start)
+
+
+def _escape_html(s):
+    """Escape for use in RichText."""
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
 class _StageView(StageView):
     """StageView that overrides DrawAxis and adds a right-click context menu for variant switching."""
 
@@ -129,6 +212,9 @@ class _StageView(StageView):
         self._annotation_overlay = AnnotationGlOverlay()
         self._reticle_overlay = CameraReticleGlOverlay()
         self._slate_overlay = SlateTextGlOverlay()
+        self._prim_info_overlay = _PrimInfoOverlay(parent=self)
+        self._prim_info_overlay.setParent(self)
+        self.setMouseTracking(True)
 
     def initializeGL(self):
         """Run base GL init (if any) then apply viewport enhancements."""
@@ -319,6 +405,53 @@ class _StageView(StageView):
         except Exception as err:
             log.warning(f'Context menu pick failed: {err}')
             super().contextMenuEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """When Ctrl is held, pick prim under cursor and show floating prim info panel."""
+        super().mouseMoveEvent(event)
+        pos = event.position().toPoint() if hasattr(event.position(), 'toPoint') else event.pos()
+        if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
+            if self._dataModel and self._dataModel.stage:
+                try:
+                    in_bounds, pick_frustum = self.computePickFrustum(pos.x(), pos.y())
+                    if in_bounds:
+                        pick_results = self.pick(pick_frustum)
+                        if pick_results and len(pick_results) >= 3:
+                            prim_path = pick_results[2]
+                            if prim_path and prim_path != Sdf.Path.emptyPath:
+                                stage = self._dataModel.stage
+                                prim = stage.GetPrimAtPath(prim_path)
+                                info = _get_prim_info_for_hover(prim)
+                                if info:
+                                    path_str, spec_ids = info
+                                    self._prim_info_overlay.set_prim_info(path_str, spec_ids)
+                                    self._prim_info_overlay.raise_()
+                                    # Position panel near cursor, keep inside view
+                                    offset_x, offset_y = 16, 16
+                                    px = pos.x() + offset_x
+                                    py = pos.y() + offset_y
+                                    w, h = self._prim_info_overlay.width(), self._prim_info_overlay.height()
+                                    if px + w > self.width():
+                                        px = pos.x() - offset_x - w
+                                    if py + h > self.height():
+                                        py = pos.y() - offset_y - h
+                                    if px < 0:
+                                        px = 8
+                                    if py < 0:
+                                        py = 8
+                                    self._prim_info_overlay.move(px, py)
+                                    self._prim_info_overlay.show()
+                                    return
+                except Exception as err:
+                    log.debug("Prim hover pick failed: %s", err)
+            self._prim_info_overlay.hide()
+        else:
+            self._prim_info_overlay.hide()
+
+    def leaveEvent(self, event):
+        """Hide prim info overlay when mouse leaves the view."""
+        super().leaveEvent(event)
+        self._prim_info_overlay.hide()
 
     def _set_variant(self, prim_path, variant_set_name, variant_name):
         """Set the variant selection for a prim's variant set."""
