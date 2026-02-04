@@ -272,6 +272,58 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         hdr_browse_btn.clicked.connect(self._pick_hdr_images_dir)
         hdr_hbox.addWidget(hdr_browse_btn)
         grid.addWidget(hdr_widget, 2, 1, 1, -1)
+
+        lbl = QtWidgets.QLabel('Lights root:')
+        grid.addWidget(lbl, 3, 0)
+        lights_widget = QtWidgets.QWidget()
+        lights_hbox = QtWidgets.QHBoxLayout(lights_widget)
+        lights_hbox.setContentsMargins(0, 0, 0, 0)
+        self._lights_root_le = QtWidgets.QLineEdit()
+        self._lights_root_le.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed
+        )
+        self._lights_root_le.setPlaceholderText('Optional: relative to project root or absolute path')
+        if self._config.current_project and getattr(
+            self._config.current_project, 'lights_root', None
+        ):
+            self._lights_root_le.setText(self._config.current_project.lights_root or '')
+        lights_hbox.addWidget(self._lights_root_le)
+        lights_browse_btn = QtWidgets.QPushButton()
+        lights_browse_btn.setIcon(style.standardIcon(
+            QtWidgets.QStyle.StandardPixmap.SP_DirOpenIcon
+        ))
+        lights_browse_btn.setFixedSize(self._add_proj_btn.size())
+        lights_browse_btn.setToolTip('Choose lights root directory')
+        lights_browse_btn.clicked.connect(self._pick_lights_root)
+        lights_hbox.addWidget(lights_browse_btn)
+        grid.addWidget(lights_widget, 3, 1, 1, -1)
+
+        lbl = QtWidgets.QLabel('Materials root:')
+        grid.addWidget(lbl, 4, 0)
+        materials_widget = QtWidgets.QWidget()
+        materials_hbox = QtWidgets.QHBoxLayout(materials_widget)
+        materials_hbox.setContentsMargins(0, 0, 0, 0)
+        self._materials_root_le = QtWidgets.QLineEdit()
+        self._materials_root_le.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed
+        )
+        self._materials_root_le.setPlaceholderText('Optional: relative to project root or absolute path')
+        if self._config.current_project and getattr(
+            self._config.current_project, 'materials_root', None
+        ):
+            self._materials_root_le.setText(self._config.current_project.materials_root or '')
+        materials_hbox.addWidget(self._materials_root_le)
+        materials_browse_btn = QtWidgets.QPushButton()
+        materials_browse_btn.setIcon(style.standardIcon(
+            QtWidgets.QStyle.StandardPixmap.SP_DirOpenIcon
+        ))
+        materials_browse_btn.setFixedSize(self._add_proj_btn.size())
+        materials_browse_btn.setToolTip('Choose materials root directory')
+        materials_browse_btn.clicked.connect(self._pick_materials_root)
+        materials_hbox.addWidget(materials_browse_btn)
+        grid.addWidget(materials_widget, 4, 1, 1, -1)
         
         # TODO: check for perforce plugin
         #self._perforce_cb = QtWidgets.QCheckBox('Use Perforce')
@@ -316,11 +368,19 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
                 self._project_name_le.clear()
                 self._project_rootdir_le.clear()
                 self._hdr_images_dir_le.clear()
+                self._lights_root_le.clear()
+                self._materials_root_le.clear()
                 return
             self._project_name_le.setText(current_project.name)
             self._project_rootdir_le.setText(current_project.rootdir)
             self._hdr_images_dir_le.setText(
                 getattr(current_project, 'hdr_images_dir', None) or ''
+            )
+            self._lights_root_le.setText(
+                getattr(current_project, 'lights_root', None) or ''
+            )
+            self._materials_root_le.setText(
+                getattr(current_project, 'materials_root', None) or ''
             )
         finally:
             self._project_name_le.blockSignals(val1)
@@ -344,6 +404,58 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         )
         if ret:
             self._hdr_images_dir_le.setText(ret)
+            self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(True)
+
+    def _pick_lights_root(self):
+        """Open a directory browser to choose the lights root directory."""
+        start_dir = self._lights_root_le.text() or (
+            self._project_rootdir_le.text() if self._project_rootdir_le.text() else str(Path.home())
+        )
+        ret = QtWidgets.QFileDialog.getExistingDirectory(
+            self, 'Choose Lights Root Directory', start_dir
+        )
+        if ret:
+            # If within project root, store as relative path; otherwise absolute
+            proj_root = self._project_rootdir_le.text()
+            if proj_root:
+                try:
+                    proj_path = Path(proj_root).resolve()
+                    ret_path = Path(ret).resolve()
+                    if ret_path.is_relative_to(proj_path):
+                        rel = ret_path.relative_to(proj_path)
+                        self._lights_root_le.setText(rel.as_posix())
+                    else:
+                        self._lights_root_le.setText(ret)
+                except Exception:
+                    self._lights_root_le.setText(ret)
+            else:
+                self._lights_root_le.setText(ret)
+            self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(True)
+
+    def _pick_materials_root(self):
+        """Open a directory browser to choose the materials root directory."""
+        start_dir = self._materials_root_le.text() or (
+            self._project_rootdir_le.text() if self._project_rootdir_le.text() else str(Path.home())
+        )
+        ret = QtWidgets.QFileDialog.getExistingDirectory(
+            self, 'Choose Materials Root Directory', start_dir
+        )
+        if ret:
+            # If within project root, store as relative path; otherwise absolute
+            proj_root = self._project_rootdir_le.text()
+            if proj_root:
+                try:
+                    proj_path = Path(proj_root).resolve()
+                    ret_path = Path(ret).resolve()
+                    if ret_path.is_relative_to(proj_path):
+                        rel = ret_path.relative_to(proj_path)
+                        self._materials_root_le.setText(rel.as_posix())
+                    else:
+                        self._materials_root_le.setText(ret)
+                except Exception:
+                    self._materials_root_le.setText(ret)
+            else:
+                self._materials_root_le.setText(ret)
             self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(True)
 
     def _project_name_changed(self, proj_name):
@@ -376,6 +488,8 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
                     break
 
         hdr_dir = self._hdr_images_dir_le.text().strip() or None
+        lights_root = self._lights_root_le.text().strip() or None
+        materials_root = self._materials_root_le.text().strip() or None
 
         if proj is not None:
             # Editing existing project: update from form
@@ -383,6 +497,8 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
             proj.name = proj_name
             proj.rootdir = rootdir
             proj.hdr_images_dir = hdr_dir
+            proj.lights_root = lights_root
+            proj.materials_root = materials_root
             proj.cfg_path = (Path(rootdir) / '.dedaverse' / 'project.cfg').as_posix()
             if old_name != proj_name and old_name in self._config.user.projects:
                 del self._config.user.projects[old_name]
@@ -403,6 +519,8 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
                 proj.name = proj_name
                 proj.rootdir = rootdir
             proj.hdr_images_dir = hdr_dir
+            proj.lights_root = lights_root
+            proj.materials_root = materials_root
             proj.cfg_path = (Path(rootdir) / '.dedaverse' / 'project.cfg').as_posix()
             self._config.user.add_project(proj)
 

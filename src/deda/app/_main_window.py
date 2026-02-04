@@ -33,6 +33,7 @@ import os
 import logging
 import json
 import functools
+import html
 from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
 
@@ -42,11 +43,64 @@ from deda.core import LayeredConfig, Project
 
 from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
-from ._dialogs import AddItemDialog
+from ._dialogs import AddItemDialog, ConfigureItemDialog
 #from deda.core.viewer import UsdViewWidget
 
 
 log = logging.getLogger(__name__)
+
+
+class ItemTile(QtWidgets.QWidget):
+    """Tile widget for displaying an item with icon, name, and tooltip."""
+
+    def __init__(self, item_data, tile_width, parent=None):
+        super().__init__(parent=parent)
+        self._item_data = item_data
+        self.setFixedSize(tile_width, tile_width)
+        self.setStyleSheet(
+            "ItemTile{background-color: rgb(30,30,30); border: 1px solid rgb(50,50,50); border-radius: 3px;}"
+        )
+        vbox = QtWidgets.QVBoxLayout(self)
+        vbox.setContentsMargins(4, 4, 4, 4)
+        vbox.setSpacing(2)
+
+        icon_path = item_data.get('icon', None)
+        if icon_path and Path(icon_path).is_file():
+            pixmap = QtGui.QPixmap(icon_path)
+        else:
+            icon_path = Path(__file__).parent / 'icons' / 'questionmark_small.png'
+            pixmap = QtGui.QPixmap(str(icon_path))
+        icon_size = tile_width - 20
+        pixmap = pixmap.scaled(
+            icon_size, icon_size,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation
+        )
+        icon_label = QtWidgets.QLabel()
+        icon_label.setPixmap(pixmap)
+        icon_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        vbox.addWidget(icon_label)
+
+        name = item_data.get('name', 'Untitled')
+        name_label = QtWidgets.QLabel(name)
+        name_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        font = name_label.font()
+        font.setPointSize(max(8, tile_width // 20))
+        name_label.setFont(font)
+        name_label.setWordWrap(True)
+        vbox.addWidget(name_label)
+
+        description = item_data.get('description', '')
+        title = item_data.get('title', '')
+        item_type = item_data.get('type', '')
+        tooltip = f'<b>{html.escape(name)}</b>'
+        if title and title != name:
+            tooltip += f'<br><i>{html.escape(title)}</i>'
+        if item_type:
+            tooltip += f'<br><i>Type: {html.escape(item_type)}</i>'
+        if description:
+            tooltip += f'<br>{html.escape(description)}'
+        self.setToolTip(tooltip)
 
 
 class PanelHeader(QtWidgets.QWidget):
@@ -171,20 +225,34 @@ class Panel(QtWidgets.QFrame):
         
         if show_scroll_area:
             self._scroll_area = QtWidgets.QScrollArea()
-            
-            # TODO: Add tiled icons or list to scroll area
-            # Need to add a graphics view with tiles of object types
-            # sortable, or custom drag-drop organization of tiles, in "edit" mode
-            # optional list view
-            
-            #self._scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-            #self._scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)        
+            self._scroll_area.setWidgetResizable(True)
+            self._scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self._scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+            container = QtWidgets.QWidget()
+            container_layout = QtWidgets.QGridLayout(container)
+            container_layout.setSpacing(8)
+            container_layout.setContentsMargins(8, 8, 8, 8)
+            container_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
+            self._tiles_container = container
+            self._tiles_layout = container_layout
+            self._tiles_count = 0
+            self._tiles_per_row = 5
+            container.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Minimum,
+                QtWidgets.QSizePolicy.Policy.Minimum
+            )
+            self._scroll_area.setWidget(container)
+
             vbox.addWidget(self._scroll_area)
             header.minmax_clicked.connect(self._on_minimized)
             self._on_minimized(header.minimized)
-            
-            self._scroll_area.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-            self._scroll_area.customContextMenuRequested.connect(self._show_context_menu)   
+
+            # Use viewport for context menu so position is in content coordinates
+            viewport = self._scroll_area.viewport()
+            viewport.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+            viewport.customContextMenuRequested.connect(self._show_context_menu)
+            self._items = []   
             
     @property
     def visibility(self):
@@ -217,16 +285,124 @@ class Panel(QtWidgets.QFrame):
     def _on_minimized(self, minimized):
         self._scroll_area.setVisible(not minimized)
         self.minimized_changed.emit(self.objectName(), minimized)
+
+    def _update_tile_size(self):
+        """Update tile size based on scroll area width (1/5 when vertical scrollbar present)."""
+        if not self._scroll_area or not self._tiles_container:
+            return
+        scroll_width = self._scroll_area.viewport().width()
+        if scroll_width <= 0:
+            return
+        # When vertical scrollbar is present, use 1/5 width for tiles
+        # Account for margins (8px each side = 16px) and spacing between tiles
+        available_width = scroll_width - 16
+        # Use 5 tiles per row (1/5 width each) when vertical scrollbar present
+        self._tiles_per_row = 5
+        spacing = 8
+        tile_width = max(80, (available_width - (self._tiles_per_row - 1) * spacing) // self._tiles_per_row)
+        # Update existing tiles
+        for i in range(self._tiles_layout.count()):
+            item = self._tiles_layout.itemAt(i)
+            if item and item.widget():
+                item.widget().setFixedSize(tile_width, tile_width)
+        # Relayout tiles
+        self._relayout_tiles()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QtCore.QTimer.singleShot(0, self._update_tile_size)
+
+    def _relayout_tiles(self):
+        """Relayout all tiles in the grid."""
+        if not self._tiles_container:
+            return
+        # Remove all widgets from layout
+        while self._tiles_layout.count():
+            item = self._tiles_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+        # Re-add widgets in grid
+        scroll_width = self._scroll_area.viewport().width() if self._scroll_area else 400
+        available_width = scroll_width - 16
+        spacing = 8
+        tile_width = max(80, (available_width - (self._tiles_per_row - 1) * spacing) // self._tiles_per_row)
+        for idx, item_data in enumerate(self._items):
+            row = idx // self._tiles_per_row
+            col = idx % self._tiles_per_row
+            tile = ItemTile(item_data, tile_width, parent=self._tiles_container)
+            tile._item_index = idx  # used by context menu to find item
+            self._tiles_layout.addWidget(
+                tile, row, col,
+                alignment=QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft
+            )
+
+    def add_item_tile(self, item_data):
+        """Add a tile widget for the given item data."""
+        if not self._tiles_container:
+            return
+        self._items.append(item_data)
+        self._update_tile_size()
         
+    def _tile_at_position(self, position):
+        """Return the ItemTile under the given position (in viewport coordinates)."""
+        viewport = self._scroll_area.viewport()
+        pos_in_container = viewport.mapTo(self._tiles_container, position)
+        w = self._tiles_container.childAt(pos_in_container)
+        while w is not None:
+            if isinstance(w, ItemTile):
+                return w
+            w = w.parentWidget()
+        return None
+
     def _show_context_menu(self, position):
         menu = QtWidgets.QMenu(parent=self)
-        
+
+        tile = self._tile_at_position(position)
+        if tile is not None and hasattr(tile, '_item_index'):
+            idx = tile._item_index
+            if 0 <= idx < len(self._items):
+                config_icon_path = Path(__file__).parent / 'icons' / 'gear_icon_32.png'
+                config_icon = QtGui.QIcon(str(config_icon_path)) if config_icon_path.is_file() else QtGui.QIcon()
+                configure_action = menu.addAction(config_icon, 'Configure...')
+                configure_action.triggered.connect(
+                    lambda checked=False, i=idx: self._open_configure_dialog(i)
+                )
+                menu.addSeparator()
+
         icon_path = Path(__file__).parent / 'icons' / 'green_plus.png'
-        plus_icon = QtGui.QIcon(str(icon_path))        
+        plus_icon = QtGui.QIcon(str(icon_path))
         action = menu.addAction(plus_icon, f'Add {self._type_name}')
         action.triggered.connect(self._add_item)
-        
-        menu.exec(self._scroll_area.mapToGlobal(position))
+
+        menu.exec(self._scroll_area.viewport().mapToGlobal(position))
+
+    def _open_configure_dialog(self, item_index):
+        """Open the configuration dialog for the item at the given index."""
+        if item_index < 0 or item_index >= len(self._items):
+            return
+        item_data = self._items[item_index]
+        dlg = ConfigureItemDialog(
+            self._type_name.capitalize(),
+            item_data,
+            item_index,
+            parent=self._scroll_area
+        )
+        dlg.item_updated.connect(self._on_item_configured)
+        if self._scroll_area:
+            rect = self._scroll_area.geometry()
+            dlg_rect = dlg.geometry()
+            pt = QtCore.QPoint(
+                (rect.width() / 2) - (dlg_rect.width() / 2),
+                (rect.height() / 2) - (dlg_rect.height() / 2)
+            )
+            dlg.move(self._scroll_area.mapToGlobal(pt))
+        dlg.exec()
+
+    def _on_item_configured(self, item_index, updated_data):
+        """Update the item at the given index and refresh the tile layout."""
+        if 0 <= item_index < len(self._items):
+            self._items[item_index] = updated_data
+            self._relayout_tiles()
         
               
 
@@ -411,6 +587,10 @@ class MainWindow(QtWidgets.QMainWindow):
             panel_obj = Panel(panel, title, parent=self, **panel_settings)
             if panel == 'Assets':
                 panel_obj.item_created.connect(self._on_asset_created)
+            # Connect item_created to add tile to the panel
+            panel_obj.item_created.connect(
+                lambda item, p=panel_obj: p.add_item_tile(item)
+            )
             vbox.addWidget(panel_obj)
             if panel != 'Project':
                 panel_obj.close_clicked.connect(

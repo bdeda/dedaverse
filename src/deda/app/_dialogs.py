@@ -19,7 +19,7 @@
 Graphics views for panels and browsers.
 """
 
-__all__ = ["AddItemDialog"]
+__all__ = ["AddItemDialog", "ConfigureItemDialog"]
 
 import os
 from pathlib import Path
@@ -75,6 +75,7 @@ class AddItemDialog(QtWidgets.QDialog):
         # customization of icon allows drag and drop, resize and store icon on drop
         self._icon_lbl = ClickableLabel()
         self._icon_lbl.setPixmap(questionmark_icon)
+        self._selected_icon_path = None
         grid.addWidget(self._icon_lbl, 0, 0, 2, 1)
         self._icon_lbl.clicked.connect(self._open_icon_browser)
                 
@@ -134,22 +135,151 @@ class AddItemDialog(QtWidgets.QDialog):
         item = {
             'name': self._name_le.text().strip(),
             'type': self._types_cb.currentText(),
+            'description': '',  # Can be extended later
         }
         if self._type_name == 'App':
             item['command'] = self._command_le.text()
+        # Store the icon path if a custom icon was selected
+        if self._selected_icon_path:
+            item['icon'] = self._selected_icon_path
         self.item_created.emit(item)
         self.close()
         
     def _open_icon_browser(self):
-        print('Icon clicked')
+        """Open file dialog to select an icon image."""
+        start_dir = str(Path.home())
+        if self._selected_icon_path:
+            start_dir = str(Path(self._selected_icon_path).parent)
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            'Select Icon Image',
+            start_dir,
+            'Image Files (*.png *.jpg *.jpeg *.bmp *.ico);;All Files (*)'
+        )
+        if file_path and Path(file_path).is_file():
+            self._selected_icon_path = file_path
+            pixmap = QtGui.QPixmap(file_path)
+            if not pixmap.isNull():
+                self._icon_lbl.setPixmap(pixmap.scaled(
+                    64, 64,
+                    QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                    QtCore.Qt.TransformationMode.SmoothTransformation
+                ))
         
     def _name_changed(self, value):
         if not value.strip():
             self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(False)
         else:
             self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(True)
-            
-        
-        
-    
-    
+
+
+class ConfigureItemDialog(QtWidgets.QDialog):
+    """Edit an existing panel item: icon, name, title, description; for apps, command too."""
+
+    item_updated = QtCore.Signal(int, object)  # item_index, updated item dict
+
+    def __init__(self, type_name, item_data, item_index, parent=None):
+        super().__init__(parent=parent)
+        self.setWindowTitle(f'Configure {type_name}')
+        icon_path = Path(__file__).parent / 'icons' / 'gear_icon_32.png'
+        if icon_path.is_file():
+            self.setWindowIcon(QtGui.QIcon(str(icon_path)))
+        self._type_name = type_name
+        self._item_data = dict(item_data)
+        self._item_index = item_index
+
+        vbox = QtWidgets.QVBoxLayout()
+        self.setLayout(vbox)
+        grid = QtWidgets.QGridLayout()
+        vbox.addLayout(grid)
+
+        # Icon (clickable to browse)
+        default_icon = Path(__file__).parent / 'icons' / 'questionmark_small.png'
+        self._selected_icon_path = self._item_data.get('icon') or None
+        if self._selected_icon_path and not Path(self._selected_icon_path).is_file():
+            self._selected_icon_path = None
+        pix_path = self._selected_icon_path or str(default_icon)
+        pixmap = QtGui.QPixmap(pix_path)
+        if pixmap.isNull():
+            pixmap = QtGui.QPixmap(str(default_icon))
+        self._icon_lbl = ClickableLabel()
+        self._icon_lbl.setPixmap(pixmap.scaled(
+            64, 64,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation
+        ))
+        self._icon_lbl.clicked.connect(self._open_icon_browser)
+        grid.addWidget(self._icon_lbl, 0, 0, 3, 1)
+
+        # Name
+        grid.addWidget(QtWidgets.QLabel('Name:'), 0, 1)
+        self._name_le = QtWidgets.QLineEdit()
+        self._name_le.setText(self._item_data.get('name', 'Untitled'))
+        grid.addWidget(self._name_le, 0, 2)
+
+        # Title
+        grid.addWidget(QtWidgets.QLabel('Title:'), 1, 1)
+        self._title_le = QtWidgets.QLineEdit()
+        self._title_le.setText(self._item_data.get('title', self._item_data.get('name', '')))
+        self._title_le.setPlaceholderText('Optional display title')
+        grid.addWidget(self._title_le, 1, 2)
+
+        # Description
+        grid.addWidget(QtWidgets.QLabel('Description:'), 2, 1)
+        self._desc_le = QtWidgets.QLineEdit()
+        self._desc_le.setText(self._item_data.get('description', ''))
+        self._desc_le.setPlaceholderText('Optional description')
+        grid.addWidget(self._desc_le, 2, 2)
+
+        # Command (Apps only)
+        if type_name == 'App':
+            grid.addWidget(QtWidgets.QLabel('Command:'), 3, 1)
+            self._command_le = QtWidgets.QLineEdit()
+            self._command_le.setText(self._item_data.get('command', ''))
+            grid.addWidget(self._command_le, 3, 2)
+        else:
+            self._command_le = None
+
+        self._btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel,
+            parent=self
+        )
+        vbox.addWidget(self._btns)
+        self._btns.accepted.connect(self._save)
+        self._btns.rejected.connect(self.close)
+
+    def _open_icon_browser(self):
+        start_dir = str(Path.home())
+        if self._selected_icon_path:
+            start_dir = str(Path(self._selected_icon_path).parent)
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            'Select Icon Image',
+            start_dir,
+            'Image Files (*.png *.jpg *.jpeg *.bmp *.ico);;All Files (*)'
+        )
+        if file_path and Path(file_path).is_file():
+            self._selected_icon_path = file_path
+            pixmap = QtGui.QPixmap(file_path)
+            if not pixmap.isNull():
+                self._icon_lbl.setPixmap(pixmap.scaled(
+                    64, 64,
+                    QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                    QtCore.Qt.TransformationMode.SmoothTransformation
+                ))
+
+    def _save(self):
+        name = self._name_le.text().strip() or 'Untitled'
+        updated = {
+            'name': name,
+            'type': self._item_data.get('type', ''),
+            'title': self._title_le.text().strip() or name,
+            'description': self._desc_le.text().strip(),
+        }
+        if self._selected_icon_path:
+            updated['icon'] = self._selected_icon_path
+        if self._type_name == 'App' and self._command_le is not None:
+            updated['command'] = self._command_le.text()
+        self.item_updated.emit(self._item_index, updated)
+        self.close()
+

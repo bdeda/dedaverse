@@ -211,6 +211,8 @@ class ProjectConfig:
             ``{rootdir}/.dedaverse/project.cfg`` if unset.
         key: Optional short identifier (e.g. "FEN").
         hdr_images_dir: Optional directory path for HDR/environment textures (dome light).
+        lights_root: Optional directory path for lights (relative to rootdir or absolute).
+        materials_root: Optional directory path for materials (relative to rootdir or absolute).
         project_type: Project type for asset type mapping during creation.
         asset_types: List of asset type names for this project.
         plugins: List of plugin configurations.
@@ -224,6 +226,8 @@ class ProjectConfig:
     cfg_path: str | None = None
     key: str | None = None
     hdr_images_dir: str | None = None
+    lights_root: str | None = None
+    materials_root: str | None = None
 
     project_type: str | None = None
 
