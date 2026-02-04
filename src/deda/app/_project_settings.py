@@ -246,6 +246,32 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         browse_btn.clicked.connect(self._pick_project_rootdir)
         rootdir_hbox.addWidget(browse_btn)
         grid.addWidget(rootdir_widget, 1, 1, 1, -1)
+
+        lbl = QtWidgets.QLabel('HDR / Environment directory:')
+        grid.addWidget(lbl, 2, 0)
+        hdr_widget = QtWidgets.QWidget()
+        hdr_hbox = QtWidgets.QHBoxLayout(hdr_widget)
+        hdr_hbox.setContentsMargins(0, 0, 0, 0)
+        self._hdr_images_dir_le = QtWidgets.QLineEdit()
+        self._hdr_images_dir_le.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed
+        )
+        self._hdr_images_dir_le.setPlaceholderText('Optional: directory for HDR/EXR dome light textures')
+        if self._config.current_project and getattr(
+            self._config.current_project, 'hdr_images_dir', None
+        ):
+            self._hdr_images_dir_le.setText(self._config.current_project.hdr_images_dir or '')
+        hdr_hbox.addWidget(self._hdr_images_dir_le)
+        hdr_browse_btn = QtWidgets.QPushButton()
+        hdr_browse_btn.setIcon(style.standardIcon(
+            QtWidgets.QStyle.StandardPixmap.SP_DirOpenIcon
+        ))
+        hdr_browse_btn.setFixedSize(self._add_proj_btn.size())
+        hdr_browse_btn.setToolTip('Choose HDR / environment textures directory')
+        hdr_browse_btn.clicked.connect(self._pick_hdr_images_dir)
+        hdr_hbox.addWidget(hdr_browse_btn)
+        grid.addWidget(hdr_widget, 2, 1, 1, -1)
         
         # TODO: check for perforce plugin
         #self._perforce_cb = QtWidgets.QCheckBox('Use Perforce')
@@ -289,9 +315,13 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
             if not current_project:
                 self._project_name_le.clear()
                 self._project_rootdir_le.clear()
+                self._hdr_images_dir_le.clear()
                 return
             self._project_name_le.setText(current_project.name)
             self._project_rootdir_le.setText(current_project.rootdir)
+            self._hdr_images_dir_le.setText(
+                getattr(current_project, 'hdr_images_dir', None) or ''
+            )
         finally:
             self._project_name_le.blockSignals(val1)
             self._project_rootdir_le.blockSignals(val2)            
@@ -304,6 +334,16 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         )
         if ret:
             self._project_rootdir_le.setText(ret)
+            self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(True)
+
+    def _pick_hdr_images_dir(self):
+        """Open a directory browser to choose the HDR/environment textures directory."""
+        start_dir = self._hdr_images_dir_le.text() or str(Path.home())
+        ret = QtWidgets.QFileDialog.getExistingDirectory(
+            self, 'Choose HDR / Environment Textures Directory', start_dir
+        )
+        if ret:
+            self._hdr_images_dir_le.setText(ret)
             self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(True)
 
     def _project_name_changed(self, proj_name):
@@ -335,11 +375,14 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
                     proj = p
                     break
 
+        hdr_dir = self._hdr_images_dir_le.text().strip() or None
+
         if proj is not None:
             # Editing existing project: update from form
             old_name = proj.name
             proj.name = proj_name
             proj.rootdir = rootdir
+            proj.hdr_images_dir = hdr_dir
             proj.cfg_path = (Path(rootdir) / '.dedaverse' / 'project.cfg').as_posix()
             if old_name != proj_name and old_name in self._config.user.projects:
                 del self._config.user.projects[old_name]
@@ -359,6 +402,7 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
             else:
                 proj.name = proj_name
                 proj.rootdir = rootdir
+            proj.hdr_images_dir = hdr_dir
             proj.cfg_path = (Path(rootdir) / '.dedaverse' / 'project.cfg').as_posix()
             self._config.user.add_project(proj)
 

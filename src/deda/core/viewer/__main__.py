@@ -17,12 +17,18 @@
 # ###################################################################################
 """Main entry point for the Dedaverse viewer application."""
 
-from PySide6 import QtWidgets
+from pathlib import Path
 
+from deda.app import Application
+from deda.app import _main_window as _app_main_window
 from deda.core.viewer import _window
+from PySide6 import QtGui
 
 if __name__ == '__main__':
-    app = QtWidgets.QApplication()
+    app = Application()
+    icon_path = Path(_app_main_window.__file__).parent / 'icons' / 'star_icon.png'
+    if icon_path.is_file():
+        app.setWindowIcon(QtGui.QIcon(str(icon_path)))
     w = _window.MainWindow()
     w.show()
     app.exec()

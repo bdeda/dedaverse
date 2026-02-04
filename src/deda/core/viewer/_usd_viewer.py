@@ -21,6 +21,11 @@ __all__ = ['UsdViewWidget']
 import logging
 from pathlib import Path
 
+try:
+    import OpenGL
+except ImportError:
+    OpenGL = None
+
 from PySide6 import QtWidgets, QtCore, QtGui
 
 from pxr import Gf, Usd, Sdf, UsdLux
@@ -67,6 +72,53 @@ def _collect_prims_with_variant_sets(prim):
     return result
 
 
+def _apply_viewport_gl_state():
+    """Apply optional OpenGL state when the viewport is initialized.
+
+    Enables GL_TEXTURE_CUBE_MAP_SEAMLESS (better dome/env sampling),
+    GL_MULTISAMPLE (antialiasing), GL_DEPTH_CLAMP where supported,
+    and optional line/polygon smooth and sample alpha-to-coverage to reduce
+    aliasing on curved and reflective edges.
+    Safe to call from initializeGL when context is current.
+    """
+    if OpenGL is None:
+        return
+    gl = getattr(OpenGL, "GL", None)
+    if gl is None or not hasattr(gl, "glEnable"):
+        return
+    try:
+        if hasattr(gl, "GL_TEXTURE_CUBE_MAP_SEAMLESS"):
+            gl.glEnable(gl.GL_TEXTURE_CUBE_MAP_SEAMLESS)
+    except Exception:
+        pass
+    try:
+        if hasattr(gl, "GL_MULTISAMPLE"):
+            gl.glEnable(gl.GL_MULTISAMPLE)
+    except Exception:
+        pass
+    try:
+        if hasattr(gl, "GL_DEPTH_CLAMP"):
+            gl.glEnable(gl.GL_DEPTH_CLAMP)
+    except Exception:
+        pass
+    # Reduce aliasing on edges (curves, silhouettes). May be ignored when MSAA is active.
+    try:
+        if hasattr(gl, "GL_LINE_SMOOTH"):
+            gl.glEnable(gl.GL_LINE_SMOOTH)
+    except Exception:
+        pass
+    try:
+        if hasattr(gl, "GL_POLYGON_SMOOTH"):
+            gl.glEnable(gl.GL_POLYGON_SMOOTH)
+    except Exception:
+        pass
+    try:
+        if hasattr(gl, "GL_SAMPLE_ALPHA_TO_COVERAGE"):
+            gl.glEnable(gl.GL_SAMPLE_ALPHA_TO_COVERAGE)
+    except Exception:
+        pass
+
+
 class _StageView(StageView):
     """StageView that overrides DrawAxis and adds a right-click context menu for variant switching."""
 
@@ -77,6 +129,11 @@ class _StageView(StageView):
         self._annotation_overlay = AnnotationGlOverlay()
         self._reticle_overlay = CameraReticleGlOverlay()
         self._slate_overlay = SlateTextGlOverlay()
+
+    def initializeGL(self):
+        """Run base GL init (if any) then apply viewport enhancements."""
+        super().initializeGL()
+        _apply_viewport_gl_state()
 
     @property
     def annotation_overlay(self) -> AnnotationGlOverlay:
@@ -307,6 +364,11 @@ class UsdViewWidget(QtWidgets.QWidget):
     @property
     def viewSettings(self):
         return self._view._dataModel.viewSettings
+
+    @property
+    def reticle_overlay(self):
+        """Camera reticle overlay for this viewport."""
+        return self._view.reticle_overlay
 
     @property
     def stage(self):

@@ -34,8 +34,24 @@ from . import _playbar
 from . import _reticle
 from . import _slate
 
-# Directory containing HDR/EXR environment textures for the dome light
-HDR_IMAGES_DIR = Path(r'F:\hdri')
+# Fallback HDR directory when project has none set (e.g. viewer run without project)
+_DEFAULT_HDR_IMAGES_DIR = Path(r'F:\hdri')
+
+
+def _get_hdr_images_dir() -> Path:
+    """Return the directory for HDR/environment textures (from project config or default)."""
+    try:
+        from deda.core import LayeredConfig
+        config = LayeredConfig.instance()
+        proj = config.current_project if config else None
+        if proj and getattr(proj, 'hdr_images_dir', None):
+            p = Path(proj.hdr_images_dir)
+            if p.is_dir():
+                return p
+    except Exception:
+        pass
+    return _DEFAULT_HDR_IMAGES_DIR
+
 
 # Default FPS when stage does not explicitly set timeCodesPerSecond
 _DEFAULT_FPS = 24
@@ -52,8 +68,60 @@ _KEY_ASPECT_RATIO = 'view/aspectRatio'
 _KEY_ENV_TEXTURE = 'view/environmentTexturePath'
 _KEY_GEOMETRY = 'window/geometry'
 _KEY_RECENT_FILES = 'file/recentFiles'
+_KEY_RETICLE_ENABLED = 'view/reticleEnabled'
+_KEY_RETICLE_STYLE = 'view/reticleStyle'
 
 _MAX_RECENT_FILES = 10
+
+
+class LoadingOverlay(QtWidgets.QWidget):
+    """Semi-transparent overlay with a spinning indicator for loading state."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+        self.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, False)
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+        self._angle_deg = 0
+        self._timer = QtCore.QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self.hide()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._angle_deg = 0
+        self._timer.start(50)
+
+    def hideEvent(self, event):
+        self._timer.stop()
+        super().hideEvent(event)
+
+    def _tick(self):
+        self._angle_deg = (self._angle_deg + 30) % 360
+        self.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.SmoothPixmapTransform)
+        # Semi-transparent background
+        painter.fillRect(self.rect(), QtGui.QColor(0, 0, 0, 120))
+        # Spinning arc at center
+        side = min(self.width(), self.height()) // 4
+        x = (self.width() - side) // 2
+        y = (self.height() - side) // 2
+        rect = QtCore.QRect(x, y, side, side)
+        pen = QtGui.QPen(QtGui.QColor(255, 255, 255, 220))
+        pen.setWidth(max(2, side // 16))
+        painter.setPen(pen)
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        start_angle = 90 - self._angle_deg
+        span_angle = 270
+        painter.drawArc(rect, start_angle * 16, span_angle * 16)
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -74,8 +142,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._recent_files = self._load_recent_files()
         
         self.setWindowTitle('Dedaverse')
-        import deda.app as _deda_app
-        icon_path = Path(_deda_app.__file__).resolve().parent / 'icons' / 'star_icon.png'
+        # Use same star icon as main Dedaverse window (deda.app._main_window)
+        from deda.app import _main_window as _app_main_window
+        icon_path = Path(_app_main_window.__file__).parent / 'icons' / 'star_icon.png'
         if icon_path.is_file():
             self.setWindowIcon(QtGui.QIcon(str(icon_path)))
         
@@ -87,7 +156,11 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self._viewer = UsdViewWidget(stage=None, parent=self)
         vbox.addWidget(self._viewer, 1)
-        
+
+        self._loading_overlay = LoadingOverlay(parent=self._viewer)
+        self._loading_overlay.raise_()
+        self._viewer.installEventFilter(self)
+
         self._playbar = _playbar.Playbar(parent=self)
         self._playbar.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
@@ -136,9 +209,65 @@ class MainWindow(QtWidgets.QMainWindow):
         self._show_bboxes_action.setCheckable(True)
         self._show_bboxes_action.setChecked(self._viewer.viewSettings.showBBoxes)
         self._show_bboxes_action.triggered.connect(self._on_show_bboxes_toggled)
+        self._build_reticle_submenu(view_menu)
         view_menu.addSeparator()
         self._build_aspect_ratio_submenu(view_menu)
         self._build_environment_texture_submenu(view_menu)
+
+    def eventFilter(self, obj, event):
+        """Keep loading overlay sized to the viewer when the viewer is resized."""
+        if obj is self._viewer and event.type() == QtCore.QEvent.Type.Resize:
+            self._loading_overlay.setGeometry(self._viewer.rect())
+        return super().eventFilter(obj, event)
+
+    def _show_loading_overlay(self):
+        """Show the spinning loading overlay over the viewer."""
+        self._loading_overlay.setGeometry(self._viewer.rect())
+        self._loading_overlay.raise_()
+        self._loading_overlay.show()
+        QtWidgets.QApplication.processEvents()
+
+    def _hide_loading_overlay(self):
+        """Hide the loading overlay."""
+        self._loading_overlay.hide()
+
+    def _build_reticle_submenu(self, view_menu):
+        """Add submenu to turn camera reticle on/off and set style. Default off."""
+        reticle_menu = view_menu.addMenu('Camera &Reticle')
+        self._reticle_enabled_action = reticle_menu.addAction('&Show Reticle')
+        self._reticle_enabled_action.setCheckable(True)
+        self._reticle_enabled_action.setChecked(False)
+        self._reticle_enabled_action.triggered.connect(self._on_reticle_enabled_toggled)
+        reticle_menu.addSeparator()
+        style_menu = reticle_menu.addMenu('&Style')
+        self._reticle_style_actions = {}
+        for label, style in [
+            ('&Crosshair', 'crosshair'),
+            ('&Frame', 'frame'),
+            ('&Grid', 'grid'),
+        ]:
+            action = style_menu.addAction(label)
+            action.setCheckable(True)
+            action.setData(style)
+            action.triggered.connect(
+                (lambda s: lambda: self._on_reticle_style_changed(s))(style)
+            )
+            self._reticle_style_actions[style] = action
+
+    def _on_reticle_enabled_toggled(self):
+        """Toggle camera reticle visibility and save to settings."""
+        checked = self._reticle_enabled_action.isChecked()
+        self._viewer.reticle_overlay.enabled = checked
+        self._settings.setValue(_KEY_RETICLE_ENABLED, checked)
+        self._viewer.update_view(resetCam=False, forceComputeBBox=False)
+
+    def _on_reticle_style_changed(self, style):
+        """Set reticle style and save to settings. Uncheck other styles."""
+        self._viewer.reticle_overlay.style = style
+        self._settings.setValue(_KEY_RETICLE_STYLE, style)
+        for s, action in self._reticle_style_actions.items():
+            action.setChecked(s == style)
+        self._viewer.update_view(resetCam=False, forceComputeBBox=False)
 
     def _build_aspect_ratio_submenu(self, view_menu):
         """Add submenu to select view aspect ratio."""
@@ -184,6 +313,8 @@ class MainWindow(QtWidgets.QMainWindow):
         s.setValue(_KEY_ENV_TEXTURE, self._env_texture_path or '')
         s.setValue(_KEY_GEOMETRY, self.saveGeometry())
         s.setValue(_KEY_RECENT_FILES, self._recent_files)
+        s.setValue(_KEY_RETICLE_ENABLED, self._viewer.reticle_overlay.enabled)
+        s.setValue(_KEY_RETICLE_STYLE, self._viewer.reticle_overlay.style)
 
     def _restore_view_settings(self):
         """Restore view options from QSettings."""
@@ -235,6 +366,16 @@ class MainWindow(QtWidgets.QMainWindow):
             if path and Path(path).exists():
                 self._env_texture_path = path
                 self._viewer.set_dome_light_texture(path)
+        # Camera reticle (default off)
+        enabled = s.value(_KEY_RETICLE_ENABLED, False, type=bool)
+        self._viewer.reticle_overlay.enabled = enabled
+        self._reticle_enabled_action.setChecked(enabled)
+        style = s.value(_KEY_RETICLE_STYLE, 'crosshair', type=str)
+        if style not in ('crosshair', 'frame', 'grid'):
+            style = 'crosshair'
+        self._viewer.reticle_overlay.style = style
+        for st, action in self._reticle_style_actions.items():
+            action.setChecked(st == style)
 
     def _restore_geometry(self):
         """Restore window geometry (position and size) from QSettings."""
@@ -243,14 +384,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self.restoreGeometry(geom)
 
     def _build_environment_texture_submenu(self, view_menu):
-        """Add submenu to select dome light environment texture from D:\\hdr_images."""
+        """Add submenu to select dome light environment texture from project HDR directory."""
         env_menu = view_menu.addMenu('&Environment Texture')
         clear_action = env_menu.addAction('&Clear (Default)')
         clear_action.triggered.connect(lambda: self._on_set_environment_texture(None))
         env_menu.addSeparator()
-        if HDR_IMAGES_DIR.is_dir():
+        hdr_dir = _get_hdr_images_dir()
+        if hdr_dir.is_dir():
             textures = sorted(
-                list(HDR_IMAGES_DIR.glob('*.exr')) + list(HDR_IMAGES_DIR.glob('*.hdr'))
+                list(hdr_dir.glob('*.exr')) + list(hdr_dir.glob('*.hdr'))
             )
             for tex_path in textures:
                 action = env_menu.addAction(tex_path.stem)
@@ -264,7 +406,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_set_environment_texture(self, texture_path):
         """Set the dome light environment texture."""
         self._env_texture_path = str(texture_path) if texture_path else None
-        self._viewer.set_dome_light_texture(self._env_texture_path)
+        try:
+            self._show_loading_overlay()
+            self._viewer.set_dome_light_texture(self._env_texture_path)
+        finally:
+            self._hide_loading_overlay()
 
     def _load_recent_files(self):
         """Load recent files list from QSettings."""
@@ -314,6 +460,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _open_stage_file(self, file_path):
         """Load a USD stage from file_path and update the viewer. Used by Open and Recent Files."""
+        self._show_loading_overlay()
         try:
             stage = Usd.Stage.Open(file_path)
             if stage:
@@ -340,6 +487,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 'Open Failed',
                 f'Could not open USD file:\n{file_path}\n\n{e}'
             )
+        finally:
+            self._hide_loading_overlay()
 
     def _on_open_file(self):
         """Open a file dialog and load the selected USD stage."""
