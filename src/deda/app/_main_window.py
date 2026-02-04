@@ -248,10 +248,9 @@ class Panel(QtWidgets.QFrame):
             header.minmax_clicked.connect(self._on_minimized)
             self._on_minimized(header.minimized)
 
-            # Use viewport for context menu so position is in content coordinates
-            viewport = self._scroll_area.viewport()
-            viewport.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-            viewport.customContextMenuRequested.connect(self._show_context_menu)
+            # Context menu on scroll area so it is always triggered when right-clicking in panel
+            self._scroll_area.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+            self._scroll_area.customContextMenuRequested.connect(self._show_context_menu)
             self._items = []   
             
     @property
@@ -344,9 +343,8 @@ class Panel(QtWidgets.QFrame):
         self._update_tile_size()
         
     def _tile_at_position(self, position):
-        """Return the ItemTile under the given position (in viewport coordinates)."""
-        viewport = self._scroll_area.viewport()
-        pos_in_container = viewport.mapTo(self._tiles_container, position)
+        """Return the ItemTile under the given position. Position is in scroll area coordinates."""
+        pos_in_container = self._scroll_area.mapTo(self._tiles_container, position)
         w = self._tiles_container.childAt(pos_in_container)
         while w is not None:
             if isinstance(w, ItemTile):
@@ -355,26 +353,34 @@ class Panel(QtWidgets.QFrame):
         return None
 
     def _show_context_menu(self, position):
+        """Build and show the panel context menu. Position is in scroll area coordinates."""
         menu = QtWidgets.QMenu(parent=self)
 
         tile = self._tile_at_position(position)
         if tile is not None and hasattr(tile, '_item_index'):
             idx = tile._item_index
             if 0 <= idx < len(self._items):
+                # Item-specific actions when right-clicking on a tile
                 config_icon_path = Path(__file__).parent / 'icons' / 'gear_icon_32.png'
                 config_icon = QtGui.QIcon(str(config_icon_path)) if config_icon_path.is_file() else QtGui.QIcon()
-                configure_action = menu.addAction(config_icon, 'Configure...')
-                configure_action.triggered.connect(
+                menu.addAction(config_icon, 'Configure...').triggered.connect(
                     lambda checked=False, i=idx: self._open_configure_dialog(i)
                 )
+                remove_action = menu.addAction('Remove')
+                remove_action.triggered.connect(lambda checked=False, i=idx: self._remove_item_at(i))
                 menu.addSeparator()
 
         icon_path = Path(__file__).parent / 'icons' / 'green_plus.png'
         plus_icon = QtGui.QIcon(str(icon_path))
-        action = menu.addAction(plus_icon, f'Add {self._type_name}')
-        action.triggered.connect(self._add_item)
+        menu.addAction(plus_icon, f'Add {self._type_name}').triggered.connect(self._add_item)
 
-        menu.exec(self._scroll_area.viewport().mapToGlobal(position))
+        menu.exec(self._scroll_area.mapToGlobal(position))
+
+    def _remove_item_at(self, item_index):
+        """Remove the item at the given index and refresh the tile layout."""
+        if 0 <= item_index < len(self._items):
+            self._items.pop(item_index)
+            self._relayout_tiles()
 
     def _open_configure_dialog(self, item_index):
         """Open the configuration dialog for the item at the given index."""
