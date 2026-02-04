@@ -34,7 +34,7 @@ except ImportError:
 import ctypes
 import psutil
 
-from PySide6 import QtWidgets, QtCore
+from PySide6 import QtGui, QtWidgets, QtCore
 
 import deda.log
 import deda.core
@@ -47,7 +47,14 @@ log = logging.getLogger(__name__)
 class Application(QtWidgets.QApplication):
     """Main application instance for all DedaFX apps."""
 
-    def __init__(self, *args, **kwargs): 
+    def __init__(self, *args, **kwargs):
+        # Set default OpenGL surface format before any GL context is created.
+        # Higher MSAA sample count reduces aliasing on curved and reflective edges.
+        fmt = QtGui.QSurfaceFormat()
+        fmt.setSamples(8)
+        fmt.setSwapBehavior(QtGui.QSurfaceFormat.SwapBehavior.DoubleBuffer)
+        QtGui.QSurfaceFormat.setDefaultFormat(fmt)
+
         # For UI scaling
         QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
         QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
