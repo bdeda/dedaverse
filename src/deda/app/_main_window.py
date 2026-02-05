@@ -50,16 +50,23 @@ from ._dialogs import AddItemDialog, ConfigureItemDialog
 log = logging.getLogger(__name__)
 
 
-class ItemTile(QtWidgets.QWidget):
+class ItemTile(QtWidgets.QFrame):
     """Tile widget for displaying an item with icon, name, and tooltip."""
 
     def __init__(self, item_data, tile_width, parent=None):
         super().__init__(parent=parent)
         self._item_data = item_data
         self.setFixedSize(tile_width, tile_width)
+        self.setObjectName("ItemTile")
+        # Set NoFrame so stylesheet border is used instead of QFrame's built-in frame
+        self.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self._normal_border = "rgb(50,50,50)"
+        self._hover_border = "rgb(80,80,80)"  # Lighter gray for hover
+        # Use ID selector for reliable stylesheet application
         self.setStyleSheet(
-            "ItemTile{background-color: rgb(30,30,30); border: 1px solid rgb(50,50,50); border-radius: 3px;}"
+            f"#ItemTile{{background-color: rgb(30,30,30); border: 1px solid {self._normal_border}; border-radius: 3px;}}"
         )
+        self.setMouseTracking(True)
         vbox = QtWidgets.QVBoxLayout(self)
         vbox.setContentsMargins(4, 4, 4, 4)
         vbox.setSpacing(2)
@@ -101,6 +108,20 @@ class ItemTile(QtWidgets.QWidget):
         if description:
             tooltip += f'<br>{html.escape(description)}'
         self.setToolTip(tooltip)
+
+    def enterEvent(self, event):
+        """Change border color to lighter gray when mouse enters the tile."""
+        super().enterEvent(event)
+        self.setStyleSheet(
+            f"#ItemTile{{background-color: rgb(30,30,30); border: 1px solid {self._hover_border}; border-radius: 3px;}}"
+        )
+
+    def leaveEvent(self, event):
+        """Restore normal border color when mouse leaves the tile."""
+        super().leaveEvent(event)
+        self.setStyleSheet(
+            f"#ItemTile{{background-color: rgb(30,30,30); border: 1px solid {self._normal_border}; border-radius: 3px;}}"
+        )
 
 
 class PanelHeader(QtWidgets.QWidget):
