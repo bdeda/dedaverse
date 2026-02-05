@@ -145,13 +145,18 @@ def _apply_viewport_gl_state():
 
 
 class _PrimInfoOverlay(QtWidgets.QFrame):
-    """Semi-transparent floating panel showing prim path and prim spec identifiers."""
+    """Semi-transparent floating panel showing prim path and prim spec identifiers.
+    Shown as a top-level tool window so it is not overdrawn by the OpenGL view."""
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.setWindowFlags(QtCore.Qt.FramelessWindowHint)
+        self.setWindowFlags(
+            QtCore.Qt.FramelessWindowHint
+            | QtCore.Qt.Tool
+            | QtCore.Qt.WindowStaysOnTopHint
+        )
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, False)
-        self.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)
         self.setStyleSheet(
             "background-color: rgba(28, 28, 32, 230);"
             " border: 1px solid rgba(80, 80, 90, 200);"
@@ -406,47 +411,83 @@ class _StageView(StageView):
             log.warning(f'Context menu pick failed: {err}')
             super().contextMenuEvent(event)
 
+    def _try_show_prim_info_at(self, pos):
+        """Pick at pos and show prim info overlay if over a prim. Hide overlay otherwise.
+        pos is in widget coordinates. Returns True if overlay was shown."""
+        if not self._dataModel or not self._dataModel.stage:
+            self._prim_info_overlay.hide()
+            return False
+        try:
+            in_bounds, pick_frustum = self.computePickFrustum(pos.x(), pos.y())
+            if not in_bounds:
+                self._prim_info_overlay.hide()
+                return False
+            pick_results = self.pick(pick_frustum)
+            if not pick_results or len(pick_results) < 3:
+                self._prim_info_overlay.hide()
+                return False
+            prim_path = pick_results[2]
+            if not prim_path or prim_path == Sdf.Path.emptyPath:
+                self._prim_info_overlay.hide()
+                return False
+            stage = self._dataModel.stage
+            prim = stage.GetPrimAtPath(prim_path)
+            info = _get_prim_info_for_hover(prim)
+            if not info:
+                self._prim_info_overlay.hide()
+                return False
+            path_str, spec_ids = info
+            self._prim_info_overlay.set_prim_info(path_str, spec_ids)
+            offset_x, offset_y = 16, 16
+            px = pos.x() + offset_x
+            py = pos.y() + offset_y
+            w, h = self._prim_info_overlay.width(), self._prim_info_overlay.height()
+            if px + w > self.width():
+                px = pos.x() - offset_x - w
+            if py + h > self.height():
+                py = pos.y() - offset_y - h
+            if px < 0:
+                px = 8
+            if py < 0:
+                py = 8
+            # Overlay is a top-level window; position in global coordinates
+            global_pt = self.mapToGlobal(QtCore.QPoint(px, py))
+            self._prim_info_overlay.move(global_pt)
+            self._prim_info_overlay.show()
+            return True
+        except Exception as err:
+            log.debug("Prim hover pick failed: %s", err)
+            self._prim_info_overlay.hide()
+            return False
+
     def mouseMoveEvent(self, event):
         """When Ctrl is held, pick prim under cursor and show floating prim info panel."""
         super().mouseMoveEvent(event)
         pos = event.position().toPoint() if hasattr(event.position(), 'toPoint') else event.pos()
         if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
-            if self._dataModel and self._dataModel.stage:
-                try:
-                    in_bounds, pick_frustum = self.computePickFrustum(pos.x(), pos.y())
-                    if in_bounds:
-                        pick_results = self.pick(pick_frustum)
-                        if pick_results and len(pick_results) >= 3:
-                            prim_path = pick_results[2]
-                            if prim_path and prim_path != Sdf.Path.emptyPath:
-                                stage = self._dataModel.stage
-                                prim = stage.GetPrimAtPath(prim_path)
-                                info = _get_prim_info_for_hover(prim)
-                                if info:
-                                    path_str, spec_ids = info
-                                    self._prim_info_overlay.set_prim_info(path_str, spec_ids)
-                                    self._prim_info_overlay.raise_()
-                                    # Position panel near cursor, keep inside view
-                                    offset_x, offset_y = 16, 16
-                                    px = pos.x() + offset_x
-                                    py = pos.y() + offset_y
-                                    w, h = self._prim_info_overlay.width(), self._prim_info_overlay.height()
-                                    if px + w > self.width():
-                                        px = pos.x() - offset_x - w
-                                    if py + h > self.height():
-                                        py = pos.y() - offset_y - h
-                                    if px < 0:
-                                        px = 8
-                                    if py < 0:
-                                        py = 8
-                                    self._prim_info_overlay.move(px, py)
-                                    self._prim_info_overlay.show()
-                                    return
-                except Exception as err:
-                    log.debug("Prim hover pick failed: %s", err)
-            self._prim_info_overlay.hide()
+            self._try_show_prim_info_at(pos)
         else:
             self._prim_info_overlay.hide()
+
+    def keyPressEvent(self, event):
+        """Show prim info overlay as soon as Ctrl is pressed if cursor is over a prim."""
+        if event.key() == QtCore.Qt.Key.Key_Control:
+            pos = self.mapFromGlobal(QtGui.QCursor.pos())
+            if self.rect().contains(pos):
+                self._try_show_prim_info_at(pos)
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        """Hide prim info overlay when Ctrl is released."""
+        if event.key() == QtCore.Qt.Key.Key_Control:
+            self._prim_info_overlay.hide()
+        super().keyReleaseEvent(event)
+
+    def show_prim_info_at_cursor(self):
+        """Called from parent widget when Ctrl is pressed; show overlay at current cursor if over a prim."""
+        pos = self.mapFromGlobal(QtGui.QCursor.pos())
+        if self.rect().contains(pos):
+            self._try_show_prim_info_at(pos)
 
     def leaveEvent(self, event):
         """Hide prim info overlay when mouse leaves the view."""
@@ -675,10 +716,16 @@ class UsdViewWidget(QtWidgets.QWidget):
 
     def keyPressEvent(self, event):
         key = event.key()
-        if key == QtCore.Qt.Key_F:
-            self.update_view(resetCam=True, forceComputeBBox=True)        
-        
-        
+        if key == QtCore.Qt.Key.Key_F:
+            self.update_view(resetCam=True, forceComputeBBox=True)
+        elif key == QtCore.Qt.Key.Key_Control:
+            self._view.show_prim_info_at_cursor()
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if event.key() == QtCore.Qt.Key.Key_Control:
+            self._view._prim_info_overlay.hide()
+        super().keyReleaseEvent(event)
 
 if __name__ == '__main__':
     app = QtWidgets.QApplication([])
