@@ -95,6 +95,8 @@ class AddItemDialog(QtWidgets.QDialog):
             items = _types.all_default_asset_types()
         elif type_name == 'App':
             items = ['Command', 'Python']
+        elif type_name == 'Service':
+            items = ['REST']  # Services are REST-based
         elif type_name == 'Task':
             items = ['Work', 'Review', 'Notify']        
         self._types_cb.addItems(items)
@@ -107,16 +109,23 @@ class AddItemDialog(QtWidgets.QDialog):
             self._types_cb.setCurrentIndex(idx)
         self._types_cb.currentTextChanged.connect(self._on_type_changed)
 
-        if type_name != 'App':
-            grid.addWidget(self._types_cb, 1, 3, -1, 1)        
-        else:
+        if type_name == 'App':
             grid.addWidget(self._types_cb, 1, 3)
             
             lbl = QtWidgets.QLabel('Command:')
             grid.addWidget(lbl, 2, 2)
             self._command_le = QtWidgets.QLineEdit()
             grid.addWidget(self._command_le, 2, 3, -1, 1)
-            #self._command_le.textEdited.connect(self._name_changed)            
+            #self._command_le.textEdited.connect(self._name_changed)
+        elif type_name == 'Service':
+            grid.addWidget(self._types_cb, 1, 3)
+            
+            lbl = QtWidgets.QLabel('URL:')
+            grid.addWidget(lbl, 2, 2)
+            self._url_le = QtWidgets.QLineEdit()
+            grid.addWidget(self._url_le, 2, 3, -1, 1)
+        else:
+            grid.addWidget(self._types_cb, 1, 3, -1, 1)            
         
         # buttons to create or cancel
         self._btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel,
@@ -139,6 +148,9 @@ class AddItemDialog(QtWidgets.QDialog):
         }
         if self._type_name == 'App':
             item['command'] = self._command_le.text()
+        elif self._type_name == 'Service':
+            item['url'] = self._url_le.text().strip()
+            item['params'] = []  # Parameters can be added later via configure dialog
         # Store the icon path if a custom icon was selected
         if self._selected_icon_path:
             item['icon'] = self._selected_icon_path
@@ -231,14 +243,22 @@ class ConfigureItemDialog(QtWidgets.QDialog):
         self._desc_le.setPlaceholderText('Optional description')
         grid.addWidget(self._desc_le, 2, 2)
 
-        # Command (Apps only)
+        # Command (Apps only) or URL (Services only)
         if type_name == 'App':
             grid.addWidget(QtWidgets.QLabel('Command:'), 3, 1)
             self._command_le = QtWidgets.QLineEdit()
             self._command_le.setText(self._item_data.get('command', ''))
             grid.addWidget(self._command_le, 3, 2)
+            self._url_le = None
+        elif type_name == 'Service':
+            grid.addWidget(QtWidgets.QLabel('URL:'), 3, 1)
+            self._url_le = QtWidgets.QLineEdit()
+            self._url_le.setText(self._item_data.get('url', ''))
+            grid.addWidget(self._url_le, 3, 2)
+            self._command_le = None
         else:
             self._command_le = None
+            self._url_le = None
 
         self._btns = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel,
@@ -280,6 +300,9 @@ class ConfigureItemDialog(QtWidgets.QDialog):
             updated['icon'] = self._selected_icon_path
         if self._type_name == 'App' and self._command_le is not None:
             updated['command'] = self._command_le.text()
+        elif self._type_name == 'Service' and self._url_le is not None:
+            updated['url'] = self._url_le.text().strip()
+            updated['params'] = self._item_data.get('params', [])  # Preserve existing params
         self.item_updated.emit(self._item_index, updated)
         self.close()
 

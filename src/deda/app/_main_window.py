@@ -41,7 +41,7 @@ from pathlib import Path
 from PySide6 import QtWidgets, QtCore, QtGui
 
 from deda.core import LayeredConfig, Project
-from deda.core._config import AppConfig
+from deda.core._config import AppConfig, ServiceConfig
 
 from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
@@ -189,6 +189,19 @@ class MainWindow(QtWidgets.QMainWindow):
         based on the config settings.
         
         """
+        # Disconnect view menu actions from previous panels so we don't hold references to
+        # deleted Panel widgets (avoids "Internal C++ object already deleted" when toggling view).
+        _connections = getattr(self, '_view_action_connections', None)
+        if _connections:
+            for conn in _connections.values():
+                try:
+                    conn.disconnect()
+                except RuntimeError:
+                    pass
+            self._view_action_connections.clear()
+        else:
+            self._view_action_connections = {}
+
         widget = QtWidgets.QWidget(parent=self)
         self.setCentralWidget(widget)        
         vbox = QtWidgets.QVBoxLayout()
@@ -238,6 +251,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 panel_obj.item_created.connect(self._on_app_created)
                 panel_obj.item_updated.connect(self._on_app_updated)
                 panel_obj.item_activated.connect(self._on_app_activated)
+                panel_obj.item_removed.connect(self._on_app_removed)
+            elif panel == 'Services':
+                panel_obj.item_created.connect(self._on_service_created)
+                panel_obj.item_updated.connect(self._on_service_updated)
+                panel_obj.item_removed.connect(self._on_service_removed)
             # Connect item_created to add tile to the panel
             panel_obj.item_created.connect(
                 lambda item, p=panel_obj: p.add_item_tile(item)
@@ -258,6 +276,11 @@ class MainWindow(QtWidgets.QMainWindow):
         apps_panel = widget.findChild(Panel, 'Apps')
         if apps_panel:
             self._load_apps_to_panel(apps_panel)
+        
+        # Re-load services from project config (on startup or when project is switched)
+        services_panel = widget.findChild(Panel, 'Services')
+        if services_panel:
+            self._load_services_to_panel(services_panel)
         
         #vbox.addWidget(AssetPanel(parent=self))
         #vbox.addWidget(AppPanel(parent=self))
@@ -310,12 +333,24 @@ class MainWindow(QtWidgets.QMainWindow):
             panel_obj.visibility = action.isChecked()
 
     def _connect_view_action_for_panel(self, panel_obj):
-        """Connect the View submenu action to show/hide this panel."""
+        """Connect the View submenu action to show/hide this panel by name.
+        Uses panel name so we never hold a reference to a deleted panel.
+        """
         action = self._action_for_panel_name(panel_obj.objectName())
-        if action:
-            action.triggered.connect(
-                lambda checked, p=panel_obj: self._on_view_toggled_for_panel(checked, p)
-            )
+        if not action:
+            return
+        panel_name = panel_obj.objectName()
+        # Disconnect previous connection for this panel if we rebuilt the main widget
+        existing = self._view_action_connections.get(panel_name)
+        if existing is not None:
+            try:
+                existing.disconnect()
+            except RuntimeError:
+                pass
+        conn = action.triggered.connect(
+            lambda checked, name=panel_name: self._on_view_toggled_for_panel_by_name(checked, name)
+        )
+        self._view_action_connections[panel_name] = conn
 
     def _all_non_project_panels_hidden(self):
         """Return True if Assets, Apps, Services, and Tasks are all hidden."""
@@ -347,6 +382,16 @@ class MainWindow(QtWidgets.QMainWindow):
         """Handle View submenu toggle: show/hide panel and update layout."""
         panel_obj.visibility = checked
         self._update_panel_stack_layout()
+
+    def _on_view_toggled_for_panel_by_name(self, checked, panel_name):
+        """Handle View submenu toggle by panel name; finds current panel so we never touch a deleted widget."""
+        widget = self.centralWidget()
+        if not widget:
+            return
+        panel = widget.findChild(Panel, panel_name)
+        if panel is not None:
+            panel.visibility = checked
+            self._update_panel_stack_layout()
 
     def _update_panel_stack_layout(self):
         """When all non-Project panels are hidden, add top stretch to pin Project at bottom."""
@@ -429,11 +474,15 @@ class MainWindow(QtWidgets.QMainWindow):
         for app_config in merged:
             if not app_config.enabled:
                 continue
+            # Get layer information for this app
+            layer_name, is_writable = self._config.get_app_layer_info(app_config.name)
             item_data = {
                 'name': app_config.name,
                 'type': 'Command',
                 'description': '',
                 'command': app_config.command,
+                'layer': layer_name,  # 'site', 'user', or 'project'
+                'is_writable': is_writable,  # True if the layer's config file is writable
             }
             if app_config.icon_path:
                 item_data['icon'] = app_config.icon_path
@@ -441,6 +490,39 @@ class MainWindow(QtWidgets.QMainWindow):
             count += 1
 
         log.debug("Loaded %d apps from config layers (site + user + project)", count)
+
+    def _load_services_to_panel(self, services_panel):
+        """Load services from site (studio), user, and project config layers into the Services panel.
+        Later layers override earlier when the same service name exists.
+        """
+        if not services_panel:
+            return
+
+        merged = self._config.get_merged_services()
+
+        # Clear existing items in the panel
+        services_panel._items.clear()
+        services_panel._relayout_tiles()
+
+        count = 0
+        for service_config in merged:
+            if not service_config.enabled:
+                continue
+            # Get layer information for this service
+            layer_name, is_writable = self._config.get_service_layer_info(service_config.name)
+            item_data = {
+                'name': service_config.name,
+                'type': 'Service',
+                'description': service_config.url or '',
+                'url': service_config.url,
+                'params': service_config.params or [],
+                'layer': layer_name,  # 'site', 'user', or 'project'
+                'is_writable': is_writable,  # True if the layer's config file is writable
+            }
+            services_panel.add_item_tile(item_data)
+            count += 1
+
+        log.debug("Loaded %d services from config layers (site + user + project)", count)
 
     def _on_app_created(self, app_info):
         """Handle the creation of an app and save it to the project config."""
@@ -521,6 +603,145 @@ class MainWindow(QtWidgets.QMainWindow):
             log.info("Updated app '%s' in project config", app_name)
         except Exception as err:
             log.error("Failed to update app in project config: %s", err)
+
+    def _on_service_created(self, service_info):
+        """Handle the creation of a service and save it to the project config."""
+        if not self.current_project:
+            log.warning("Cannot save service: no current project")
+            return
+        
+        # Convert item dict to ServiceConfig
+        service_name = service_info.get('name', 'Untitled')
+        url = service_info.get('url', '')
+        params = service_info.get('params', [])
+        
+        # Do not add if a service with the same name already exists
+        existing_names = {s.name for s in self.current_project.services}
+        if service_name in existing_names:
+            log.warning(f"Service '{service_name}' already exists in project config; not adding duplicate.")
+            return
+
+        # Create ServiceConfig with required fields
+        service_config = ServiceConfig(
+            name=service_name,
+            enabled=True,  # New services are enabled by default
+            url=url,
+            params=params if params else []
+        )
+
+        # Add to project config services list
+        self.current_project.services.append(service_config)
+
+        # Save the project config
+        try:
+            self.current_project.save()
+            log.info(f"Saved service '{service_name}' to project config")
+        except Exception as err:
+            log.error(f"Failed to save service to project config: {err}")
+
+    def _on_service_updated(self, item_index, updated_data):
+        """Handle the update of a service and persist to the project config (by name).
+        Panel order is merged (site + user + project), so we find or add by name in project.
+        """
+        if not self.current_project:
+            log.warning("Cannot update service: no current project")
+            return
+
+        service_name = updated_data.get('name', '').strip() or 'Untitled'
+        url = updated_data.get('url', '')
+        params = updated_data.get('params', [])
+
+        # Find service by name in project config (service may have come from site/user layer)
+        service_config = None
+        for s in self.current_project.services:
+            if s.name == service_name:
+                service_config = s
+                break
+
+        if service_config is None:
+            # Service came from site or user; add project-level override
+            service_config = ServiceConfig(
+                name=service_name,
+                enabled=True,
+                url=url,
+                params=params if params else []
+            )
+            self.current_project.services.append(service_config)
+        else:
+            service_config.url = url
+            service_config.params = params if params else []
+
+        try:
+            self.current_project.save()
+            log.info("Updated service '%s' in project config", service_name)
+        except Exception as err:
+            log.error("Failed to update service in project config: %s", err)
+
+    def _on_app_removed(self, item_data):
+        """Handle the removal of an app and delete it from the project config."""
+        if not self.current_project:
+            log.warning("Cannot remove app: no current project")
+            return
+        
+        app_name = item_data.get('name', '').strip()
+        if not app_name:
+            return
+
+        # Find and remove app by name from project config
+        removed = False
+        for i, app_config in enumerate(self.current_project.apps):
+            if app_config.name == app_name:
+                self.current_project.apps.pop(i)
+                removed = True
+                break
+
+        if removed:
+            try:
+                self.current_project.save()
+                log.info(f"Removed app '{app_name}' from project config")
+                # Reload the apps panel to reflect the change
+                widget = self.centralWidget()
+                if widget:
+                    apps_panel = widget.findChild(Panel, 'Apps')
+                    if apps_panel:
+                        self._load_apps_to_panel(apps_panel)
+            except Exception as err:
+                log.error(f"Failed to remove app from project config: {err}")
+        else:
+            log.warning(f"App '{app_name}' not found in project config (may be from site/user layer)")
+
+    def _on_service_removed(self, item_data):
+        """Handle the removal of a service and delete it from the project config."""
+        if not self.current_project:
+            log.warning("Cannot remove service: no current project")
+            return
+        
+        service_name = item_data.get('name', '').strip()
+        if not service_name:
+            return
+
+        # Find and remove service by name from project config
+        removed = False
+        for i, service_config in enumerate(self.current_project.services):
+            if service_config.name == service_name:
+                self.current_project.services.pop(i)
+                removed = True
+                break
+
+        if removed:
+            try:
+                self.current_project.save()
+                log.info(f"Removed service '{service_name}' from project config")
+                # Reload the services panel to reflect the change
+                widget = self.centralWidget()
+                if widget:
+                    services_panel = widget.findChild(Panel, 'Services')
+                    if services_panel:
+                        self._load_services_to_panel(services_panel)
+            except Exception as err:
+                log.error(f"Failed to remove service from project config: {err}")
+        else:
+            log.warning(f"Service '{service_name}' not found in project config (may be from site/user layer)")
     
     def _open_project_settings(self):
         

@@ -208,6 +208,7 @@ class Panel(QtWidgets.QFrame):
     item_created = QtCore.Signal(object)
     item_updated = QtCore.Signal(int, object)  # item_index, updated_item_data
     item_activated = QtCore.Signal(object)  # item_data when tile is double-clicked
+    item_removed = QtCore.Signal(object)  # item_data when item is removed
     minimized_changed = QtCore.Signal(str, bool)
     
     def __init__(self, type_name, name, 
@@ -354,9 +355,12 @@ class Panel(QtWidgets.QFrame):
         self._update_tile_size()
         
     def _tile_at_position(self, position):
-        """Return the ItemTile under the given position. Position is in scroll area coordinates."""
-        pos_in_container = self._scroll_area.mapTo(self._tiles_container, position)
-        w = self._tiles_container.childAt(pos_in_container)
+        """Return the ItemTile under the given position. Position is in scroll area viewport coordinates."""
+        # customContextMenuRequested provides coordinates relative to the viewport
+        # Find the widget at this position by using childAt on the viewport
+        viewport = self._scroll_area.viewport()
+        w = viewport.childAt(position)
+        # Walk up the parent chain to find an ItemTile
         while w is not None:
             if isinstance(w, ItemTile):
                 return w
@@ -364,34 +368,45 @@ class Panel(QtWidgets.QFrame):
         return None
 
     def _show_context_menu(self, position):
-        """Build and show the panel context menu. Position is in scroll area coordinates."""
+        """Build and show the panel context menu. Position is in scroll area viewport coordinates."""
         menu = QtWidgets.QMenu(parent=self)
 
         tile = self._tile_at_position(position)
         if tile is not None and hasattr(tile, '_item_index'):
             idx = tile._item_index
             if 0 <= idx < len(self._items):
-                # Item-specific actions when right-clicking on a tile
-                config_icon_path = Path(__file__).parent / 'icons' / 'gear_icon_32.png'
-                config_icon = QtGui.QIcon(str(config_icon_path)) if config_icon_path.is_file() else QtGui.QIcon()
-                menu.addAction(config_icon, 'Configure...').triggered.connect(
-                    lambda checked=False, i=idx: self._open_configure_dialog(i)
-                )
-                remove_action = menu.addAction('Remove')
-                remove_action.triggered.connect(lambda checked=False, i=idx: self._remove_item_at(i))
-                menu.addSeparator()
+                item_data = self._items[idx]
+                # Check if this item is from a writable layer (for apps, check layer writability)
+                is_writable = item_data.get('is_writable', True)  # Default to True for non-app items
+                
+                # Only show Configure/Remove if the item's layer is writable
+                if is_writable:
+                    # Item-specific actions when right-clicking on a tile
+                    config_icon_path = Path(__file__).parent / 'icons' / 'gear_icon_32.png'
+                    config_icon = QtGui.QIcon(str(config_icon_path)) if config_icon_path.is_file() else QtGui.QIcon()
+                    menu.addAction(config_icon, 'Configure...').triggered.connect(
+                        lambda checked=False, i=idx: self._open_configure_dialog(i)
+                    )
+                    remove_action = menu.addAction('Remove')
+                    remove_action.triggered.connect(lambda checked=False, i=idx: self._remove_item_at(i))
+                    menu.addSeparator()
 
         icon_path = Path(__file__).parent / 'icons' / 'green_plus.png'
         plus_icon = QtGui.QIcon(str(icon_path))
         menu.addAction(plus_icon, f'Add {self._type_name}').triggered.connect(self._add_item)
 
-        menu.exec(self._scroll_area.mapToGlobal(position))
+        # Convert viewport coordinates to global coordinates for menu.exec()
+        viewport = self._scroll_area.viewport()
+        global_pos = viewport.mapToGlobal(position)
+        menu.exec(global_pos)
 
     def _remove_item_at(self, item_index):
         """Remove the item at the given index and refresh the tile layout."""
         if 0 <= item_index < len(self._items):
-            self._items.pop(item_index)
+            item_data = self._items.pop(item_index)
             self._relayout_tiles()
+            # Emit signal so parent can remove from config if needed
+            self.item_removed.emit(item_data)
 
     def _open_configure_dialog(self, item_index):
         """Open the configuration dialog for the item at the given index."""

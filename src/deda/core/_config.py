@@ -166,6 +166,20 @@ class SiteConfig:
     def __hash__(self):
         return hash(self.name)
 
+    @property
+    def is_writable(self) -> bool:
+        """True if the site config file can be written."""
+        site_config_path = os.getenv('DEDAVERSE_SITE_CONFIG')
+        if not site_config_path:
+            # No site config file means it's a default in-memory config, which is not writable
+            return False
+        site_config_file = Path(site_config_path)
+        if not site_config_file.is_file():
+            # File doesn't exist yet, check if we can create it
+            site_config_dir = site_config_file.parent
+            return os.access(site_config_dir, os.W_OK) if site_config_dir.exists() else False
+        return os.access(site_config_file, os.W_OK)
+
     @classmethod
     def load(cls) -> 'SiteConfig | None':
         """Load site config from DEDAVERSE_SITE_CONFIG path.
@@ -237,7 +251,7 @@ class ProjectConfig:
 
     plugins: list[PluginConfig] = field(default_factory=list)
 
-    services: list[str] = field(default_factory=list)
+    services: list[ServiceConfig] = field(default_factory=list)
 
     apps: list[AppConfig] = field(default_factory=list)
 
@@ -343,6 +357,16 @@ class UserConfig:
     plugins: list[PluginConfig] = field(default_factory=list)
     services: list[ServiceConfig] = field(default_factory=list)
     apps: list[AppConfig] = field(default_factory=list)
+
+    @property
+    def is_writable(self) -> bool:
+        """True if the user config file can be written."""
+        user_config_path = Path.home() / '.dedaverse' / 'user.cfg'
+        if not user_config_path.is_file():
+            # File doesn't exist yet, check if we can create it
+            user_config_dir = user_config_path.parent
+            return os.access(user_config_dir, os.W_OK) if user_config_dir.exists() else False
+        return os.access(user_config_path, os.W_OK)
 
     @classmethod
     def load(cls) -> 'UserConfig':
@@ -499,6 +523,86 @@ class LayeredConfig:
                 by_name[app.name] = len(merged)
                 merged.append(app)
         return merged
+
+    def get_app_layer_info(self, app_name: str) -> tuple[str, bool]:
+        """Return the layer name and writability for the given app.
+        
+        Args:
+            app_name: Name of the app to check.
+            
+        Returns:
+            Tuple of (layer_name, is_writable) where layer_name is 'site', 'user', or 'project'.
+            If app is not found, returns ('project', True) as default.
+        """
+        # Check in reverse order (project -> user -> site) to find the layer that defines this app
+        if self.current_project:
+            project_apps = self.current_project.apps or []
+            for app in project_apps:
+                if app.name == app_name:
+                    return ('project', self.current_project.is_writable)
+        
+        user_apps = self.user.apps or []
+        for app in user_apps:
+            if app.name == app_name:
+                return ('user', self.user.is_writable)
+        
+        if self._site_config:
+            site_apps = self._site_config.apps or []
+            for app in site_apps:
+                if app.name == app_name:
+                    return ('site', self._site_config.is_writable)
+        
+        # Default to project layer (shouldn't happen if app exists)
+        return ('project', True)
+
+    def get_merged_services(self) -> list[ServiceConfig]:
+        """Return services from site, user, and current project layers.
+        Later layers override earlier when the same service name exists.
+        Order: site first, then user, then project.
+        """
+        merged: list[ServiceConfig] = []
+        by_name: dict[str, int] = {}
+        site_services = (self._site_config.services if self._site_config else []) or []
+        user_services = self.user.services or []
+        project_services = (self.current_project.services if self.current_project else []) or []
+        for service in site_services + user_services + project_services:
+            if service.name in by_name:
+                merged[by_name[service.name]] = service
+            else:
+                by_name[service.name] = len(merged)
+                merged.append(service)
+        return merged
+
+    def get_service_layer_info(self, service_name: str) -> tuple[str, bool]:
+        """Return the layer name and writability for the given service.
+        
+        Args:
+            service_name: Name of the service to check.
+            
+        Returns:
+            Tuple of (layer_name, is_writable) where layer_name is 'site', 'user', or 'project'.
+            If service is not found, returns ('project', True) as default.
+        """
+        # Check in reverse order (project -> user -> site) to find the layer that defines this service
+        if self.current_project:
+            project_services = self.current_project.services or []
+            for service in project_services:
+                if service.name == service_name:
+                    return ('project', self.current_project.is_writable)
+        
+        user_services = self.user.services or []
+        for service in user_services:
+            if service.name == service_name:
+                return ('user', self.user.is_writable)
+        
+        if self._site_config:
+            site_services = self._site_config.services or []
+            for service in site_services:
+                if service.name == service_name:
+                    return ('site', self._site_config.is_writable)
+        
+        # Default to project layer (shouldn't happen if service exists)
+        return ('project', True)
 
     @property
     def current_project(self) -> ProjectConfig | None:
