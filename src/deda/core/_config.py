@@ -77,10 +77,12 @@ class AppConfig:
     enabled: bool
 
     def __eq__(self, other):
-        return self.name == other.name and self.version == other.version
-    
+        if not isinstance(other, AppConfig):
+            return NotImplemented
+        return self.name == other.name
+
     def __hash__(self):
-        return hash((self.name, self.version))
+        return hash(self.name)
     
 
 @dataclass_json
@@ -237,7 +239,20 @@ class ProjectConfig:
 
     services: list[str] = field(default_factory=list)
 
-    apps: list[AppConfig] = field(default_factory=list) 
+    apps: list[AppConfig] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """When apps list is empty (new studio config), add the default Dedaverse viewer app."""
+        if not self.apps:
+            self.apps.append(AppConfig(
+                name='Dedaverse',
+                version='',
+                command='python -m deda.core.viewer',
+                icon_path='',
+                install_url='',
+                help_url='',
+                enabled=True,
+            ))
     
     def __eq__(self, other):
         return self.name == str(other) 
@@ -411,6 +426,17 @@ class LayeredConfig:
     ``current_project`` or ``projects`` is accessed.
     """
 
+    # Default studio app when no site config file is loaded (so Dedaverse viewer is always available)
+    _DEFAULT_STUDIO_APP = AppConfig(
+        name='Dedaverse',
+        version='',
+        command='python -m deda.core.viewer',
+        icon_path='',
+        install_url='',
+        help_url='',
+        enabled=True,
+    )
+
     def __init__(self):
         
         self._all_projects = {}
@@ -418,6 +444,18 @@ class LayeredConfig:
         # The site config is loaded to include the settings for all users and all projects
         # This is retrieved via env var, and set up by system administrators or pipeline teams
         self._site_config = SiteConfig.load()
+        # When no site config exists or it has no apps, ensure studio layer has Dedaverse so it is inherited
+        if self._site_config is None:
+            self._site_config = SiteConfig(
+                name=None,
+                plugin_urls=[],
+                plugins=[],
+                services=[],
+                apps=[self._DEFAULT_STUDIO_APP],
+                projects={},
+            )
+        elif not self._site_config.apps:
+            self._site_config.apps = [self._DEFAULT_STUDIO_APP]
                
         # Loaded first, when the system starts. If not found, opens up a <new project>
         self._user_config = UserConfig.load()
@@ -438,6 +476,29 @@ class LayeredConfig:
     def user(self) -> UserConfig:
         """The user configuration."""
         return self._user_config
+
+    @property
+    def site(self) -> 'SiteConfig | None':
+        """The site (studio) configuration, if loaded."""
+        return self._site_config
+
+    def get_merged_apps(self) -> list[AppConfig]:
+        """Return apps from site, user, and current project layers.
+        Later layers override earlier when the same app name exists.
+        Order: site first, then user, then project.
+        """
+        merged: list[AppConfig] = []
+        by_name: dict[str, int] = {}
+        site_apps = (self._site_config.apps if self._site_config else []) or []
+        user_apps = self.user.apps or []
+        project_apps = (self.current_project.apps if self.current_project else []) or []
+        for app in site_apps + user_apps + project_apps:
+            if app.name in by_name:
+                merged[by_name[app.name]] = app
+            else:
+                by_name[app.name] = len(merged)
+                merged.append(app)
+        return merged
 
     @property
     def current_project(self) -> ProjectConfig | None:

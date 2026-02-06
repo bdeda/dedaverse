@@ -54,33 +54,46 @@ class TestAppConfig(unittest.TestCase):
         self.assertTrue(app.enabled)
 
     def test_app_config_equality(self):
-        """Test AppConfig equality comparison."""
+        """Test AppConfig equality by name only (same name => equal, no duplicates)."""
         app1 = AppConfig(
-            name='TestApp', version='1.0.0', command='test', icon_path='', 
+            name='TestApp', version='1.0.0', command='test', icon_path='',
             install_url='', help_url='', enabled=True
         )
         app2 = AppConfig(
-            name='TestApp', version='1.0.0', command='test', icon_path='', 
+            name='TestApp', version='1.0.0', command='test', icon_path='',
             install_url='', help_url='', enabled=True
         )
         app3 = AppConfig(
-            name='TestApp', version='2.0.0', command='test', icon_path='', 
+            name='TestApp', version='2.0.0', command='other', icon_path='',
+            install_url='', help_url='', enabled=True
+        )
+        app4 = AppConfig(
+            name='OtherApp', version='1.0.0', command='test', icon_path='',
             install_url='', help_url='', enabled=True
         )
         self.assertEqual(app1, app2)
-        self.assertNotEqual(app1, app3)
+        self.assertEqual(app1, app3)  # Same name => equal (version ignored)
+        self.assertNotEqual(app1, app4)  # Different name => not equal
 
     def test_app_config_hash(self):
-        """Test AppConfig hashing."""
+        """Test AppConfig hashing (by name only; hashable for duplicate detection)."""
         app1 = AppConfig(
-            name='TestApp', version='1.0.0', command='test', icon_path='', 
+            name='TestApp', version='1.0.0', command='test', icon_path='',
             install_url='', help_url='', enabled=True
         )
         app2 = AppConfig(
-            name='TestApp', version='1.0.0', command='test', icon_path='', 
+            name='TestApp', version='2.0.0', command='other', icon_path='',
             install_url='', help_url='', enabled=True
         )
-        self.assertEqual(hash(app1), hash(app2))
+        app3 = AppConfig(
+            name='OtherApp', version='1.0.0', command='test', icon_path='',
+            install_url='', help_url='', enabled=True
+        )
+        self.assertEqual(hash(app1), hash(app2))  # Same name => same hash
+        self.assertNotEqual(hash(app1), hash(app3))  # Different name => different hash
+        # Can be used in a set (no duplicate names)
+        app_set = {app1, app2, app3}
+        self.assertEqual(len(app_set), 2)  # app1 and app2 collapse (same name)
 
 
 class TestPluginConfig(unittest.TestCase):

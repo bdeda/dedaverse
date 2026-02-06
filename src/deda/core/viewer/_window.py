@@ -70,6 +70,7 @@ _KEY_GEOMETRY = 'window/geometry'
 _KEY_RECENT_FILES = 'file/recentFiles'
 _KEY_RETICLE_ENABLED = 'view/reticleEnabled'
 _KEY_RETICLE_STYLE = 'view/reticleStyle'
+_KEY_SLATE_ENABLED = 'view/slateEnabled'
 
 _MAX_RECENT_FILES = 10
 
@@ -210,6 +211,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._show_bboxes_action.setChecked(self._viewer.viewSettings.showBBoxes)
         self._show_bboxes_action.triggered.connect(self._on_show_bboxes_toggled)
         self._build_reticle_submenu(view_menu)
+        self._slate_layer_action = view_menu.addAction('Slate &Layer')
+        self._slate_layer_action.setCheckable(True)
+        self._slate_layer_action.setChecked(self._viewer.slate_overlay.enabled)
+        self._slate_layer_action.triggered.connect(self._on_slate_layer_toggled)
         view_menu.addSeparator()
         self._build_aspect_ratio_submenu(view_menu)
         self._build_environment_texture_submenu(view_menu)
@@ -259,6 +264,13 @@ class MainWindow(QtWidgets.QMainWindow):
         checked = self._reticle_enabled_action.isChecked()
         self._viewer.reticle_overlay.enabled = checked
         self._settings.setValue(_KEY_RETICLE_ENABLED, checked)
+        self._viewer.update_view(resetCam=False, forceComputeBBox=False)
+
+    def _on_slate_layer_toggled(self):
+        """Toggle slate text overlay and save to settings."""
+        checked = self._slate_layer_action.isChecked()
+        self._viewer.slate_overlay.enabled = checked
+        self._settings.setValue(_KEY_SLATE_ENABLED, checked)
         self._viewer.update_view(resetCam=False, forceComputeBBox=False)
 
     def _on_reticle_style_changed(self, style):
@@ -315,6 +327,7 @@ class MainWindow(QtWidgets.QMainWindow):
         s.setValue(_KEY_RECENT_FILES, self._recent_files)
         s.setValue(_KEY_RETICLE_ENABLED, self._viewer.reticle_overlay.enabled)
         s.setValue(_KEY_RETICLE_STYLE, self._viewer.reticle_overlay.style)
+        s.setValue(_KEY_SLATE_ENABLED, self._viewer.slate_overlay.enabled)
 
     def _restore_view_settings(self):
         """Restore view options from QSettings."""
@@ -376,6 +389,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._viewer.reticle_overlay.style = style
         for st, action in self._reticle_style_actions.items():
             action.setChecked(st == style)
+        # Slate layer (default off)
+        slate_enabled = s.value(_KEY_SLATE_ENABLED, False, type=bool)
+        self._viewer.slate_overlay.enabled = slate_enabled
+        self._slate_layer_action.setChecked(slate_enabled)
 
     def _restore_geometry(self):
         """Restore window geometry (position and size) from QSettings."""

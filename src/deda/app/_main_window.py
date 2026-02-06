@@ -30,6 +30,7 @@ except ImportError:
 finally:
     sys.path = sys.path[1:]
 import os
+import subprocess
 import logging
 import json
 import functools
@@ -40,377 +41,17 @@ from pathlib import Path
 from PySide6 import QtWidgets, QtCore, QtGui
 
 from deda.core import LayeredConfig, Project
+from deda.core._config import AppConfig
 
 from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
 from ._dialogs import AddItemDialog, ConfigureItemDialog
+from ._panel import ItemTile, PanelHeader, Panel
 #from deda.core.viewer import UsdViewWidget
 
 
 log = logging.getLogger(__name__)
 
-
-class ItemTile(QtWidgets.QWidget):
-    """Tile widget for displaying an item with icon, name, and tooltip."""
-
-    def __init__(self, item_data, tile_width, parent=None):
-        super().__init__(parent=parent)
-        self._item_data = item_data
-        self.setFixedSize(tile_width, tile_width)
-        self.setStyleSheet(
-            "ItemTile{background-color: rgb(30,30,30); border: 1px solid rgb(50,50,50); border-radius: 3px;}"
-        )
-        vbox = QtWidgets.QVBoxLayout(self)
-        vbox.setContentsMargins(4, 4, 4, 4)
-        vbox.setSpacing(2)
-
-        icon_path = item_data.get('icon', None)
-        if icon_path and Path(icon_path).is_file():
-            pixmap = QtGui.QPixmap(icon_path)
-        else:
-            icon_path = Path(__file__).parent / 'icons' / 'questionmark_small.png'
-            pixmap = QtGui.QPixmap(str(icon_path))
-        icon_size = tile_width - 20
-        pixmap = pixmap.scaled(
-            icon_size, icon_size,
-            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-            QtCore.Qt.TransformationMode.SmoothTransformation
-        )
-        icon_label = QtWidgets.QLabel()
-        icon_label.setPixmap(pixmap)
-        icon_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        vbox.addWidget(icon_label)
-
-        name = item_data.get('name', 'Untitled')
-        name_label = QtWidgets.QLabel(name)
-        name_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        font = name_label.font()
-        font.setPointSize(max(8, tile_width // 20))
-        name_label.setFont(font)
-        name_label.setWordWrap(True)
-        vbox.addWidget(name_label)
-
-        description = item_data.get('description', '')
-        title = item_data.get('title', '')
-        item_type = item_data.get('type', '')
-        tooltip = f'<b>{html.escape(name)}</b>'
-        if title and title != name:
-            tooltip += f'<br><i>{html.escape(title)}</i>'
-        if item_type:
-            tooltip += f'<br><i>Type: {html.escape(item_type)}</i>'
-        if description:
-            tooltip += f'<br>{html.escape(description)}'
-        self.setToolTip(tooltip)
-
-
-class PanelHeader(QtWidgets.QWidget):
-    
-    gear_icon = None
-    close_icon = None
-    
-    settings_clicked = QtCore.Signal()
-    minmax_clicked = QtCore.Signal(bool) # True when minimized, False when maximized
-    close_clicked = QtCore.Signal()
-    
-    
-    def __init__(self, title, 
-                 icon=None, 
-                 show_minmax=True,
-                 minimized=False,
-                 show_close=True,
-                 settings_callback=None,
-                 close_callback=None, 
-                 parent=None):
-        super().__init__(parent=parent)
-        
-        self._minimized = bool(minimized)
-        self._settings_callback = settings_callback
-        self._close_callback = close_callback
-        
-        hbox = QtWidgets.QHBoxLayout()
-        self.setLayout(hbox)
-        hbox.setContentsMargins(0, 0, 0, 0)
-        
-        label = QtWidgets.QLabel(title)
-        font = label.font()
-        font.setPointSize(10)
-        metrics = QtGui.QFontMetrics(font)
-        label.setFont(font)         
-        
-        if icon:
-            icon = QtGui.QPixmap(icon).scaled(metrics.height(), metrics.height())
-            img = QtWidgets.QLabel()
-            img.setPixmap(icon)
-            img.setFixedSize(metrics.height(), metrics.height())
-            hbox.addWidget(img)       
-        
-        hbox.addWidget(label)
-        
-        hbox.addStretch()
-        
-        if not PanelHeader.gear_icon:
-            icon_path = Path(__file__).parent / 'icons' / 'gear_icon_32.png'
-            PanelHeader.gear_icon = QtGui.QIcon(str(icon_path))
-        gear_btn = QtWidgets.QPushButton(PanelHeader.gear_icon, '')
-        gear_btn.setToolTip('Settings')
-        gear_btn.setFlat(True)
-        gear_btn.setFixedSize(metrics.height(), metrics.height())
-        hbox.addWidget(gear_btn)
-        gear_btn.clicked.connect(self._on_settings_clicked)
-        
-        if show_minmax:
-            self._minmax_btn = QtWidgets.QPushButton('[]' if self._minimized else '__')
-            self._minmax_btn.setFlat(True)
-            self._minmax_btn.setFixedSize(metrics.height(), metrics.height())
-            hbox.addWidget(self._minmax_btn)
-            self._minmax_btn.clicked.connect(self._minmax_clicked)
-            
-        if show_close:
-            close_btn = QtWidgets.QPushButton('X')
-            close_btn.setFlat(True)
-            close_btn.setFixedSize(metrics.height(), metrics.height())
-            hbox.addWidget(close_btn) 
-            close_btn.clicked.connect(self.close_clicked.emit)
-        
-        self.setFixedHeight(metrics.height())        
-        
-    @property
-    def minimized(self):
-        return self._minimized
-        
-    def _minmax_clicked(self):
-        self._minimized = not self._minimized
-        if self._minimized:
-            self._minmax_btn.setText('[]')
-        else:
-            self._minmax_btn.setText('__')
-        self.minmax_clicked.emit(self._minimized) 
-        
-    def _on_settings_clicked(self):
-        self.settings_clicked.emit()
-        if self._settings_callback:
-            self._settings_callback()        
-        
-
-class Panel(QtWidgets.QFrame):
-    """Base class for all panel types."""
-    
-    close_clicked = QtCore.Signal()
-    add_item = QtCore.Signal(str)
-    item_created = QtCore.Signal(object)
-    minimized_changed = QtCore.Signal(str, bool)
-    
-    def __init__(self, type_name, name, 
-                 view=None, # instance of the view to put into the panel
-                 show_scroll_area=True, 
-                 parent=None, **kwargs):
-        super().__init__(parent=parent)
-        
-        self._visibility = True
-        self.setObjectName(type_name)
-        self._type_name = type_name
-        if type_name.endswith('s'):
-            self._type_name = type_name[:-1]
-        
-        self.setStyleSheet("Panel{background-color: rgb(20,20,20); border: 1px solid rgb(40,40,40); border-radius: 5px;}")
-        
-        self._scroll_area = None
-        
-        vbox = QtWidgets.QVBoxLayout()
-        self.setLayout(vbox)
-        
-        header = PanelHeader(name, parent=self, **kwargs) 
-        vbox.addWidget(header)
-        header.close_clicked.connect(self.close)
-        
-        if show_scroll_area:
-            self._scroll_area = QtWidgets.QScrollArea()
-            self._scroll_area.setWidgetResizable(True)
-            self._scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            self._scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-
-            container = QtWidgets.QWidget()
-            container_layout = QtWidgets.QGridLayout(container)
-            container_layout.setSpacing(8)
-            container_layout.setContentsMargins(8, 8, 8, 8)
-            container_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
-            self._tiles_container = container
-            self._tiles_layout = container_layout
-            self._tiles_count = 0
-            self._tiles_per_row = 5
-            container.setSizePolicy(
-                QtWidgets.QSizePolicy.Policy.Minimum,
-                QtWidgets.QSizePolicy.Policy.Minimum
-            )
-            self._scroll_area.setWidget(container)
-
-            vbox.addWidget(self._scroll_area)
-            header.minmax_clicked.connect(self._on_minimized)
-            self._on_minimized(header.minimized)
-
-            # Context menu on scroll area so it is always triggered when right-clicking in panel
-            self._scroll_area.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-            self._scroll_area.customContextMenuRequested.connect(self._show_context_menu)
-            self._items = []   
-            
-    @property
-    def visibility(self):
-        return self._visibility
-    
-    @visibility.setter
-    def visibility(self, value: bool):
-        self._visibility = bool(value)
-        self.setVisible(self._visibility)
-            
-    def __repr__(self):
-        return f'<{self.__class__.__name__} {self.objectName()}>'
-        
-    def close(self):        
-        super().close() 
-        self.close_clicked.emit()
-        
-    def _add_item(self):
-        self.add_item.emit(self._type_name)
-        dlg = AddItemDialog(self._type_name, parent=self._scroll_area)
-        dlg.item_created.connect(self.item_created.emit) # propogate signal
-        if self._scroll_area:
-            rect = self._scroll_area.geometry()
-            dlg_rect = dlg.geometry()
-            pt = QtCore.QPoint((rect.width()/2) - (dlg_rect.width()/2),
-                               (rect.height()/2) - (dlg_rect.height()/2))
-            dlg.move(self._scroll_area.mapToGlobal(pt))
-        dlg.exec()
-               
-    def _on_minimized(self, minimized):
-        self._scroll_area.setVisible(not minimized)
-        self.minimized_changed.emit(self.objectName(), minimized)
-
-    def _update_tile_size(self):
-        """Update tile size based on scroll area width (1/5 when vertical scrollbar present)."""
-        if not self._scroll_area or not self._tiles_container:
-            return
-        scroll_width = self._scroll_area.viewport().width()
-        if scroll_width <= 0:
-            return
-        # When vertical scrollbar is present, use 1/5 width for tiles
-        # Account for margins (8px each side = 16px) and spacing between tiles
-        available_width = scroll_width - 16
-        # Use 5 tiles per row (1/5 width each) when vertical scrollbar present
-        self._tiles_per_row = 5
-        spacing = 8
-        tile_width = max(80, (available_width - (self._tiles_per_row - 1) * spacing) // self._tiles_per_row)
-        # Update existing tiles
-        for i in range(self._tiles_layout.count()):
-            item = self._tiles_layout.itemAt(i)
-            if item and item.widget():
-                item.widget().setFixedSize(tile_width, tile_width)
-        # Relayout tiles
-        self._relayout_tiles()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        QtCore.QTimer.singleShot(0, self._update_tile_size)
-
-    def _relayout_tiles(self):
-        """Relayout all tiles in the grid."""
-        if not self._tiles_container:
-            return
-        # Remove all widgets from layout
-        while self._tiles_layout.count():
-            item = self._tiles_layout.takeAt(0)
-            if item.widget():
-                item.widget().setParent(None)
-        # Re-add widgets in grid
-        scroll_width = self._scroll_area.viewport().width() if self._scroll_area else 400
-        available_width = scroll_width - 16
-        spacing = 8
-        tile_width = max(80, (available_width - (self._tiles_per_row - 1) * spacing) // self._tiles_per_row)
-        for idx, item_data in enumerate(self._items):
-            row = idx // self._tiles_per_row
-            col = idx % self._tiles_per_row
-            tile = ItemTile(item_data, tile_width, parent=self._tiles_container)
-            tile._item_index = idx  # used by context menu to find item
-            self._tiles_layout.addWidget(
-                tile, row, col,
-                alignment=QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft
-            )
-
-    def add_item_tile(self, item_data):
-        """Add a tile widget for the given item data."""
-        if not self._tiles_container:
-            return
-        self._items.append(item_data)
-        self._update_tile_size()
-        
-    def _tile_at_position(self, position):
-        """Return the ItemTile under the given position. Position is in scroll area coordinates."""
-        pos_in_container = self._scroll_area.mapTo(self._tiles_container, position)
-        w = self._tiles_container.childAt(pos_in_container)
-        while w is not None:
-            if isinstance(w, ItemTile):
-                return w
-            w = w.parentWidget()
-        return None
-
-    def _show_context_menu(self, position):
-        """Build and show the panel context menu. Position is in scroll area coordinates."""
-        menu = QtWidgets.QMenu(parent=self)
-
-        tile = self._tile_at_position(position)
-        if tile is not None and hasattr(tile, '_item_index'):
-            idx = tile._item_index
-            if 0 <= idx < len(self._items):
-                # Item-specific actions when right-clicking on a tile
-                config_icon_path = Path(__file__).parent / 'icons' / 'gear_icon_32.png'
-                config_icon = QtGui.QIcon(str(config_icon_path)) if config_icon_path.is_file() else QtGui.QIcon()
-                menu.addAction(config_icon, 'Configure...').triggered.connect(
-                    lambda checked=False, i=idx: self._open_configure_dialog(i)
-                )
-                remove_action = menu.addAction('Remove')
-                remove_action.triggered.connect(lambda checked=False, i=idx: self._remove_item_at(i))
-                menu.addSeparator()
-
-        icon_path = Path(__file__).parent / 'icons' / 'green_plus.png'
-        plus_icon = QtGui.QIcon(str(icon_path))
-        menu.addAction(plus_icon, f'Add {self._type_name}').triggered.connect(self._add_item)
-
-        menu.exec(self._scroll_area.mapToGlobal(position))
-
-    def _remove_item_at(self, item_index):
-        """Remove the item at the given index and refresh the tile layout."""
-        if 0 <= item_index < len(self._items):
-            self._items.pop(item_index)
-            self._relayout_tiles()
-
-    def _open_configure_dialog(self, item_index):
-        """Open the configuration dialog for the item at the given index."""
-        if item_index < 0 or item_index >= len(self._items):
-            return
-        item_data = self._items[item_index]
-        dlg = ConfigureItemDialog(
-            self._type_name.capitalize(),
-            item_data,
-            item_index,
-            parent=self._scroll_area
-        )
-        dlg.item_updated.connect(self._on_item_configured)
-        if self._scroll_area:
-            rect = self._scroll_area.geometry()
-            dlg_rect = dlg.geometry()
-            pt = QtCore.QPoint(
-                (rect.width() / 2) - (dlg_rect.width() / 2),
-                (rect.height() / 2) - (dlg_rect.height() / 2)
-            )
-            dlg.move(self._scroll_area.mapToGlobal(pt))
-        dlg.exec()
-
-    def _on_item_configured(self, item_index, updated_data):
-        """Update the item at the given index and refresh the tile layout."""
-        if 0 <= item_index < len(self._items):
-            self._items[item_index] = updated_data
-            self._relayout_tiles()
-        
-              
 
 class MainWindow(QtWidgets.QMainWindow):
     """Main Window base class for all DedaFX applications."""
@@ -593,6 +234,10 @@ class MainWindow(QtWidgets.QMainWindow):
             panel_obj = Panel(panel, title, parent=self, **panel_settings)
             if panel == 'Assets':
                 panel_obj.item_created.connect(self._on_asset_created)
+            elif panel == 'Apps':
+                panel_obj.item_created.connect(self._on_app_created)
+                panel_obj.item_updated.connect(self._on_app_updated)
+                panel_obj.item_activated.connect(self._on_app_activated)
             # Connect item_created to add tile to the panel
             panel_obj.item_created.connect(
                 lambda item, p=panel_obj: p.add_item_tile(item)
@@ -608,6 +253,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         #if tuple(panels.keys()) != ('Project',):
         self._update_panel_stack_layout()
+
+        # Re-load apps from project config (on startup or when project is switched)
+        apps_panel = widget.findChild(Panel, 'Apps')
+        if apps_panel:
+            self._load_apps_to_panel(apps_panel)
         
         #vbox.addWidget(AssetPanel(parent=self))
         #vbox.addWidget(AppPanel(parent=self))
@@ -718,6 +368,159 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._asset_library:
             rootdir = None # get this from the project config
             self._asset_library = Project.create(self.current_project, rootdir)
+
+    def _on_app_activated(self, item_data):
+        """Launch the app via its command in a subprocess (double-click on Apps panel tile)."""
+        command = item_data.get('command', '').strip()
+        if not command:
+            log.warning("App item has no command; cannot launch.")
+            return
+        # Run Python commands with current interpreter and env so PYTHONPATH/venv are inherited
+        argv, use_env = self._parse_python_launch(command)
+        if argv is not None:
+            kwargs = {'env': os.environ.copy()} if use_env else {}
+            try:
+                subprocess.Popen(argv, **kwargs)
+                log.info(f"Launched app: {command}")
+            except Exception as err:
+                log.error(f"Failed to launch app '{command}': {err}")
+                self.show_message("Launch failed", str(err), icon=QtWidgets.QSystemTrayIcon.Critical)
+            return
+        # Non-Python or unparseable: run via shell
+        try:
+            subprocess.Popen(command, shell=True)
+            log.info(f"Launched app: {command}")
+        except Exception as err:
+            log.error(f"Failed to launch app '{command}': {err}")
+            self.show_message("Launch failed", str(err), icon=QtWidgets.QSystemTrayIcon.Critical)
+
+    def _parse_python_launch(self, command):
+        """If command is a Python invocation, return (argv_list, use_main_env); else (None, False).
+        Running with sys.executable and env=os.environ.copy() ensures PYTHONPATH and venv are inherited.
+        """
+        parts = command.split()
+        if not parts:
+            return None, False
+        first = parts[0].lower()
+        if not (first == 'python' or first.startswith('python3') or first.startswith('python-')):
+            return None, False
+        if len(parts) >= 3 and parts[1] == '-m':
+            # python -m module [args...]
+            return [sys.executable, '-m', parts[2]] + parts[3:], True
+        if len(parts) >= 2:
+            # python script.py [args...]
+            return [sys.executable] + parts[1:], True
+        return None, False
+
+    def _load_apps_to_panel(self, apps_panel):
+        """Load apps from site (studio), user, and project config layers into the Apps panel.
+        Later layers override earlier when the same app name exists.
+        """
+        if not apps_panel:
+            return
+
+        merged = self._config.get_merged_apps()
+
+        # Clear existing items in the panel
+        apps_panel._items.clear()
+        apps_panel._relayout_tiles()
+
+        count = 0
+        for app_config in merged:
+            if not app_config.enabled:
+                continue
+            item_data = {
+                'name': app_config.name,
+                'type': 'Command',
+                'description': '',
+                'command': app_config.command,
+            }
+            if app_config.icon_path:
+                item_data['icon'] = app_config.icon_path
+            apps_panel.add_item_tile(item_data)
+            count += 1
+
+        log.debug("Loaded %d apps from config layers (site + user + project)", count)
+
+    def _on_app_created(self, app_info):
+        """Handle the creation of an app and save it to the project config."""
+        if not self.current_project:
+            log.warning("Cannot save app: no current project")
+            return
+        
+        # Convert item dict to AppConfig
+        app_name = app_info.get('name', 'Untitled')
+        app_type = app_info.get('type', 'Command')
+        command = app_info.get('command', '')
+        icon_path = app_info.get('icon', '')
+        
+        # Do not add if an app with the same name already exists
+        existing_names = {a.name for a in self.current_project.apps}
+        if app_name in existing_names:
+            log.warning(f"App '{app_name}' already exists in project config; not adding duplicate.")
+            return
+
+        # Create AppConfig with required fields
+        app_config = AppConfig(
+            name=app_name,
+            version='',  # Version not provided in AddItemDialog
+            command=command,
+            icon_path=icon_path if icon_path else '',
+            install_url='',  # Not provided in AddItemDialog
+            help_url='',  # Not provided in AddItemDialog
+            enabled=True  # New apps are enabled by default
+        )
+
+        # Add to project config apps list
+        self.current_project.apps.append(app_config)
+
+        # Save the project config
+        try:
+            self.current_project.save()
+            log.info(f"Saved app '{app_name}' to project config")
+        except Exception as err:
+            log.error(f"Failed to save app to project config: {err}")
+
+    def _on_app_updated(self, item_index, updated_data):
+        """Handle the update of an app and persist to the project config (by name).
+        Panel order is merged (site + user + project), so we find or add by name in project.
+        """
+        if not self.current_project:
+            log.warning("Cannot update app: no current project")
+            return
+
+        app_name = updated_data.get('name', '').strip() or 'Untitled'
+        command = updated_data.get('command', '')
+        icon_path = updated_data.get('icon', '')
+
+        # Find app by name in project config (app may have come from site/user layer)
+        app_config = None
+        for a in self.current_project.apps:
+            if a.name == app_name:
+                app_config = a
+                break
+
+        if app_config is None:
+            # App came from site or user; add project-level override
+            app_config = AppConfig(
+                name=app_name,
+                version='',
+                command=command,
+                icon_path=icon_path if icon_path else '',
+                install_url='',
+                help_url='',
+                enabled=True,
+            )
+            self.current_project.apps.append(app_config)
+        else:
+            app_config.command = command
+            app_config.icon_path = icon_path if icon_path else ''
+
+        try:
+            self.current_project.save()
+            log.info("Updated app '%s' in project config", app_name)
+        except Exception as err:
+            log.error("Failed to update app in project config: %s", err)
     
     def _open_project_settings(self):
         
