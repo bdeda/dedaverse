@@ -30,6 +30,7 @@ except ImportError:
 finally:
     sys.path = sys.path[1:]
 import os
+import subprocess
 import logging
 import json
 import functools
@@ -236,6 +237,7 @@ class MainWindow(QtWidgets.QMainWindow):
             elif panel == 'Apps':
                 panel_obj.item_created.connect(self._on_app_created)
                 panel_obj.item_updated.connect(self._on_app_updated)
+                panel_obj.item_activated.connect(self._on_app_activated)
             # Connect item_created to add tile to the panel
             panel_obj.item_created.connect(
                 lambda item, p=panel_obj: p.add_item_tile(item)
@@ -251,6 +253,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         #if tuple(panels.keys()) != ('Project',):
         self._update_panel_stack_layout()
+
+        # Re-load apps from project config (on startup or when project is switched)
+        apps_panel = widget.findChild(Panel, 'Apps')
+        if apps_panel:
+            self._load_apps_to_panel(apps_panel)
         
         #vbox.addWidget(AssetPanel(parent=self))
         #vbox.addWidget(AppPanel(parent=self))
@@ -362,6 +369,79 @@ class MainWindow(QtWidgets.QMainWindow):
             rootdir = None # get this from the project config
             self._asset_library = Project.create(self.current_project, rootdir)
 
+    def _on_app_activated(self, item_data):
+        """Launch the app via its command in a subprocess (double-click on Apps panel tile)."""
+        command = item_data.get('command', '').strip()
+        if not command:
+            log.warning("App item has no command; cannot launch.")
+            return
+        # Run Python commands with current interpreter and env so PYTHONPATH/venv are inherited
+        argv, use_env = self._parse_python_launch(command)
+        if argv is not None:
+            kwargs = {'env': os.environ.copy()} if use_env else {}
+            try:
+                subprocess.Popen(argv, **kwargs)
+                log.info(f"Launched app: {command}")
+            except Exception as err:
+                log.error(f"Failed to launch app '{command}': {err}")
+                self.show_message("Launch failed", str(err), icon=QtWidgets.QSystemTrayIcon.Critical)
+            return
+        # Non-Python or unparseable: run via shell
+        try:
+            subprocess.Popen(command, shell=True)
+            log.info(f"Launched app: {command}")
+        except Exception as err:
+            log.error(f"Failed to launch app '{command}': {err}")
+            self.show_message("Launch failed", str(err), icon=QtWidgets.QSystemTrayIcon.Critical)
+
+    def _parse_python_launch(self, command):
+        """If command is a Python invocation, return (argv_list, use_main_env); else (None, False).
+        Running with sys.executable and env=os.environ.copy() ensures PYTHONPATH and venv are inherited.
+        """
+        parts = command.split()
+        if not parts:
+            return None, False
+        first = parts[0].lower()
+        if not (first == 'python' or first.startswith('python3') or first.startswith('python-')):
+            return None, False
+        if len(parts) >= 3 and parts[1] == '-m':
+            # python -m module [args...]
+            return [sys.executable, '-m', parts[2]] + parts[3:], True
+        if len(parts) >= 2:
+            # python script.py [args...]
+            return [sys.executable] + parts[1:], True
+        return None, False
+
+    def _load_apps_to_panel(self, apps_panel):
+        """Load apps from site (studio), user, and project config layers into the Apps panel.
+        Later layers override earlier when the same app name exists.
+        """
+        if not apps_panel:
+            return
+
+        merged = self._config.get_merged_apps()
+
+        # Clear existing items in the panel
+        apps_panel._items.clear()
+        apps_panel._relayout_tiles()
+
+        count = 0
+        for app_config in merged:
+            if not app_config.enabled:
+                continue
+            item_data = {
+                'name': app_config.name,
+                'type': 'Command',
+                'description': '',
+                'command': app_config.command,
+            }
+            if app_config.icon_path:
+                item_data['icon'] = app_config.icon_path
+            apps_panel.add_item_tile(item_data)
+            count += 1
+
+        log.debug("Loaded %d apps from config layers (site + user + project)", count)
+
     def _on_app_created(self, app_info):
         """Handle the creation of an app and save it to the project config."""
         if not self.current_project:
@@ -374,6 +454,12 @@ class MainWindow(QtWidgets.QMainWindow):
         command = app_info.get('command', '')
         icon_path = app_info.get('icon', '')
         
+        # Do not add if an app with the same name already exists
+        existing_names = {a.name for a in self.current_project.apps}
+        if app_name in existing_names:
+            log.warning(f"App '{app_name}' already exists in project config; not adding duplicate.")
+            return
+
         # Create AppConfig with required fields
         app_config = AppConfig(
             name=app_name,
@@ -384,10 +470,10 @@ class MainWindow(QtWidgets.QMainWindow):
             help_url='',  # Not provided in AddItemDialog
             enabled=True  # New apps are enabled by default
         )
-        
+
         # Add to project config apps list
         self.current_project.apps.append(app_config)
-        
+
         # Save the project config
         try:
             self.current_project.save()
@@ -396,34 +482,45 @@ class MainWindow(QtWidgets.QMainWindow):
             log.error(f"Failed to save app to project config: {err}")
 
     def _on_app_updated(self, item_index, updated_data):
-        """Handle the update of an app and save it to the project config."""
+        """Handle the update of an app and persist to the project config (by name).
+        Panel order is merged (site + user + project), so we find or add by name in project.
+        """
         if not self.current_project:
             log.warning("Cannot update app: no current project")
             return
-        
-        # Find the app in the project config by matching the index
-        # Note: This assumes the order matches between Panel._items and current_project.apps
-        # A more robust approach would match by name, but for now we'll use index
-        if item_index < len(self.current_project.apps):
-            app_config = self.current_project.apps[item_index]
-            
-            # Update AppConfig with new values
-            app_name = updated_data.get('name', app_config.name)
-            command = updated_data.get('command', app_config.command)
-            icon_path = updated_data.get('icon', app_config.icon_path)
-            
-            app_config.name = app_name
+
+        app_name = updated_data.get('name', '').strip() or 'Untitled'
+        command = updated_data.get('command', '')
+        icon_path = updated_data.get('icon', '')
+
+        # Find app by name in project config (app may have come from site/user layer)
+        app_config = None
+        for a in self.current_project.apps:
+            if a.name == app_name:
+                app_config = a
+                break
+
+        if app_config is None:
+            # App came from site or user; add project-level override
+            app_config = AppConfig(
+                name=app_name,
+                version='',
+                command=command,
+                icon_path=icon_path if icon_path else '',
+                install_url='',
+                help_url='',
+                enabled=True,
+            )
+            self.current_project.apps.append(app_config)
+        else:
             app_config.command = command
             app_config.icon_path = icon_path if icon_path else ''
-            
-            # Save the project config
-            try:
-                self.current_project.save()
-                log.info(f"Updated app '{app_name}' in project config")
-            except Exception as err:
-                log.error(f"Failed to update app in project config: {err}")
-        else:
-            log.warning(f"App index {item_index} out of range for project config apps")
+
+        try:
+            self.current_project.save()
+            log.info("Updated app '%s' in project config", app_name)
+        except Exception as err:
+            log.error("Failed to update app in project config: %s", err)
     
     def _open_project_settings(self):
         

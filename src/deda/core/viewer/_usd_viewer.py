@@ -216,7 +216,10 @@ class _StageView(StageView):
         self._axis_enabled = False
         self._annotation_overlay = AnnotationGlOverlay()
         self._reticle_overlay = CameraReticleGlOverlay()
-        self._slate_overlay = SlateTextGlOverlay()
+        self._slate_overlay = SlateTextGlOverlay(
+            enabled=False,
+            lines=["Slate layer", "Temporary text"],
+        )
         self._prim_info_overlay = _PrimInfoOverlay(parent=self)
         self._prim_info_overlay.setParent(self)
         self.setMouseTracking(True)
@@ -543,6 +546,11 @@ class UsdViewWidget(QtWidgets.QWidget):
     def reticle_overlay(self):
         """Camera reticle overlay for this viewport."""
         return self._view.reticle_overlay
+
+    @property
+    def slate_overlay(self):
+        """Slate text overlay for this viewport."""
+        return self._view.slate_overlay
 
     @property
     def stage(self):

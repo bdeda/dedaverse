@@ -32,6 +32,8 @@ from ._dialogs import AddItemDialog, ConfigureItemDialog
 class ItemTile(QtWidgets.QFrame):
     """Tile widget for displaying an item with icon, name, and tooltip."""
 
+    activated = QtCore.Signal(object)  # Emits item_data on double-click
+
     def __init__(self, item_data, tile_width, parent=None):
         super().__init__(parent=parent)
         self._item_data = item_data
@@ -101,6 +103,12 @@ class ItemTile(QtWidgets.QFrame):
         self.setStyleSheet(
             f"#ItemTile{{background-color: rgb(30,30,30); border: 1px solid {self._normal_border}; border-radius: 3px;}}"
         )
+
+    def mouseDoubleClickEvent(self, event):
+        """Emit activated with item data on double-click."""
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self.activated.emit(self._item_data)
+        super().mouseDoubleClickEvent(event)
 
 
 class PanelHeader(QtWidgets.QWidget):
@@ -199,6 +207,7 @@ class Panel(QtWidgets.QFrame):
     add_item = QtCore.Signal(str)
     item_created = QtCore.Signal(object)
     item_updated = QtCore.Signal(int, object)  # item_index, updated_item_data
+    item_activated = QtCore.Signal(object)  # item_data when tile is double-clicked
     minimized_changed = QtCore.Signal(str, bool)
     
     def __init__(self, type_name, name, 
@@ -331,6 +340,7 @@ class Panel(QtWidgets.QFrame):
             col = idx % self._tiles_per_row
             tile = ItemTile(item_data, tile_width, parent=self._tiles_container)
             tile._item_index = idx  # used by context menu to find item
+            tile.activated.connect(self.item_activated.emit)
             self._tiles_layout.addWidget(
                 tile, row, col,
                 alignment=QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft
