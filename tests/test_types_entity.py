@@ -30,7 +30,7 @@ class TestEntity(unittest.TestCase):
         parent = None
         entity = Entity(name='TestEntity', parent=parent)
         self.assertEqual(entity._name, 'TestEntity')
-        self.assertEqual(entity._parent, parent)
+        self.assertIs(entity.parent, parent)
 
     def test_entity_from_path_not_implemented(self):
         """Test that Entity.from_path() raises NotImplementedError."""

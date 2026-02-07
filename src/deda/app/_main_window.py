@@ -410,9 +410,12 @@ class MainWindow(QtWidgets.QMainWindow):
             
     def _on_asset_created(self, asset_info):
         """Handle the creation of the asset in the asset library."""
-        if not self._asset_library:
-            rootdir = None # get this from the project config
-            self._asset_library = Project.create(self.current_project, rootdir)
+        if not self._asset_library and self.current_project:
+            # Create project USDA stage at {project_root}/.dedaverse/{project_name}.usda
+            self._asset_library = Project.find_or_create(
+                self.current_project.name,
+                self.current_project.rootdir,
+            )
 
     def _on_app_activated(self, item_data):
         """Launch the app via its command in a subprocess (double-click on Apps panel tile)."""

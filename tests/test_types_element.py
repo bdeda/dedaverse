@@ -31,7 +31,7 @@ class TestElement(unittest.TestCase):
         parent = None
         element = Element(name='TestElement', parent=parent)
         self.assertEqual(element._name, 'TestElement')
-        self.assertEqual(element._parent, parent)
+        self.assertIs(element.parent, parent)
 
     def test_element_inherits_from_entity(self):
         """Test that Element inherits from Entity."""

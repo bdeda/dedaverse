@@ -31,7 +31,7 @@ class TestCollection(unittest.TestCase):
         """Test that Collection requires a non-None parent."""
         project = Project(name="TestProject", rootdir=Path("test_root"))
         collection = Collection(name="TestCollection", parent=project)
-        self.assertEqual(collection._parent, project)
+        self.assertIs(collection.parent, project)
 
     def test_collection_parent_none_raises(self):
         """Test that Collection cannot be created without a parent."""

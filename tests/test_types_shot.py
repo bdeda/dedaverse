@@ -33,7 +33,7 @@ class TestShot(unittest.TestCase):
         project = Project(name="TestProject", rootdir=Path("test_root"))
         sequence = Sequence(name="TestSequence", parent=project)
         shot = Shot(name="TestShot", parent=sequence)
-        self.assertEqual(shot._parent, sequence)
+        self.assertIs(shot.parent, sequence)
 
     def test_shot_parent_none_raises(self):
         """Test that Shot cannot be created without a parent."""

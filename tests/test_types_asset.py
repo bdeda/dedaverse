@@ -31,7 +31,7 @@ class TestAsset(unittest.TestCase):
         """Test that Asset requires a non-None parent."""
         project = Project(name="TestProject", rootdir=Path("test_root"))
         asset = Asset(name="TestAsset", parent=project)
-        self.assertEqual(asset._parent, project)
+        self.assertIs(asset.parent, project)
 
     def test_asset_parent_none_raises(self):
         """Test that Asset cannot be created without a parent."""

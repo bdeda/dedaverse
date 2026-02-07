@@ -75,6 +75,35 @@ with open(config_path, 'w') as f:
     json.dump(data, f, indent=4)
 ```
 
+#### Module Layout
+- **Public API at the top** - Put public classes and functions at the top of the module.
+- **Internal/private at the bottom** - Put internal helpers and private functions (e.g. names starting with `_`) at the bottom of the module.
+- **Sort alphabetically** - Within each area (top and bottom), keep symbols sorted alphabetically.
+- **Classes before functions** - In the public (top) section, list classes first (alphabetically), then functions (alphabetically).
+- Example structure:
+```python
+"""Module docstring."""
+
+__all__ = ['PublicClass', 'public_function']
+
+# --- Public (top): classes first (A–Z), then functions (A–Z) ---
+
+class PublicClass:
+    ...
+
+def public_function():
+    ...
+
+# --- Internal/private (bottom): alphabetically sorted ---
+
+def _internal_helper():
+    ...
+```
+
+#### Imports
+- **Prefer imports at the top of the module** - Put `import` and `from ... import` statements at the top of the file whenever possible (after the module docstring, before `__all__` or code). Group in order: standard library, third-party, first-party/local.
+- **Deferred imports** - Use imports inside functions or methods only when necessary to avoid circular imports or to defer loading a heavy/optional dependency until it is used.
+
 ### 3. Project Structure
 
 ```
