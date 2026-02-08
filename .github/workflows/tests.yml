@@ -89,9 +89,8 @@ jobs:
             - name: Check all modules have coverage > 0%
               run: |
                   python tests/check_coverage_all_modules.py coverage.xml --source src/deda \
-                      --exclude '*dcc*' \
-                      --exclude '*core/ai*' \
-                      --exclude '*__init__2*'
+                      --exclude 'core/ai' \
+                      --exclude '__init__2'
 
             - name: Upload coverage reports
               uses: codecov/codecov-action@v5

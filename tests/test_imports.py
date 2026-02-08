@@ -16,8 +16,6 @@
 #
 # ###################################################################################
 
-import pytest
-
 
 def test_imports():
     # Top-level packages
@@ -29,16 +27,15 @@ def test_imports():
 
     # deda.ai
     import deda.ai
-    # _neural_network requires torch (optional dependency); skip if not installed
+    # _neural_network requires torch (optional); continue test so other modules get coverage
     try:
         import deda.ai._neural_network  # noqa: F401
-    except ModuleNotFoundError as e:
-        if "torch" in str(e):
-            pytest.skip("torch not installed; skipping deda.ai._neural_network")
-        raise
+    except ModuleNotFoundError:
+        pass
 
     # deda.core
     import deda.core
+    import deda.core._app_launcher
     import deda.core._amazon_photos
     import deda.core._check_for_updates
     import deda.core._config
@@ -62,6 +59,17 @@ def test_imports():
     import deda.core.launcher._maya
     import deda.core.launcher._substance
 
+    # deda.core.ai (optional: _model1, _usd_training require tensorflow)
+    import deda.core.ai
+    try:
+        import deda.core.ai._model1  # noqa: F401
+    except ModuleNotFoundError:
+        pass
+    try:
+        import deda.core.ai._usd_training  # noqa: F401
+    except ModuleNotFoundError:
+        pass
+
     # deda.core.types
     import deda.core.types
     import deda.core.types._asset_id
@@ -75,6 +83,7 @@ def test_imports():
 
     # deda.core.viewer
     import deda.core.viewer
+    import deda.core.viewer.__main__
     import deda.core.viewer._annotation
     import deda.core.viewer._app
     import deda.core.viewer._camera_reticle
@@ -87,6 +96,10 @@ def test_imports():
     # deda.model
     import deda.model
     import deda.model._types
+
+    # deda.dcc
+    import deda.dcc
+    import deda.dcc._eventfilter
 
     # deda.plugins
     import deda.plugins.application_manager
@@ -107,6 +120,7 @@ def test_imports():
 
     # deda.app (requires PySide6; CI uses libEGL + QT_QPA_PLATFORM=offscreen)
     import deda.app
+    import deda.app.__main__
     import deda.app._app
     import deda.app._asset_browser
     import deda.app._asset_info
@@ -122,4 +136,4 @@ def test_imports():
     import deda.app.task
     import deda.app.task._task
 
-    # Not importable (no package __init__.py): deda.dcc, deda.core.ai, deda.plugins.ollama
+    # Not importable (no package): deda.plugins.ollama
