@@ -114,6 +114,35 @@ class Collection(Asset):
         _add_child_prim_with_reference(self, name, child_path)
         return Collection(name, self)
 
+    def get_immediate_children(self) -> list[dict]:
+        """Return immediate child prims of this collection on the project stage.
+
+        Each item is a dict with keys: name, type ('Collection' or 'Asset'),
+        is_collection (True for Collection, False for Asset).
+
+        Returns:
+            List of dicts suitable for use in the Assets panel grid.
+        """
+        stage = self.project.stage
+        if stage is None:
+            return []
+        prim = stage.GetPrimAtPath(self.prim_path)
+        if not prim.IsValid():
+            return []
+        result = []
+        for child in prim.GetChildren():
+            name = child.GetName()
+            kind = Usd.ModelAPI(child).GetKind()
+            typ = 'Collection' if kind == Kind.Tokens.group else 'Asset'
+            result.append({
+                'name': name,
+                'type': typ,
+                'is_collection': typ == 'Collection',
+                'description': '',
+                'title': '',
+            })
+        return result
+
     def iter_assets(self):
         for prim in self.project.stage.TraverseAll():
             yield Asset._from_prim(prim)

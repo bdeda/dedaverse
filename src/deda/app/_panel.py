@@ -116,44 +116,54 @@ class PanelHeader(QtWidgets.QWidget):
     gear_icon = None
     close_icon = None
     
-    settings_clicked = QtCore.Signal()
-    minmax_clicked = QtCore.Signal(bool) # True when minimized, False when maximized
+    minmax_clicked = QtCore.Signal(bool)  # True when minimized, False when maximized
+    navigate_up_clicked = QtCore.Signal()
     close_clicked = QtCore.Signal()
-    
-    
-    def __init__(self, title, 
-                 icon=None, 
+    settings_clicked = QtCore.Signal()
+
+    def __init__(self, title,
+                 icon=None,
                  show_minmax=True,
                  minimized=False,
                  show_close=True,
+                 show_navigate_up=False,
                  settings_callback=None,
-                 close_callback=None, 
+                 close_callback=None,
                  parent=None):
         super().__init__(parent=parent)
-        
+
         self._minimized = bool(minimized)
         self._settings_callback = settings_callback
         self._close_callback = close_callback
-        
+
         hbox = QtWidgets.QHBoxLayout()
         self.setLayout(hbox)
         hbox.setContentsMargins(0, 0, 0, 0)
-        
-        label = QtWidgets.QLabel(title)
-        font = label.font()
+
+        font = QtGui.QFont()
         font.setPointSize(10)
         metrics = QtGui.QFontMetrics(font)
-        label.setFont(font)         
-        
+
+        self._navigate_up_btn = QtWidgets.QPushButton('\u2191')  # Upward arrow
+        self._navigate_up_btn.setToolTip('Go up')
+        self._navigate_up_btn.setFlat(True)
+        self._navigate_up_btn.setFixedSize(metrics.height(), metrics.height())
+        self._navigate_up_btn.clicked.connect(self.navigate_up_clicked.emit)
+        self._navigate_up_btn.setVisible(bool(show_navigate_up))
+        hbox.addWidget(self._navigate_up_btn)
+
+        self._title_label = QtWidgets.QLabel(title)
+        self._title_label.setFont(font)
+
         if icon:
             icon = QtGui.QPixmap(icon).scaled(metrics.height(), metrics.height())
             img = QtWidgets.QLabel()
             img.setPixmap(icon)
             img.setFixedSize(metrics.height(), metrics.height())
-            hbox.addWidget(img)       
-        
-        hbox.addWidget(label)
-        
+            hbox.addWidget(img)
+
+        hbox.addWidget(self._title_label)
+
         hbox.addStretch()
         
         if not PanelHeader.gear_icon:
@@ -177,14 +187,22 @@ class PanelHeader(QtWidgets.QWidget):
             close_btn = QtWidgets.QPushButton('X')
             close_btn.setFlat(True)
             close_btn.setFixedSize(metrics.height(), metrics.height())
-            hbox.addWidget(close_btn) 
+            hbox.addWidget(close_btn)
             close_btn.clicked.connect(self.close_clicked.emit)
-        
-        self.setFixedHeight(metrics.height())        
-        
+
+        self.setFixedHeight(metrics.height())
+
     @property
     def minimized(self):
         return self._minimized
+
+    def set_show_navigate_up(self, visible: bool) -> None:
+        """Show or hide the navigate-up (go up in hierarchy) button."""
+        self._navigate_up_btn.setVisible(bool(visible))
+
+    def set_title(self, title: str) -> None:
+        """Update the header title text."""
+        self._title_label.setText(title)
         
     def _minmax_clicked(self):
         self._minimized = not self._minimized
@@ -202,7 +220,7 @@ class PanelHeader(QtWidgets.QWidget):
 
 class Panel(QtWidgets.QFrame):
     """Base class for all panel types."""
-    
+
     close_clicked = QtCore.Signal()
     add_item = QtCore.Signal(str)
     item_created = QtCore.Signal(object)
@@ -210,29 +228,33 @@ class Panel(QtWidgets.QFrame):
     item_activated = QtCore.Signal(object)  # item_data when tile is double-clicked
     item_removed = QtCore.Signal(object)  # item_data when item is removed
     minimized_changed = QtCore.Signal(str, bool)
-    
-    def __init__(self, type_name, name, 
-                 view=None, # instance of the view to put into the panel
-                 show_scroll_area=True, 
+    navigate_up_clicked = QtCore.Signal()
+
+    def __init__(self, type_name, name,
+                 view=None,  # instance of the view to put into the panel
+                 show_scroll_area=True,
+                 show_navigate_up=False,
                  parent=None, **kwargs):
         super().__init__(parent=parent)
-        
+
         self._visibility = True
         self.setObjectName(type_name)
         self._type_name = type_name
         if type_name.endswith('s'):
             self._type_name = type_name[:-1]
-        
+
         self.setStyleSheet("Panel{background-color: rgb(20,20,20); border: 1px solid rgb(40,40,40); border-radius: 5px;}")
-        
+
         self._scroll_area = None
-        
+
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
-        
-        header = PanelHeader(name, parent=self, **kwargs) 
+
+        header = PanelHeader(name, parent=self, show_navigate_up=show_navigate_up, **kwargs)
+        self._header = header
         vbox.addWidget(header)
         header.close_clicked.connect(self.close)
+        header.navigate_up_clicked.connect(self.navigate_up_clicked.emit)
         
         if show_scroll_area:
             self._scroll_area = QtWidgets.QScrollArea()
@@ -272,7 +294,17 @@ class Panel(QtWidgets.QFrame):
     def visibility(self, value: bool):
         self._visibility = bool(value)
         self.setVisible(self._visibility)
-            
+
+    def set_show_navigate_up(self, visible: bool) -> None:
+        """Show or hide the navigate-up button in the header."""
+        if self._header:
+            self._header.set_show_navigate_up(visible)
+
+    def set_title(self, title: str) -> None:
+        """Update the panel header title."""
+        if self._header:
+            self._header.set_title(title)
+
     def __repr__(self):
         return f'<{self.__class__.__name__} {self.objectName()}>'
         

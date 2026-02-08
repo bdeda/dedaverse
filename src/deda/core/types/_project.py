@@ -134,11 +134,13 @@ class Project(Collection):
     def stage(self):
         """Usd.Stage opened from the project's USDA metadata file.
 
-        Returns:
-            Usd.Stage for the project metadata_path, or an empty/invalid stage
-            if the file does not exist yet.
+        If the USDA file does not exist, it is created (find_or_create semantics)
+        for backwards compatibility with projects that predate the asset metadata.
         """
-        return Usd.Stage.Open(str(self.metadata_path))
+        path = self.metadata_path
+        if not path.is_file():
+            _create_project_stage_usda(self.rootdir, self.prim_name)
+        return Usd.Stage.Open(str(path))
 
     @classmethod
     def create(

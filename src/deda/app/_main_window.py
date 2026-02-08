@@ -42,6 +42,7 @@ from PySide6 import QtWidgets, QtCore, QtGui
 
 from deda.core import LayeredConfig, Project
 from deda.core._config import AppConfig, ServiceConfig
+from deda.core.types import Collection
 
 # Asset types that are created as Collection in project USD metadata
 _COLLECTION_ASSET_TYPES = frozenset({'Collection', 'Sequence', 'Shot'})
@@ -80,6 +81,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._proj_settings_dlg = None
         self._force_close = False
         self._asset_library = None
+        self._assets_view_container = None  # Project | Collection | None; current level in Assets panel
         
         if app_name is None:
             app_name = "Dedaverse"
@@ -198,20 +200,33 @@ class MainWindow(QtWidgets.QMainWindow):
         if _connections:
             for conn in _connections.values():
                 try:
-                    conn.disconnect()
-                except RuntimeError:
+                    QtCore.QObject.disconnect(conn)
+                except (RuntimeError, TypeError):
                     pass
             self._view_action_connections.clear()
         else:
             self._view_action_connections = {}
 
         widget = QtWidgets.QWidget(parent=self)
-        self.setCentralWidget(widget)        
+        self.setCentralWidget(widget)
         vbox = QtWidgets.QVBoxLayout()
         widget.setLayout(vbox)
-        
+
         current_project = self.current_project
-        
+
+        # Sync asset library and assets view to current project (covers app restart and project change)
+        if current_project:
+            self._asset_library = Project(
+                current_project.name,
+                current_project.rootdir,
+                prim_name=getattr(current_project, 'prim_name', None),
+            )
+            self._assets_view_container = self._asset_library
+            self._restore_assets_panel_path()
+        else:
+            self._asset_library = None
+            self._assets_view_container = None
+
         # TODO: get this list from a user/project config
         panels = {
             'Project': {'show_minmax': False, 
@@ -247,9 +262,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 panel_settings['minimized'] = self._settings.value(
                     f'view/{panel.lower()}_minimized', False, type=bool
                 )
+            if panel == 'Assets':
+                # Top level (no container or container is Project) -> title "Project"
+                title = 'Project' if (
+                    self._assets_view_container is None
+                    or self._assets_view_container.parent is None
+                ) else self._assets_view_container.name
+                panel_settings['show_navigate_up'] = False
             panel_obj = Panel(panel, title, parent=self, **panel_settings)
             if panel == 'Assets':
                 panel_obj.item_created.connect(self._on_asset_created)
+                panel_obj.item_activated.connect(self._on_asset_panel_item_activated)
+                panel_obj.navigate_up_clicked.connect(self._on_assets_navigate_up)
             elif panel == 'Apps':
                 panel_obj.item_created.connect(self._on_app_created)
                 panel_obj.item_updated.connect(self._on_app_updated)
@@ -259,10 +283,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 panel_obj.item_created.connect(self._on_service_created)
                 panel_obj.item_updated.connect(self._on_service_updated)
                 panel_obj.item_removed.connect(self._on_service_removed)
-            # Connect item_created to add tile to the panel
-            panel_obj.item_created.connect(
-                lambda item, p=panel_obj: p.add_item_tile(item)
-            )
+            # Connect item_created to add tile to the panel (Assets panel is populated by _load_assets_to_panel only)
+            if panel != 'Assets':
+                panel_obj.item_created.connect(
+                    lambda item, p=panel_obj: p.add_item_tile(item)
+                )
             vbox.addWidget(panel_obj)
             if panel != 'Project':
                 panel_obj.close_clicked.connect(
@@ -284,7 +309,12 @@ class MainWindow(QtWidgets.QMainWindow):
         services_panel = widget.findChild(Panel, 'Services')
         if services_panel:
             self._load_services_to_panel(services_panel)
-        
+
+        # Load Assets panel from asset library (project or current collection)
+        assets_panel = widget.findChild(Panel, 'Assets')
+        if assets_panel:
+            self._load_assets_to_panel(assets_panel)
+
         #vbox.addWidget(AssetPanel(parent=self))
         #vbox.addWidget(AppPanel(parent=self))
         #vbox.addWidget(TaskPanel(parent=self))
@@ -316,11 +346,6 @@ class MainWindow(QtWidgets.QMainWindow):
             
     def _initialize_project(self, project):
         """Initialize the project with the new settings from the project arg."""
-        self._asset_library = Project(
-            project.name,
-            project.rootdir,
-            prim_name=getattr(project, 'prim_name', None),
-        )
         self._create_main_widget()
                    
     def _action_for_panel_name(self, name):
@@ -351,8 +376,8 @@ class MainWindow(QtWidgets.QMainWindow):
         existing = self._view_action_connections.get(panel_name)
         if existing is not None:
             try:
-                existing.disconnect()
-            except RuntimeError:
+                QtCore.QObject.disconnect(existing)
+            except (RuntimeError, TypeError):
                 pass
         conn = action.triggered.connect(
             lambda checked, name=panel_name: self._on_view_toggled_for_panel_by_name(checked, name)
@@ -415,6 +440,95 @@ class MainWindow(QtWidgets.QMainWindow):
                 del item
             self._panel_stack_has_top_stretch = False
             
+    def _restore_assets_panel_path(self) -> None:
+        """Restore the Assets panel view to the saved path for the current project."""
+        if not self.current_project or not self._assets_view_container:
+            return
+        path = self._config.user.assets_panel_path.get(self.current_project.name) or []
+        if not path:
+            return
+        container = self._assets_view_container
+        for name in path:
+            children = {c['name']: c for c in container.get_immediate_children()}
+            if name not in children or not children[name].get('is_collection'):
+                break
+            container = Collection(name, container)
+        self._assets_view_container = container
+
+    def _save_assets_panel_path(self) -> None:
+        """Save the current Assets panel view path to user config."""
+        if not self.current_project or not self._assets_view_container:
+            return
+        if self._assets_view_container.parent is None:
+            path = []
+        else:
+            segments = []
+            c = self._assets_view_container
+            while c is not None and c.parent is not None:
+                segments.append(c.name)
+                c = c.parent
+            path = list(reversed(segments))
+        self._config.user.assets_panel_path[self.current_project.name] = path
+        try:
+            self._config.user.save()
+        except OSError as err:
+            log.warning("Could not save Assets panel path to user config: %s", err)
+
+    def _load_assets_to_panel(self, assets_panel):
+        """Populate the Assets panel from the current view container (Project or Collection)."""
+        if not assets_panel:
+            return
+        container = self._assets_view_container
+        if container is None or container.parent is None:
+            assets_panel.set_title('Project')
+            assets_panel.set_show_navigate_up(False)
+        else:
+            assets_panel.set_title(container.name)
+            assets_panel.set_show_navigate_up(True)
+
+        assets_panel._items.clear()
+        assets_panel._relayout_tiles()
+
+        if container is None:
+            return
+
+        for child in container.get_immediate_children():
+            item_data = {
+                'name': child['name'],
+                'type': child['type'],
+                'description': child.get('description', ''),
+                'title': child.get('title', ''),
+                'is_collection': child.get('is_collection', False),
+            }
+            assets_panel.add_item_tile(item_data)
+
+    def _on_asset_panel_item_activated(self, item_data):
+        """When a tile is double-clicked: if it is a collection, navigate into it."""
+        if not item_data.get('is_collection'):
+            return
+        container = self._assets_view_container
+        if container is None:
+            return
+        name = (item_data or {}).get('name', '').strip()
+        if not name:
+            return
+        self._assets_view_container = Collection(name, container)
+        assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
+        if assets_panel:
+            self._load_assets_to_panel(assets_panel)
+        self._save_assets_panel_path()
+
+    def _on_assets_navigate_up(self):
+        """Move the Assets panel view up one level in the hierarchy."""
+        container = self._assets_view_container
+        if container is None or container.parent is None:
+            return
+        self._assets_view_container = container.parent
+        assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
+        if assets_panel:
+            self._load_assets_to_panel(assets_panel)
+        self._save_assets_panel_path()
+
     def _on_asset_created(self, asset_info):
         """Handle the creation of the asset in the asset library and in project USD metadata."""
         if not self.current_project:
@@ -425,15 +539,19 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.current_project.rootdir,
                 prim_name=getattr(self.current_project, 'prim_name', None),
             )
+            self._assets_view_container = self._asset_library
+        container = self._assets_view_container or self._asset_library
+        if container is None:
+            return
         name = (asset_info or {}).get('name', '').strip()
         if not name:
             return
         asset_type = (asset_info or {}).get('type', 'Asset')
         try:
             if asset_type in _COLLECTION_ASSET_TYPES:
-                self._asset_library.add_collection(name)
+                container.add_collection(name)
             else:
-                self._asset_library.add_asset(name)
+                container.add_asset(name)
         except ValueError as e:
             log.warning("Could not add asset to project metadata: %s", e)
             self.show_message(
@@ -441,6 +559,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 str(e) + "\n\nUse only letters, numbers, and underscores; must not start with a number.",
                 icon=QtWidgets.QSystemTrayIcon.Warning,
             )
+            return
+        assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
+        if assets_panel:
+            self._load_assets_to_panel(assets_panel)
 
     def _on_app_activated(self, item_data):
         """Launch the app via its command in a subprocess (double-click on Apps panel tile)."""

@@ -368,6 +368,8 @@ class UserConfig:
         current_project: Name of the currently active project.
         projects: Map of project name to rootdir (or ProjectConfig when loaded).
         roles: User roles (e.g. animator, rigger, concept artist).
+        assets_panel_path: Per-project Assets panel view path (project name -> list of
+            collection names from root to current level); empty list means project root.
         plugins: List of plugin configurations.
         services: List of service configurations.
         apps: List of application configurations.
@@ -376,6 +378,8 @@ class UserConfig:
     current_project: str | None = None
     projects: dict[str, str] = field(default_factory=dict)
     roles: list[str] = field(default_factory=list)
+    # Per-project path in the Assets panel: project name -> list of collection names from root to current view
+    assets_panel_path: dict[str, list[str]] = field(default_factory=dict)
 
     plugins: list[PluginConfig] = field(default_factory=list)
     services: list[ServiceConfig] = field(default_factory=list)
