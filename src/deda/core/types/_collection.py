@@ -69,6 +69,9 @@ class Collection(Asset):
         if not Tf.IsValidIdentifier(name):
             raise ValueError(f"Invalid prim identifier: {name!r}")
         proj = self.project
+        child_prim_path = f"{self.prim_path}/{name}"
+        asset_dir = proj.asset_directory_for_prim_path(child_prim_path)
+        asset_dir.mkdir(parents=True, exist_ok=True)
         child_path = self.children_metadata_dir / f"{name}.usda"
         child_path.parent.mkdir(parents=True, exist_ok=True)
         stage = Usd.Stage.CreateNew(str(child_path))
@@ -103,6 +106,10 @@ class Collection(Asset):
         """
         if not Tf.IsValidIdentifier(name):
             raise ValueError(f"Invalid prim identifier: {name!r}")
+        proj = self.project
+        child_prim_path = f"{self.prim_path}/{name}"
+        asset_dir = proj.asset_directory_for_prim_path(child_prim_path)
+        asset_dir.mkdir(parents=True, exist_ok=True)
         child_path = self.children_metadata_dir / f"{name}.usda"
         child_path.parent.mkdir(parents=True, exist_ok=True)
         stage = Usd.Stage.CreateNew(str(child_path))
@@ -113,6 +120,32 @@ class Collection(Asset):
         stage.GetRootLayer().Save()
         _add_child_prim_with_reference(self, name, child_path)
         return Collection(name, self)
+
+    def remove_child(self, name: str) -> bool:
+        """Remove a child prim from this collection's USDA metadata.
+
+        Edits the parent's layer to remove the child prim (and its reference).
+        Does not delete the child's USDA file on disk.
+
+        Args:
+            name: Name of the child asset or collection to remove.
+
+        Returns:
+            True if the child was removed, False if the prim did not exist or
+            the edit could not be applied.
+        """
+        root_prim_name = getattr(self, "prim_name", None) or self.name
+        child_prim_path = Sdf.Path("/" + root_prim_name + "/" + name)
+        stage = Usd.Stage.Open(str(self.metadata_path))
+        root_layer = stage.GetRootLayer()
+        if not root_layer.GetPrimAtPath(child_prim_path):
+            return False
+        edit = Sdf.BatchNamespaceEdit()
+        edit.Add(child_prim_path, Sdf.Path())  # empty path = delete
+        if not root_layer.Apply(edit):
+            return False
+        root_layer.Save()
+        return True
 
     def get_immediate_children(self) -> list[dict]:
         """Return immediate child prims of this collection on the project stage.

@@ -30,26 +30,113 @@ except ImportError:
 finally:
     sys.path = sys.path[1:]
 import os
+import shlex
+import shutil
 import subprocess
+import webbrowser
 import logging
 import json
 import functools
 import html
 from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from PySide6 import QtWidgets, QtCore, QtGui
 
 from deda.core import LayeredConfig, Project
-from deda.core._config import AppConfig, ServiceConfig
-from deda.core.types import Collection
+from deda.core._config import AppConfig, ServiceConfig, _sanitize_prim_name
+from deda.core.types import Asset, Collection
 
 # Asset types that are created as Collection in project USD metadata
 _COLLECTION_ASSET_TYPES = frozenset({'Collection', 'Sequence', 'Shot'})
 
+
+def _collect_usd_dependencies(root_file_path):
+    """Collect root USD file and all nested references; return list of (abs_path, relative_path).
+
+    relative_path is from the root file's directory, for use under an asset root.
+    Preserves directory structure. Returns [(abs_str, rel_str), ...].
+    """
+    root_path = Path(root_file_path).resolve()
+    if not root_path.is_file():
+        return [(str(root_path), root_path.name)]
+    root_dir = root_path.parent
+    result = {}  # abs_path_str -> relative_path_str
+
+    def process(path_str):
+        path = Path(path_str).resolve()
+        abs_str = str(path)
+        if abs_str in result:
+            return
+        try:
+            rel = path.relative_to(root_dir)
+        except ValueError:
+            rel = Path('external') / path.name
+        rel_str = str(rel).replace('\\', '/')
+        result[abs_str] = rel_str
+        if not path.is_file():
+            return
+        try:
+            from pxr import Sdf, UsdUtils
+        except ImportError:
+            return
+        layer = Sdf.Layer.FindOrOpen(abs_str)
+        if not layer:
+            return
+        rp = getattr(layer, 'realPath', None)
+        if not rp:
+            rp = abs_str
+        layer_dir = Path(rp).resolve().parent
+        try:
+            sublayers, refs, payloads = [], [], []
+            UsdUtils.ExtractExternalReferences(rp, sublayers, refs, payloads)
+            for ref in sublayers + refs + payloads:
+                ref_clean = ref.strip().strip('@')
+                if not ref_clean:
+                    continue
+                ref_path = (layer_dir / ref_clean).resolve()
+                if ref_path.is_file() and str(ref_path) not in result:
+                    process(str(ref_path))
+        except Exception:
+            pass
+
+    process(str(root_path))
+    # Root file first, then rest sorted by path (deepest last for move order)
+    root_abs = str(root_path)
+    root_rel = result.get(root_abs, root_path.name)
+    ordered = [(root_abs, root_rel)]
+    for abs_p in sorted(result.keys()):
+        if abs_p != root_abs:
+            ordered.append((abs_p, result[abs_p]))
+    return ordered
+
+
+# Extensions supported by Usd.Stage.Open and the deda viewer (order = resolution order).
+USD_FILE_EXTENSIONS = ('.usda', '.usd', '.usdc', '.usdz')
+
+
+def _first_usd_file_in_directory(asset_dir: Path, asset_name: str) -> Path | None:
+    """Return the first USD file in asset_dir, preferring asset_name + ext, then any *.{ext}.
+
+    Checks .usda, .usd, .usdc, .usdz in that order. Used when launching an app with an asset.
+    """
+    if not asset_dir.is_dir():
+        return None
+    for ext in USD_FILE_EXTENSIONS:
+        p = asset_dir / f"{asset_name}{ext}"
+        if p.is_file():
+            return p
+    for ext in USD_FILE_EXTENSIONS:
+        matches = sorted(asset_dir.glob(f"*{ext}"))
+        if matches:
+            return matches[0]
+    return None
+
+
 from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
-from ._dialogs import AddItemDialog, ConfigureItemDialog
+from ._dialogs import AddItemDialog, ConfigureItemDialog, CopyMoveUsdFilesDialog
 from ._panel import ItemTile, PanelHeader, Panel
 #from deda.core.viewer import UsdViewWidget
 
@@ -82,7 +169,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._force_close = False
         self._asset_library = None
         self._assets_view_container = None  # Project | Collection | None; current level in Assets panel
-        
+        self._pending_drop_file_path = None  # When set, after creating asset prompt to copy/move this file into it
+
         if app_name is None:
             app_name = "Dedaverse"
         self._settings = QtCore.QSettings("DedaFX", app_name)
@@ -274,6 +362,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 panel_obj.item_created.connect(self._on_asset_created)
                 panel_obj.item_activated.connect(self._on_asset_panel_item_activated)
                 panel_obj.navigate_up_clicked.connect(self._on_assets_navigate_up)
+                panel_obj.file_dropped.connect(self._on_assets_panel_file_dropped)
+                panel_obj.item_removed.connect(self._on_asset_removed)
             elif panel == 'Apps':
                 panel_obj.item_created.connect(self._on_app_created)
                 panel_obj.item_updated.connect(self._on_app_updated)
@@ -283,6 +373,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 panel_obj.item_created.connect(self._on_service_created)
                 panel_obj.item_updated.connect(self._on_service_updated)
                 panel_obj.item_removed.connect(self._on_service_removed)
+            if panel in ('Apps', 'Services'):
+                panel_obj.asset_dropped_on_tile.connect(
+                    self._on_asset_dropped_on_app if panel == 'Apps' else self._on_asset_dropped_on_service
+                )
             # Connect item_created to add tile to the panel (Assets panel is populated by _load_assets_to_panel only)
             if panel != 'Assets':
                 panel_obj.item_created.connect(
@@ -395,6 +489,19 @@ class MainWindow(QtWidgets.QMainWindow):
                     return False
         return True
 
+    def _all_visible_non_project_panels_collapsed(self):
+        """Return True if every visible non-Project panel is minimized (collapsed)."""
+        vbox = self.centralWidget().layout()
+        if vbox is None:
+            return False
+        for i in range(vbox.count()):
+            item = vbox.itemAt(i)
+            w = item.widget() if item else None
+            if w and isinstance(w, Panel) and w.objectName() in ('Assets', 'Apps', 'Services', 'Tasks'):
+                if w.visibility and not w.minimized:
+                    return False
+        return True
+
     def _on_panel_closed(self, panel):
         """When a panel is closed, uncheck the corresponding View submenu item."""
         action = self._action_for_panel_name(panel.objectName())
@@ -407,8 +514,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_panel_stack_layout()
 
     def _on_panel_minimized_changed(self, panel_name, minimized):
-        """Save the panel minimized state to QSettings."""
+        """Save the panel minimized state to QSettings and update stretch so collapsed panels stack at bottom."""
         self._settings.setValue(f'view/{panel_name.lower()}_minimized', minimized)
+        self._update_panel_stack_layout()
 
     def _on_view_toggled_for_panel(self, checked, panel_obj):
         """Handle View submenu toggle: show/hide panel and update layout."""
@@ -426,11 +534,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self._update_panel_stack_layout()
 
     def _update_panel_stack_layout(self):
-        """When all non-Project panels are hidden, add top stretch to pin Project at bottom."""
+        """When all non-Project panels are hidden or all visible ones are collapsed, add top stretch
+        so Project and collapsed panels stack in the lower right corner.
+        """
         vbox = self.centralWidget().layout()
         if vbox is None:
             return
-        need_stretch = self._all_non_project_panels_hidden()
+        need_stretch = (
+            self._all_non_project_panels_hidden()
+            or self._all_visible_non_project_panels_collapsed()
+        )
         if need_stretch and not self._panel_stack_has_top_stretch:
             vbox.insertStretch(0, 1)
             self._panel_stack_has_top_stretch = True
@@ -529,6 +642,100 @@ class MainWindow(QtWidgets.QMainWindow):
             self._load_assets_to_panel(assets_panel)
         self._save_assets_panel_path()
 
+    def _on_asset_removed(self, item_data):
+        """Remove the asset/collection from the parent's USD metadata, archive its directory, and reload the panel."""
+        if not item_data or not self._assets_view_container:
+            return
+        name = (item_data or {}).get('name', '').strip()
+        if not name:
+            return
+        container = self._assets_view_container
+        proj = container.project
+        child_prim_path = f"{container.prim_path}/{name}"
+        asset_dir = Path(proj.asset_directory_for_prim_path(child_prim_path)).resolve()
+
+        # Move all contents of asset root into archive/ (warn if archive would be overwritten)
+        if asset_dir.is_dir():
+            to_move = [p for p in asset_dir.iterdir() if p.name != "archive"]
+            if to_move:
+                archive_dir = asset_dir / "archive"
+                existing_in_archive = set(archive_dir.iterdir()) if archive_dir.exists() else []
+                existing_names = {p.name for p in existing_in_archive}
+                conflicts = [p.name for p in to_move if p.name in existing_names]
+                if conflicts:
+                    msg = (
+                        "The following items in the archive folder would be overwritten:\n\n"
+                        + "\n".join(conflicts)
+                        + "\n\nContinue and overwrite?"
+                    )
+                    box = QtWidgets.QMessageBox(self)
+                    box.setWindowTitle("Archive overwrite")
+                    box.setText(msg)
+                    box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+                    box.setStandardButtons(
+                        QtWidgets.QMessageBox.StandardButton.Cancel | QtWidgets.QMessageBox.StandardButton.Ok
+                    )
+                    box.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+                    if box.exec() != QtWidgets.QMessageBox.StandardButton.Ok:
+                        return
+                try:
+                    archive_dir.mkdir(parents=True, exist_ok=True)
+                    for p in to_move:
+                        dest = asset_dir / "archive" / p.name
+                        shutil.move(str(p), str(dest))
+                    log.info("Archived %s items from %s into archive/", len(to_move), asset_dir)
+                except OSError as err:
+                    log.error("Failed to archive asset directory %s: %s", asset_dir, err)
+                    self.show_message(
+                        "Archive failed",
+                        f"Could not move contents to archive: {err}",
+                        icon=QtWidgets.QSystemTrayIcon.Critical,
+                    )
+                    return
+
+        try:
+            if container.remove_child(name):
+                assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
+                if assets_panel:
+                    self._load_assets_to_panel(assets_panel)
+            else:
+                log.warning("Could not remove child %r from parent USDA.", name)
+        except Exception as err:
+            log.error("Failed to remove asset from parent collection USDA: %s", err)
+            log.exception(err)
+
+    def _on_assets_panel_file_dropped(self, paths):
+        """When files from outside the project are dropped on the Assets panel, open Create Asset dialog."""
+        if not paths or not self.current_project:
+            return
+        project_root = Path(self.current_project.rootdir).resolve()
+        for p in paths:
+            path = Path(p)
+            if not path.is_file():
+                continue
+            try:
+                path_resolved = path.resolve()
+                path_resolved.relative_to(project_root)
+                continue
+            except (OSError, ValueError):
+                pass
+            self._pending_drop_file_path = str(path)
+            initial_name = _sanitize_prim_name(path.stem) or path.stem or 'asset'
+            assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
+            parent_for_dlg = assets_panel._scroll_area if assets_panel and assets_panel._scroll_area else self
+            dlg = AddItemDialog('Asset', parent=parent_for_dlg, initial_name=initial_name)
+            dlg.item_created.connect(self._on_asset_created)
+            if parent_for_dlg and hasattr(parent_for_dlg, 'geometry'):
+                rect = parent_for_dlg.geometry()
+                dlg_rect = dlg.geometry()
+                pt = QtCore.QPoint(
+                    (rect.width() / 2) - (dlg_rect.width() / 2),
+                    (rect.height() / 2) - (dlg_rect.height() / 2)
+                )
+                dlg.move(parent_for_dlg.mapToGlobal(pt))
+            dlg.exec()
+            return
+
     def _on_asset_created(self, asset_info):
         """Handle the creation of the asset in the asset library and in project USD metadata."""
         if not self.current_project:
@@ -563,6 +770,102 @@ class MainWindow(QtWidgets.QMainWindow):
         assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
         if assets_panel:
             self._load_assets_to_panel(assets_panel)
+
+        pending = getattr(self, '_pending_drop_file_path', None)
+        if pending and container and name:
+            self._pending_drop_file_path = None
+            asset_dir = container.project.asset_directory_for_prim_path(f"{container.prim_path}/{name}")
+            try:
+                asset_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+            file_list = _collect_usd_dependencies(pending)
+            if file_list:
+                root_abs, _ = file_list[0]
+                ext = Path(root_abs).suffix or '.usd'
+                file_list[0] = (root_abs, f"{name}{ext}")
+            dlg = CopyMoveUsdFilesDialog(file_list, parent=self)
+            dlg.exec()
+            action = dlg.result_action()
+            if action == CopyMoveUsdFilesDialog.CancelAction:
+                return
+            try:
+                if action == CopyMoveUsdFilesDialog.CopyAction:
+                    for src, rel in file_list:
+                        dest = asset_dir / rel
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, dest)
+                        log.info("Copied %s to %s", src, dest)
+                else:
+                    for src, rel in sorted(file_list, key=lambda x: -len(x[1].split('/'))):
+                        dest = asset_dir / rel
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(src, dest)
+                        log.info("Moved %s to %s", src, dest)
+            except OSError as err:
+                log.error("Failed to copy/move files: %s", err)
+                self.show_message("File operation failed", str(err), icon=QtWidgets.QSystemTrayIcon.Critical)
+
+    def _on_asset_dropped_on_app(self, asset_data, app_data):
+        """Launch the app with the USD file in the asset's root directory (e.g. .../Characters/Monsters/Kitchen_set/Kitchen_set.usd)."""
+        command = (app_data or {}).get('command', '').strip()
+        if not command:
+            log.warning("App item has no command; cannot launch with asset.")
+            return
+        container = self._assets_view_container
+        if not container:
+            log.warning("No asset view container; cannot resolve asset path.")
+            return
+        asset_name = (asset_data or {}).get('name', '').strip() or 'asset'
+        proj = container.project
+        child_prim_path = f"{container.prim_path}/{asset_name}"
+        asset_dir = proj.asset_directory_for_prim_path(child_prim_path)
+        usd_file = _first_usd_file_in_directory(asset_dir, asset_name)
+        if usd_file is None:
+            log.warning("No USD file (.usda, .usd, .usdc, .usdz) found in asset directory: %s", asset_dir)
+            self.show_message("No USD file", f"No USD file found in {asset_dir}.", icon=QtWidgets.QSystemTrayIcon.Warning)
+            return
+        arg = str(usd_file.resolve())
+        argv, use_env = self._parse_python_launch(command)
+        if argv is not None:
+            argv = argv + [arg]
+            kwargs = {'env': os.environ.copy()} if use_env else {}
+            try:
+                subprocess.Popen(argv, **kwargs)
+                log.info("Launched app with asset USD path %s: %s", arg, command)
+            except Exception as err:
+                log.error("Failed to launch app with asset: %s", err)
+                self.show_message("Launch failed", str(err), icon=QtWidgets.QSystemTrayIcon.Critical)
+            return
+        try:
+            safe_arg = shlex.quote(arg)
+            subprocess.Popen(f"{command} {safe_arg}", shell=True)
+            log.info("Launched app with asset USD path %s: %s", arg, command)
+        except Exception as err:
+            log.error("Failed to launch app with asset: %s", err)
+            self.show_message("Launch failed", str(err), icon=QtWidgets.QSystemTrayIcon.Critical)
+
+    def _on_asset_dropped_on_service(self, asset_data, service_data):
+        """Open the service URL with the dropped asset as a query parameter."""
+        url = (service_data or {}).get('url', '').strip()
+        if not url:
+            log.warning("Service item has no URL; cannot open with asset.")
+            return
+        asset_name = (asset_data or {}).get('name', '').strip() or 'asset'
+        try:
+            parsed = list(urlparse(url))
+            query = parse_qs(parsed[4])
+            query['asset'] = [asset_name]
+            parsed[4] = urlencode(query, doseq=True)
+            open_url = urlunparse(parsed)
+        except Exception:
+            open_url = f"{url}?asset={asset_name}" if '?' not in url else f"{url}&asset={asset_name}"
+        try:
+            webbrowser.open(open_url)
+            log.info(f"Opened service with asset '{asset_name}': {url}")
+        except Exception as err:
+            log.error(f"Failed to open service with asset: {err}")
+            self.show_message("Open failed", str(err), icon=QtWidgets.QSystemTrayIcon.Critical)
 
     def _on_app_activated(self, item_data):
         """Launch the app via its command in a subprocess (double-click on Apps panel tile)."""
