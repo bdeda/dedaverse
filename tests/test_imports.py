@@ -16,6 +16,8 @@
 #
 # ###################################################################################
 
+import unittest
+
 
 def test_imports():
     # Top-level packages
@@ -42,7 +44,10 @@ def test_imports():
         pass  # requires marionette_driver (optional)
     import deda.core._check_for_updates
     import deda.core._config
-    import deda.core._photos
+    try:
+        import deda.core._photos  # noqa: F401
+    except ModuleNotFoundError:
+        pass  # requires exifread (optional)
     import deda.core._plugin
     import deda.core._preferences
     import deda.core._types
@@ -84,17 +89,20 @@ def test_imports():
     import deda.core.types._sequence
     import deda.core.types._shot
 
-    # deda.core.viewer
-    import deda.core.viewer
-    import deda.core.viewer.__main__
-    import deda.core.viewer._annotation
-    import deda.core.viewer._app
-    import deda.core.viewer._camera_reticle
-    import deda.core.viewer._playbar
-    import deda.core.viewer._reticle
-    import deda.core.viewer._slate
-    import deda.core.viewer._usd_viewer
-    import deda.core.viewer._window
+    # deda.core.viewer (requires pxr.Usdviewq from USD; optional in headless/minimal envs)
+    try:
+        import deda.core.viewer
+        import deda.core.viewer.__main__
+        import deda.core.viewer._annotation
+        import deda.core.viewer._app
+        import deda.core.viewer._camera_reticle
+        import deda.core.viewer._playbar
+        import deda.core.viewer._reticle
+        import deda.core.viewer._slate
+        import deda.core.viewer._usd_viewer
+        import deda.core.viewer._window
+    except (ModuleNotFoundError, ImportError):
+        pass
 
     # deda.model
     import deda.model
@@ -140,3 +148,10 @@ def test_imports():
     import deda.app.task._task
 
     # Not importable (no package): deda.plugins.ollama
+
+
+class TestImports(unittest.TestCase):
+    """Unittest wrapper so 'python -m unittest discover' runs the import test."""
+
+    def test_imports(self):
+        test_imports()
