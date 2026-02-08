@@ -16,6 +16,9 @@
 #
 # ###################################################################################
 
+import pytest
+
+
 def test_imports():
     # Top-level packages
     import deda
@@ -26,7 +29,13 @@ def test_imports():
 
     # deda.ai
     import deda.ai
-    import deda.ai._neural_network
+    # _neural_network requires torch (optional dependency); skip if not installed
+    try:
+        import deda.ai._neural_network  # noqa: F401
+    except ModuleNotFoundError as e:
+        if "torch" in str(e):
+            pytest.skip("torch not installed; skipping deda.ai._neural_network")
+        raise
 
     # deda.core
     import deda.core
