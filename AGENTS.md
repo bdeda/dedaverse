@@ -80,6 +80,7 @@ with open(config_path, 'w') as f:
 - **Internal/private at the bottom** - Put internal helpers and private functions (e.g. names starting with `_`) at the bottom of the module.
 - **Sort alphabetically** - Within each area (top and bottom), keep symbols sorted alphabetically.
 - **Classes before functions** - In the public (top) section, list classes first (alphabetically), then functions (alphabetically).
+- **Within a class** - Sort method and property definitions alphabetically by name (e.g. `layer`, `metadata_dir`, `metadata_path`, `rootdir`, `stage`). Place `__init__` first, then other methods and properties in A–Z order.
 - Example structure:
 ```python
 """Module docstring."""

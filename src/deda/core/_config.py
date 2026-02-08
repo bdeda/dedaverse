@@ -52,6 +52,21 @@ from dataclasses_json import dataclass_json
 log = logging.getLogger(__name__)
 
 
+def _sanitize_prim_name(display_name: str) -> str:
+    """Convert a display name to a valid USD prim identifier.
+
+    Replaces spaces and invalid characters with underscore; ensures the result
+    starts with a letter or underscore so it is valid for Tf.IsValidIdentifier.
+    """
+    if not display_name or not display_name.strip():
+        return 'Project'
+    s = ''.join(c if c.isalnum() or c == '_' else '_' for c in display_name.strip())
+    s = s.strip('_') or 'Project'
+    if s[0].isdigit():
+        s = '_' + s
+    return s
+
+
 @dataclass_json
 @dataclass(eq=False)
 class AppConfig:
@@ -223,6 +238,9 @@ class ProjectConfig:
     Attributes:
         name: Project display name.
         rootdir: Project root directory on disk.
+        prim_name: Token used as the USD prim name in metadata (must be a valid
+            prim identifier). Used for .dedaverse/{prim_name}.usda and the root
+            prim path. If unset when loading, derived from name.
         cfg_path: Path to the config file; defaults to
             ``{rootdir}/.dedaverse/project.cfg`` if unset.
         key: Optional short identifier (e.g. "FEN").
@@ -238,6 +256,7 @@ class ProjectConfig:
 
     name: str
     rootdir: str
+    prim_name: str | None = None
 
     cfg_path: str | None = None
     key: str | None = None
@@ -256,7 +275,9 @@ class ProjectConfig:
     apps: list[AppConfig] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        """When apps list is empty (new studio config), add the default Dedaverse viewer app."""
+        """Set prim_name from name if unset; add default Dedaverse viewer app when apps empty."""
+        if self.prim_name is None or not str(self.prim_name).strip():
+            self.prim_name = _sanitize_prim_name(self.name)
         if not self.apps:
             self.apps.append(AppConfig(
                 name='Dedaverse',
@@ -312,6 +333,8 @@ class ProjectConfig:
         project = cls.from_json(data)
         # Ensure future saves will go to the same file on disk.
         project.cfg_path = path_str
+        if project.prim_name is None or not project.prim_name.strip():
+            project.prim_name = _sanitize_prim_name(project.name)
         return project
 
     def save(self) -> None:

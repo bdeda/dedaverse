@@ -43,6 +43,9 @@ from PySide6 import QtWidgets, QtCore, QtGui
 from deda.core import LayeredConfig, Project
 from deda.core._config import AppConfig, ServiceConfig
 
+# Asset types that are created as Collection in project USD metadata
+_COLLECTION_ASSET_TYPES = frozenset({'Collection', 'Sequence', 'Shot'})
+
 from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
 from ._dialogs import AddItemDialog, ConfigureItemDialog
@@ -313,7 +316,11 @@ class MainWindow(QtWidgets.QMainWindow):
             
     def _initialize_project(self, project):
         """Initialize the project with the new settings from the project arg."""
-        self._asset_library = Project(project.name, project.rootdir)
+        self._asset_library = Project(
+            project.name,
+            project.rootdir,
+            prim_name=getattr(project, 'prim_name', None),
+        )
         self._create_main_widget()
                    
     def _action_for_panel_name(self, name):
@@ -409,12 +416,30 @@ class MainWindow(QtWidgets.QMainWindow):
             self._panel_stack_has_top_stretch = False
             
     def _on_asset_created(self, asset_info):
-        """Handle the creation of the asset in the asset library."""
-        if not self._asset_library and self.current_project:
-            # Create project USDA stage at {project_root}/.dedaverse/{project_name}.usda
+        """Handle the creation of the asset in the asset library and in project USD metadata."""
+        if not self.current_project:
+            return
+        if not self._asset_library:
             self._asset_library = Project.find_or_create(
                 self.current_project.name,
                 self.current_project.rootdir,
+                prim_name=getattr(self.current_project, 'prim_name', None),
+            )
+        name = (asset_info or {}).get('name', '').strip()
+        if not name:
+            return
+        asset_type = (asset_info or {}).get('type', 'Asset')
+        try:
+            if asset_type in _COLLECTION_ASSET_TYPES:
+                self._asset_library.add_collection(name)
+            else:
+                self._asset_library.add_asset(name)
+        except ValueError as e:
+            log.warning("Could not add asset to project metadata: %s", e)
+            self.show_message(
+                "Invalid asset name",
+                str(e) + "\n\nUse only letters, numbers, and underscores; must not start with a number.",
+                icon=QtWidgets.QSystemTrayIcon.Warning,
             )
 
     def _on_app_activated(self, item_data):

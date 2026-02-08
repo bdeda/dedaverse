@@ -24,6 +24,8 @@ from which metadata is serialized.
 
 from pathlib import Path
 
+from pxr import Sdf
+
 from ._asset_id import AssetID
 
 __all__ = ['Entity']
@@ -72,6 +74,16 @@ class Entity:
         return self._parent
 
     @property
+    def prim_path(self) -> str:
+        """USD prim path for this entity in the project stage.
+
+        Root (project) is /{name}; children are {parent.prim_path}/{name}.
+        """
+        if self._parent is None:
+            return f'/{self._name}'
+        return f'{self._parent.prim_path}/{self._name}'
+
+    @property
     def path(self) -> Path:
         """File system path for this entity.
 
@@ -95,7 +107,34 @@ class Entity:
             if item.parent is None:
                 return item
             item = item.parent
-        return self  
+        return self
+
+    def get_edit_target(self):
+        """Return the best layer to edit for this entity's prim.
+
+        For the stage's pseudo-root prim, returns the stage's root layer.
+        Otherwise, walks the prim's spec stack and returns the first layer
+        that has a defining opinion (Sdf.SpecifierDef) and a non-anonymous
+        identifier, so edits go to a persistent, class-level layer.
+
+        Returns:
+            Sdf.Layer to use as the edit target, or None if no suitable
+            layer is found (e.g. prim is defined only on anonymous layers).
+
+        Note:
+            Requires self.prim (e.g. on Asset and subclasses). Not defined
+            on Entity when prim is not available.
+        """
+        stage = self.prim.GetStage()
+        if self.prim.IsPseudoRoot():
+            return stage.GetRootLayer()
+        for spec in self.prim.GetPrimStack():
+            if spec.specifier != Sdf.SpecifierDef:
+                continue
+            if spec.layer.IsAnonymous():
+                continue
+            return spec.layer
+        return None
 
     @classmethod
     def from_path(cls, path: str) -> 'Entity | None':

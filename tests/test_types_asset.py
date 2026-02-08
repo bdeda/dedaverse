@@ -17,10 +17,14 @@
 # ###################################################################################
 """Unit tests for deda.core.types._asset module."""
 
+import os
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
 from deda.core.types._asset import Asset
+from deda.core.types._collection import Collection
 from deda.core.types._project import Project
 
 
@@ -46,6 +50,49 @@ class TestAsset(unittest.TestCase):
         self.assertIs(asset.parent, project)
         self.assertIs(asset.project, project)
         _ = asset.path
+
+    def test_validate_name_returns_true_for_valid(self):
+        """Asset.validate_name returns True for valid USD identifier."""
+        self.assertTrue(Asset.validate_name("valid_name"))
+        self.assertTrue(Asset.validate_name("ValidName"))
+        self.assertTrue(Asset.validate_name("_private"))
+
+    def test_validate_name_returns_false_for_invalid(self):
+        """Asset.validate_name returns False for invalid identifier."""
+        self.assertFalse(Asset.validate_name(""))
+        self.assertFalse(Asset.validate_name("   "))
+        self.assertFalse(Asset.validate_name("123"))
+        self.assertFalse(Asset.validate_name("has-space"))
+
+    def test_validate_name_raises_type_error_for_non_string(self):
+        """Asset.validate_name raises TypeError for non-string."""
+        with self.assertRaises(TypeError):
+            Asset.validate_name(123)
+
+    def test_metadata_path_under_project(self):
+        """Asset under project has metadata_path at .dedaverse/{name}.usda."""
+        project = Project(name="Proj", rootdir=Path("/root"))
+        asset = Asset(name="MyAsset", parent=project)
+        self.assertEqual(asset.metadata_path, Path("/root/.dedaverse/MyAsset.usda"))
+
+    def test_metadata_dir_under_project(self):
+        """Asset under project has metadata_dir equal to project children_metadata_dir."""
+        project = Project(name="Proj", rootdir=Path("/root"))
+        asset = Asset(name="MyAsset", parent=project)
+        self.assertEqual(asset.metadata_dir, project.children_metadata_dir)
+
+    def test_children_metadata_dir_under_collection(self):
+        """Asset under collection has children_metadata_dir at parent's dir / name."""
+        tmp = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(__file__)))
+        try:
+            project = Project.create(name="Proj", rootdir=Path(tmp))
+            coll = project.add_collection("Col")
+            asset = project.add_asset("A1")
+            self.assertEqual(asset.children_metadata_dir, project.children_metadata_dir / "A1")
+            coll_asset = coll.add_asset("CA1")
+            self.assertEqual(coll_asset.children_metadata_dir, coll.children_metadata_dir / "CA1")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == '__main__':

@@ -55,7 +55,7 @@ class TestProject(unittest.TestCase):
         self.assertEqual(project.metadata_dir, root / ".dedaverse")
 
     def test_metadata_path(self):
-        """metadata_path is rootdir/.dedaverse/{name}.usda."""
+        """metadata_path is rootdir/.dedaverse/{prim_name}.usda."""
         root = Path("/proj/root")
         project = Project(name="MyProject", rootdir=root)
         self.assertEqual(project.metadata_path, root / ".dedaverse" / "MyProject.usda")
@@ -189,6 +189,36 @@ class TestProject(unittest.TestCase):
         self.assertIs(proj.project, proj)
         self.assertEqual(proj.path, Path("test_root"))
         self.assertEqual(proj.rootdir, Path("test_root"))
+
+    def test_prim_name_property(self):
+        """Project.prim_name returns USD prim name (valid identifier)."""
+        proj = Project(name="MyProj", rootdir=Path("r"))
+        self.assertEqual(proj.prim_name, "MyProj")
+        proj2 = Project(name="Display Name", rootdir=Path("r"), prim_name="DisplayName")
+        self.assertEqual(proj2.prim_name, "DisplayName")
+
+    def test_prim_path_uses_prim_name(self):
+        """Project.prim_path returns /{prim_name}."""
+        proj = Project(name="X", rootdir=Path("r"), prim_name="ProjX")
+        self.assertEqual(proj.prim_path, "/ProjX")
+
+    def test_children_metadata_dir_equals_metadata_dir(self):
+        """Project.children_metadata_dir is the same as metadata_dir."""
+        root = Path("/p")
+        proj = Project(name="P", rootdir=root)
+        self.assertEqual(proj.children_metadata_dir, proj.metadata_dir)
+        self.assertEqual(proj.children_metadata_dir, root / ".dedaverse")
+
+    def test_create_with_explicit_invalid_prim_name_raises(self):
+        """Project.create raises ValueError when explicit prim_name is invalid."""
+        tmp = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(__file__)))
+        try:
+            root = Path(tmp)
+            with self.assertRaises(ValueError) as ctx:
+                Project.create(name="Proj", rootdir=root, prim_name="123invalid")
+            self.assertIn("prim_name", str(ctx.exception))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == '__main__':
