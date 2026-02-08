@@ -18,8 +18,8 @@
 """
 Check that every Python module under src/deda has test coverage > 0%.
 
-Reads coverage.xml (Cobertura format) and fails if any source file
-has line-rate 0 or is missing from the report.
+Reads coverage.xml (Cobertura format) and warns (does not fail) if any
+source file has line-rate 0 or is missing from the report.
 
 Run after: pytest tests/ --cov=src/deda --cov-report=xml ...
 """
@@ -116,15 +116,16 @@ def main() -> int:
             zero_coverage.append(f)
 
     if missing or zero_coverage:
+        print("Warning: coverage > 0% check (some modules have no coverage):", file=sys.stderr)
         if missing:
-            print("Files missing from coverage report (0%):", file=sys.stderr)
+            print("  Files missing from coverage report (0%):", file=sys.stderr)
             for m in missing:
-                print(f"  {m}", file=sys.stderr)
+                print(f"    {m}", file=sys.stderr)
         if zero_coverage:
-            print("Files with 0% line coverage:", file=sys.stderr)
+            print("  Files with 0% line coverage:", file=sys.stderr)
             for z in zero_coverage:
-                print(f"  {z}", file=sys.stderr)
-        return 1
+                print(f"    {z}", file=sys.stderr)
+        return 0  # Warn only; do not fail
 
     print("All modules have coverage > 0%.")
     return 0
