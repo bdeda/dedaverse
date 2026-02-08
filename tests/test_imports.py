@@ -36,7 +36,10 @@ def test_imports():
     # deda.core
     import deda.core
     import deda.core._app_launcher
-    import deda.core._amazon_photos
+    try:
+        import deda.core._amazon_photos  # noqa: F401
+    except ModuleNotFoundError:
+        pass  # requires marionette_driver (optional)
     import deda.core._check_for_updates
     import deda.core._config
     import deda.core._photos
