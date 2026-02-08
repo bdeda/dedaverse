@@ -29,5 +29,5 @@ def initialize(loglevel=logging.DEBUG):
         loglevel: (str) The loglevel string.
         
     """
-    logger = logging.getLogger('')
+    logger = logging.getLogger('deda')
     coloredlogs.install(level=loglevel, logger=logger)

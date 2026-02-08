@@ -130,6 +130,23 @@ class Project(Collection):
         """Project root directory on disk."""
         return self._rootdir
 
+    def asset_directory_for_prim_path(self, prim_path: str) -> Path:
+        """Return the directory under project root that mirrors the prim path.
+
+        The path is the prim path with the top-level (project) prim removed,
+        e.g. /KCRC/Foobar -> rootdir/Foobar, /KCRC/Characters/Heroes -> rootdir/Characters/Heroes.
+
+        Args:
+            prim_path: USD prim path (e.g. /{prim_name}/Foobar).
+
+        Returns:
+            Path under project rootdir for this asset/collection.
+        """
+        segments = prim_path.strip("/").split("/")
+        if len(segments) <= 1:
+            return self._rootdir
+        return self._rootdir.joinpath(*segments[1:])
+
     @property
     def stage(self):
         """Usd.Stage opened from the project's USDA metadata file.

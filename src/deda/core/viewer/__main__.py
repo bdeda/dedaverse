@@ -17,18 +17,42 @@
 # ###################################################################################
 """Main entry point for the Dedaverse viewer application."""
 
+import sys
 from pathlib import Path
+import logging
 
+import click
+from PySide6 import QtCore, QtGui
+
+import deda.log
 from deda.app import Application
 from deda.app import _main_window as _app_main_window
 from deda.core.viewer import _window
-from PySide6 import QtGui
 
-if __name__ == '__main__':
+
+log = logging.getLogger('deda.core.viewer')
+
+
+@click.command()
+@click.argument('usd_path', required=False, type=click.Path(exists=False))
+def viewer(usd_path):
+    """Run the Dedaverse viewer, optionally opening a USD file.
+
+    USD_PATH is an optional path to a USD file (.usd, .usda, .usdc, .usdz)
+    to open when the viewer starts.
+    """
+    deda.log.initialize(loglevel=logging.INFO)
     app = Application()
     icon_path = Path(_app_main_window.__file__).parent / 'icons' / 'star_icon.png'
     if icon_path.is_file():
         app.setWindowIcon(QtGui.QIcon(str(icon_path)))
     w = _window.MainWindow()
     w.show()
-    app.exec()
+    if usd_path:
+        path_str = str(Path(usd_path).resolve())
+        QtCore.QTimer.singleShot(0, lambda: w._open_stage_file(path_str))
+    return app.exec()
+
+
+if __name__ == '__main__':
+    sys.exit(viewer())

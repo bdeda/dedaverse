@@ -22,23 +22,33 @@ Panel-related widget classes: ItemTile, PanelHeader, and Panel.
 __all__ = ["ItemTile", "PanelHeader", "Panel"]
 
 import html
+import json
 from pathlib import Path
 
 from PySide6 import QtWidgets, QtCore, QtGui
 
 from ._dialogs import AddItemDialog, ConfigureItemDialog
 
+# MIME type for asset drag-and-drop from Assets panel to Apps/Services panels
+ASSET_MIME_TYPE = "application/x-dedaverse-asset"
+
 
 class ItemTile(QtWidgets.QFrame):
     """Tile widget for displaying an item with icon, name, and tooltip."""
 
     activated = QtCore.Signal(object)  # Emits item_data on double-click
+    asset_dropped = QtCore.Signal(object, object)  # (asset_data, this_tile_item_data) when asset dropped on this tile
 
-    def __init__(self, item_data, tile_width, parent=None):
+    def __init__(self, item_data, tile_width, parent=None, draggable=False, accept_asset_drop=False):
         super().__init__(parent=parent)
         self._item_data = item_data
+        self._draggable = bool(draggable)
+        self._accept_asset_drop = bool(accept_asset_drop)
+        self._drag_start_pos = None
         self.setFixedSize(tile_width, tile_width)
         self.setObjectName("ItemTile")
+        if accept_asset_drop:
+            self.setAcceptDrops(True)
         # Set NoFrame so stylesheet border is used instead of QFrame's built-in frame
         self.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         self._normal_border = "rgb(50,50,50)"
@@ -68,6 +78,16 @@ class ItemTile(QtWidgets.QFrame):
         icon_label.setPixmap(pixmap)
         icon_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         vbox.addWidget(icon_label)
+
+        if draggable:
+            drag_size = 48
+            self._drag_pixmap = pixmap.scaled(
+                drag_size, drag_size,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation
+            )
+        else:
+            self._drag_pixmap = None
 
         name = item_data.get('name', 'Untitled')
         name_label = QtWidgets.QLabel(name)
@@ -103,6 +123,69 @@ class ItemTile(QtWidgets.QFrame):
         self.setStyleSheet(
             f"#ItemTile{{background-color: rgb(30,30,30); border: 1px solid {self._normal_border}; border-radius: 3px;}}"
         )
+
+    def mousePressEvent(self, event):
+        """Record start position for drag when draggable."""
+        if self._draggable and event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self._drag_start_pos = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Start drag with asset data and icon pixmap when drag threshold exceeded."""
+        if not self._draggable or self._drag_start_pos is None:
+            super().mouseMoveEvent(event)
+            return
+        if not (event.buttons() & QtCore.Qt.MouseButton.LeftButton):
+            super().mouseMoveEvent(event)
+            return
+        delta = event.position().toPoint() - self._drag_start_pos
+        if delta.manhattanLength() < QtWidgets.QApplication.startDragDistance():
+            super().mouseMoveEvent(event)
+            return
+        self._drag_start_pos = None
+        drag = QtGui.QDrag(self)
+        mime = QtCore.QMimeData()
+        mime.setData(ASSET_MIME_TYPE, QtCore.QByteArray(json.dumps(self._item_data).encode('utf-8')))
+        drag.setMimeData(mime)
+        if self._drag_pixmap:
+            drag.setPixmap(self._drag_pixmap)
+            drag.setHotSpot(QtCore.QPoint(self._drag_pixmap.width() // 2, self._drag_pixmap.height() // 2))
+        drag.exec(QtCore.Qt.DropAction.CopyAction)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """Clear drag start position."""
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self._drag_start_pos = None
+        super().mouseReleaseEvent(event)
+
+    def dragEnterEvent(self, event):
+        """Accept drag if it carries asset data."""
+        if self._accept_asset_drop and event.mimeData().hasFormat(ASSET_MIME_TYPE):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        """Accept drag move if it carries asset data."""
+        if self._accept_asset_drop and event.mimeData().hasFormat(ASSET_MIME_TYPE):
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        """Emit asset_dropped with decoded asset data and this tile's item data."""
+        if not self._accept_asset_drop or not event.mimeData().hasFormat(ASSET_MIME_TYPE):
+            super().dropEvent(event)
+            return
+        try:
+            raw = bytes(event.mimeData().data(ASSET_MIME_TYPE))
+            asset_data = json.loads(raw.decode('utf-8'))
+            event.acceptProposedAction()
+            self.asset_dropped.emit(asset_data, self._item_data)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        super().dropEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         """Emit activated with item data on double-click."""
@@ -177,7 +260,7 @@ class PanelHeader(QtWidgets.QWidget):
         gear_btn.clicked.connect(self._on_settings_clicked)
         
         if show_minmax:
-            self._minmax_btn = QtWidgets.QPushButton('[]' if self._minimized else '__')
+            self._minmax_btn = QtWidgets.QPushButton('\u25a1' if self._minimized else '\u25a0')  # □ expand / ■ collapse
             self._minmax_btn.setFlat(True)
             self._minmax_btn.setFixedSize(metrics.height(), metrics.height())
             hbox.addWidget(self._minmax_btn)
@@ -203,13 +286,13 @@ class PanelHeader(QtWidgets.QWidget):
     def set_title(self, title: str) -> None:
         """Update the header title text."""
         self._title_label.setText(title)
-        
+
     def _minmax_clicked(self):
         self._minimized = not self._minimized
         if self._minimized:
-            self._minmax_btn.setText('[]')
+            self._minmax_btn.setText('\u25a1')  # □
         else:
-            self._minmax_btn.setText('__')
+            self._minmax_btn.setText('\u25a0')  # ■
         self.minmax_clicked.emit(self._minimized) 
         
     def _on_settings_clicked(self):
@@ -229,6 +312,8 @@ class Panel(QtWidgets.QFrame):
     item_removed = QtCore.Signal(object)  # item_data when item is removed
     minimized_changed = QtCore.Signal(str, bool)
     navigate_up_clicked = QtCore.Signal()
+    asset_dropped_on_tile = QtCore.Signal(object, object)  # (asset_data, target_tile_item_data)
+    file_dropped = QtCore.Signal(object)  # list of file path strings from external drag (e.g. file manager)
 
     def __init__(self, type_name, name,
                  view=None,  # instance of the view to put into the panel
@@ -278,14 +363,49 @@ class Panel(QtWidgets.QFrame):
             self._scroll_area.setWidget(container)
 
             vbox.addWidget(self._scroll_area)
-            header.minmax_clicked.connect(self._on_minimized)
+            # Bind to this panel only so the expand/collapse button only affects this panel
+            header.minmax_clicked.connect(lambda minimized, p=self: p._on_minimized(minimized))
             self._on_minimized(header.minimized)
 
             # Context menu on scroll area so it is always triggered when right-clicking in panel
             self._scroll_area.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
             self._scroll_area.customContextMenuRequested.connect(self._show_context_menu)
-            self._items = []   
-            
+            self._items = []
+
+            if type_name == 'Assets':
+                self._scroll_area.viewport().setAcceptDrops(True)
+                self._scroll_area.viewport().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        """Handle file drops on Assets panel scroll viewport."""
+        if (
+            self.objectName() == 'Assets'
+            and self._scroll_area
+            and obj is self._scroll_area.viewport()
+        ):
+            t = event.type()
+            if t == QtCore.QEvent.Type.DragEnter:
+                if event.mimeData().hasUrls():
+                    event.acceptProposedAction()
+                return False
+            if t == QtCore.QEvent.Type.DragMove:
+                if event.mimeData().hasUrls():
+                    event.acceptProposedAction()
+                return False
+            if t == QtCore.QEvent.Type.Drop:
+                if event.mimeData().hasUrls():
+                    paths = []
+                    for url in event.mimeData().urls():
+                        if url.isLocalFile():
+                            p = Path(url.toLocalFile())
+                            if p.is_file():
+                                paths.append(str(p.resolve()))
+                    if paths:
+                        self.file_dropped.emit(paths)
+                    event.acceptProposedAction()
+                return True
+        return super().eventFilter(obj, event)
+
     @property
     def visibility(self):
         return self._visibility
@@ -304,6 +424,11 @@ class Panel(QtWidgets.QFrame):
         """Update the panel header title."""
         if self._header:
             self._header.set_title(title)
+
+    @property
+    def minimized(self) -> bool:
+        """True if the panel content is collapsed (only header visible)."""
+        return self._header.minimized if self._header else False
 
     def __repr__(self):
         return f'<{self.__class__.__name__} {self.objectName()}>'
@@ -325,7 +450,9 @@ class Panel(QtWidgets.QFrame):
         dlg.exec()
                
     def _on_minimized(self, minimized):
-        self._scroll_area.setVisible(not minimized)
+        """Show or hide this panel's content only; does not affect other panels."""
+        if self._scroll_area is not None:
+            self._scroll_area.setVisible(not minimized)
         self.minimized_changed.emit(self.objectName(), minimized)
 
     def _update_tile_size(self):
@@ -368,12 +495,22 @@ class Panel(QtWidgets.QFrame):
         available_width = scroll_width - 16
         spacing = 8
         tile_width = max(80, (available_width - (self._tiles_per_row - 1) * spacing) // self._tiles_per_row)
+        is_assets = self.objectName() == 'Assets'
+        is_apps_or_services = self.objectName() in ('Apps', 'Services')
         for idx, item_data in enumerate(self._items):
             row = idx // self._tiles_per_row
             col = idx % self._tiles_per_row
-            tile = ItemTile(item_data, tile_width, parent=self._tiles_container)
+            tile = ItemTile(
+                item_data,
+                tile_width,
+                parent=self._tiles_container,
+                draggable=is_assets,
+                accept_asset_drop=is_apps_or_services,
+            )
             tile._item_index = idx  # used by context menu to find item
             tile.activated.connect(self.item_activated.emit)
+            if is_apps_or_services:
+                tile.asset_dropped.connect(self.asset_dropped_on_tile.emit)
             self._tiles_layout.addWidget(
                 tile, row, col,
                 alignment=QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft
