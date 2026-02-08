@@ -17,20 +17,15 @@
 # ###################################################################################
 """Asset type for the asset system.
 
-Assets are backed by a usda file under the project root .dataverse directory.
+Assets are backed by a usda file under the project root .dedaverse directory.
 That directory follows the form:
-    <project_rootdir>/.dedaverse/project.cfg  -- config data for the project that exposes shared configureation
-    <project_rootdir>/.dedaverse/project.usda -- metadata about the Project, description, and children assets
-        -- contains sublayers for each top-level asset or collection
-        -- default prim with project metadata
-    <project_rootdir>/.dedaverse/collection.usda -- top level collection
-    
-    
+    <project_rootdir>/.dedaverse/project.cfg  -- config data for the project
+    <project_rootdir>/.dedaverse/{project_name}.usda -- project stage (metadata, assets)
 """
 
 from pathlib import Path
 
-from pxr import Tf
+from pxr import Sdf, Tf, Usd
 
 from ._entity import Entity
 
@@ -53,29 +48,55 @@ class Asset(Entity):
         # Only collections can have children assets.
         return None
     
-    @property 
+    @property
+    def prim(self):
+        """Usd.Prim for this asset on the project stage.
+
+        The prim may be created later. If the prim is not valid (e.g. stage
+        reloaded), it is re-acquired from the project stage.
+
+        Returns:
+            Usd.Prim at this asset's prim_path; may be invalid if not yet created.
+        """
+        proj = self.project
+        if not hasattr(proj, 'stage'):
+            return Usd.Prim()
+        stage = proj.stage
+        if stage is None:
+            return Usd.Prim()
+        path = Sdf.Path(self.prim_path)
+        prim = stage.GetPrimAtPath(path)
+        if not prim.IsValid():
+            prim = stage.GetPrimAtPath(path)
+        return prim
+
+    @property
+    def children_metadata_dir(self) -> Path:
+        """Directory where child collection/asset USDA files are stored.
+
+        For a collection under project: .dedaverse/collection_name.
+        For an asset under collection: .dedaverse/collection_name/asset_name.
+        """
+        return self.parent.children_metadata_dir / self.name
+
+    @property
     def metadata(self):
-        return # TODO
-    
-    @property
-    def metadata_dir(self) -> Path | None:
-        """The dedaverse metadata dir relative to the project rootdir.
+        return  # TODO
 
-        Returns:
-            Path to the metadata file, or None if not yet resolved.
-        """
-        # Project metadata comes from .dedaverse directory under the project rootdir
-        return self.parent.metadata_dir / self.name
-    
     @property
-    def metadata_path(self) -> Path | None:
-        """The dedaverse metadata path relative to the project rootdir.
+    def metadata_dir(self) -> Path:
+        """Directory containing this asset's USDA file (parent's children dir)."""
+        return self.parent.children_metadata_dir
 
-        Returns:
-            Path to the metadata file, or None if not yet resolved.
+    @property
+    def metadata_path(self) -> Path:
+        """Path to this asset's USDA file.
+
+        Format: parent.children_metadata_dir / {name}.usda, e.g.
+        .dedaverse/collection_name.usda for a collection under project,
+        .dedaverse/collection_name/asset_name.usda for an asset under collection.
         """
-        # Project metadata comes from .dedaverse directory under the project rootdir
-        return self.metadata_dir / f'{self.name}.usda'    
+        return self.parent.children_metadata_dir / f'{self.name}.usda'    
     
     @classmethod
     def validate_name(cls, name: str):

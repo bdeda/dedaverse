@@ -36,7 +36,7 @@ class TestLogInitialize(unittest.TestCase):
         
         initialize()
         
-        mock_get_logger.assert_called_once_with('')
+        mock_get_logger.assert_called_once_with('deda')
         mock_install.assert_called_once_with(level=logging.DEBUG, logger=mock_logger)
 
     @patch('deda.log.coloredlogs.install')
@@ -48,7 +48,7 @@ class TestLogInitialize(unittest.TestCase):
         
         initialize(loglevel=logging.INFO)
         
-        mock_get_logger.assert_called_once_with('')
+        mock_get_logger.assert_called_once_with('deda')
         mock_install.assert_called_once_with(level=logging.INFO, logger=mock_logger)
 
 

@@ -31,7 +31,7 @@ class TestSequence(unittest.TestCase):
         """Test that Sequence requires a non-None parent."""
         project = Project(name="TestProject", rootdir=Path("test_root"))
         sequence = Sequence(name="TestSequence", parent=project)
-        self.assertEqual(sequence._parent, project)
+        self.assertIs(sequence.parent, project)
 
     def test_sequence_parent_none_raises(self):
         """Test that Sequence cannot be created without a parent."""

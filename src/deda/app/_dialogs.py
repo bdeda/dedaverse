@@ -19,7 +19,7 @@
 Graphics views for panels and browsers.
 """
 
-__all__ = ["AddItemDialog", "ConfigureItemDialog"]
+__all__ = ["AddItemDialog", "ConfigureItemDialog", "CopyMoveUsdFilesDialog"]
 
 import os
 from pathlib import Path
@@ -53,36 +53,38 @@ class AddItemDialog(QtWidgets.QDialog):
     
     item_created = QtCore.Signal(object)
     
-    def __init__(self, type_name, parent=None):
+    def __init__(self, type_name, parent=None, initial_name=None):
         super().__init__(parent=parent)
-        
+
         self.setWindowTitle(f'Add {type_name}')
         icon_path = Path(__file__).parent / 'icons' / 'green_plus.png'
-        plus_icon = QtGui.QIcon(str(icon_path))   
+        plus_icon = QtGui.QIcon(str(icon_path))
         self.setWindowIcon(plus_icon)
-        
+
         self._type_name = type_name
-        
+
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
-        
+
         grid = QtWidgets.QGridLayout()
         vbox.addLayout(grid)
-                
+
         # default icon for type
         icon_path = Path(__file__).parent / 'icons' / 'questionmark_small.png'
-        questionmark_icon = QtGui.QPixmap(str(icon_path))          
+        questionmark_icon = QtGui.QPixmap(str(icon_path))
         # customization of icon allows drag and drop, resize and store icon on drop
         self._icon_lbl = ClickableLabel()
         self._icon_lbl.setPixmap(questionmark_icon)
         self._selected_icon_path = None
         grid.addWidget(self._icon_lbl, 0, 0, 2, 1)
         self._icon_lbl.clicked.connect(self._open_icon_browser)
-                
-        # editable name field, default is "untitled" 
+
+        # editable name field, default is "untitled" or initial_name when provided
         lbl = QtWidgets.QLabel('Name:')
         grid.addWidget(lbl, 0, 2)
         self._name_le = QtWidgets.QLineEdit()
+        if initial_name:
+            self._name_le.setText(initial_name.strip())
         grid.addWidget(self._name_le, 0, 3)
         self._name_le.textEdited.connect(self._name_changed)
         
@@ -95,6 +97,8 @@ class AddItemDialog(QtWidgets.QDialog):
             items = _types.all_default_asset_types()
         elif type_name == 'App':
             items = ['Command', 'Python']
+        elif type_name == 'Service':
+            items = ['REST']  # Services are REST-based
         elif type_name == 'Task':
             items = ['Work', 'Review', 'Notify']        
         self._types_cb.addItems(items)
@@ -107,16 +111,23 @@ class AddItemDialog(QtWidgets.QDialog):
             self._types_cb.setCurrentIndex(idx)
         self._types_cb.currentTextChanged.connect(self._on_type_changed)
 
-        if type_name != 'App':
-            grid.addWidget(self._types_cb, 1, 3, -1, 1)        
-        else:
+        if type_name == 'App':
             grid.addWidget(self._types_cb, 1, 3)
             
             lbl = QtWidgets.QLabel('Command:')
             grid.addWidget(lbl, 2, 2)
             self._command_le = QtWidgets.QLineEdit()
             grid.addWidget(self._command_le, 2, 3, -1, 1)
-            #self._command_le.textEdited.connect(self._name_changed)            
+            #self._command_le.textEdited.connect(self._name_changed)
+        elif type_name == 'Service':
+            grid.addWidget(self._types_cb, 1, 3)
+            
+            lbl = QtWidgets.QLabel('URL:')
+            grid.addWidget(lbl, 2, 2)
+            self._url_le = QtWidgets.QLineEdit()
+            grid.addWidget(self._url_le, 2, 3, -1, 1)
+        else:
+            grid.addWidget(self._types_cb, 1, 3, -1, 1)            
         
         # buttons to create or cancel
         self._btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel,
@@ -126,7 +137,10 @@ class AddItemDialog(QtWidgets.QDialog):
         
         self._btns.accepted.connect(self._create_item)
         self._btns.rejected.connect(self.close)
-        
+
+        if initial_name and initial_name.strip():
+            self._name_changed(initial_name.strip())
+
     def _on_type_changed(self, text: str) -> None:
         """Persist the selected type for this dialog category."""
         self._settings.setValue(f'AddItemDialog/{self._type_name}/lastType', text)
@@ -139,6 +153,9 @@ class AddItemDialog(QtWidgets.QDialog):
         }
         if self._type_name == 'App':
             item['command'] = self._command_le.text()
+        elif self._type_name == 'Service':
+            item['url'] = self._url_le.text().strip()
+            item['params'] = []  # Parameters can be added later via configure dialog
         # Store the icon path if a custom icon was selected
         if self._selected_icon_path:
             item['icon'] = self._selected_icon_path
@@ -231,14 +248,22 @@ class ConfigureItemDialog(QtWidgets.QDialog):
         self._desc_le.setPlaceholderText('Optional description')
         grid.addWidget(self._desc_le, 2, 2)
 
-        # Command (Apps only)
+        # Command (Apps only) or URL (Services only)
         if type_name == 'App':
             grid.addWidget(QtWidgets.QLabel('Command:'), 3, 1)
             self._command_le = QtWidgets.QLineEdit()
             self._command_le.setText(self._item_data.get('command', ''))
             grid.addWidget(self._command_le, 3, 2)
+            self._url_le = None
+        elif type_name == 'Service':
+            grid.addWidget(QtWidgets.QLabel('URL:'), 3, 1)
+            self._url_le = QtWidgets.QLineEdit()
+            self._url_le.setText(self._item_data.get('url', ''))
+            grid.addWidget(self._url_le, 3, 2)
+            self._command_le = None
         else:
             self._command_le = None
+            self._url_le = None
 
         self._btns = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel,
@@ -280,6 +305,55 @@ class ConfigureItemDialog(QtWidgets.QDialog):
             updated['icon'] = self._selected_icon_path
         if self._type_name == 'App' and self._command_le is not None:
             updated['command'] = self._command_le.text()
+        elif self._type_name == 'Service' and self._url_le is not None:
+            updated['url'] = self._url_le.text().strip()
+            updated['params'] = self._item_data.get('params', [])  # Preserve existing params
         self.item_updated.emit(self._item_index, updated)
         self.close()
+
+
+class CopyMoveUsdFilesDialog(QtWidgets.QDialog):
+    """Confirm copy or move of a USD file and its dependencies into the asset directory."""
+
+    CopyAction = 1
+    MoveAction = 2
+    CancelAction = 0
+
+    def __init__(self, file_list, parent=None):
+        """Show a list of files that will be copied/moved, with Copy / Move / Cancel.
+
+        file_list: list of (absolute_path_str, relative_path_str) for each file.
+        """
+        super().__init__(parent=parent)
+        self.setWindowTitle("Copy or move USD files into asset")
+        self._result = self.CancelAction
+        vbox = QtWidgets.QVBoxLayout(self)
+        label = QtWidgets.QLabel(
+            "The following files (including nested references) will be copied or moved "
+            "into the asset directory, preserving relative paths. Continue?"
+        )
+        label.setWordWrap(True)
+        vbox.addWidget(label)
+        self._list = QtWidgets.QListWidget()
+        self._list.setMinimumHeight(120)
+        for abs_path, rel_path in file_list:
+            self._list.addItem(f"{rel_path}\n  ← {abs_path}")
+        vbox.addWidget(self._list)
+        btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        copy_btn = btns.addButton("Copy", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
+        move_btn = btns.addButton("Move", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
+        btns.rejected.connect(self.reject)
+        copy_btn.clicked.connect(lambda: self._accept_action(self.CopyAction))
+        move_btn.clicked.connect(lambda: self._accept_action(self.MoveAction))
+        vbox.addWidget(btns)
+
+    def _accept_action(self, action):
+        self._result = action
+        self.accept()
+
+    def result_action(self):
+        """Return CopyAction, MoveAction, or CancelAction."""
+        return self._result
 

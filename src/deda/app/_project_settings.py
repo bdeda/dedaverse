@@ -22,6 +22,7 @@ import logging
 from pathlib import Path
 
 from PySide6 import QtWidgets, QtCore, QtGui
+from pxr import Tf
 
 import deda.core
 
@@ -85,7 +86,16 @@ class StartProjectDialog(QtWidgets.QDialog):
         self._name_editor.textChanged.connect(self._set_project_name)
         grid.addWidget(self._name_editor, row, 1, 1, -1)
         row += 1
-        
+
+        lbl = QtWidgets.QLabel('Token (prim name):')
+        lbl.setToolTip('Short name used as the USD prim name in metadata. Letters, numbers, underscores only; must not start with a number.')
+        grid.addWidget(lbl, row, 0)
+        self._token_editor = QtWidgets.QLineEdit()
+        self._token_editor.setText(getattr(self._project, 'prim_name', None) or deda.core._config._sanitize_prim_name(self._project.name))
+        self._token_editor.textChanged.connect(self._validate_token)
+        grid.addWidget(self._token_editor, row, 1, 1, -1)
+        row += 1
+
         lbl = QtWidgets.QLabel('Root Directory:')
         grid.addWidget(lbl, row, 0)
         self._rootdir_editor = QtWidgets.QLineEdit()
@@ -113,7 +123,18 @@ class StartProjectDialog(QtWidgets.QDialog):
         
     def _set_project_name(self, text):
         self._project.name = text
-        
+        if not self._token_editor.hasFocus():
+            self._token_editor.setText(deda.core._config._sanitize_prim_name(text))
+
+    def _validate_token(self):
+        token = self._token_editor.text().strip()
+        valid = bool(token and Tf.IsValidIdentifier(token))
+        self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(valid and bool(self._name_editor.text().strip()))
+        if token and not valid:
+            self._token_editor.setStyleSheet('background-color: #ffcccc;')
+        else:
+            self._token_editor.setStyleSheet('')
+
     def _pick_rootdir(self):
         # TODO: verify this can work with network paths as a secondarily supported strucuture
         ret = QtWidgets.QFileDialog.getExistingDirectory(self, 'Choose Project Directory', self._project.rootdir)
@@ -127,6 +148,7 @@ class StartProjectDialog(QtWidgets.QDialog):
             self._project = deda.core.ProjectConfig.load(cfg_path)
             if self._project:
                 self._name_editor.setText(self._project.name)
+                self._token_editor.setText(getattr(self._project, 'prim_name', None) or deda.core._config._sanitize_prim_name(self._project.name))
         else:
             self._project.rootdir = rootdir
             self._project.cfg_path = (rootdir_path / '.dedaverse' / 'project.cfg').as_posix()                
@@ -147,8 +169,12 @@ class StartProjectDialog(QtWidgets.QDialog):
             if data.name != name:
                 self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(False)
                 self._check_proj_writable()
-                return                
-        self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(True)
+                return
+        token = self._token_editor.text().strip()
+        if not token or not Tf.IsValidIdentifier(token):
+            self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(False)
+        else:
+            self._btns.button(QtWidgets.QDialogButtonBox.Save).setEnabled(True)
         self._check_proj_writable()
         
     def _check_proj_writable(self):
@@ -161,10 +187,18 @@ class StartProjectDialog(QtWidgets.QDialog):
         self._rootdir_editor.setReadOnly(False)        
         
     def save_and_close(self):
+        token = self._token_editor.text().strip()
+        if not Tf.IsValidIdentifier(token):
+            QtWidgets.QMessageBox.warning(
+                self, 'Invalid Token',
+                'Token (prim name) must be a valid USD identifier: letters, numbers, underscores only; must not start with a number.'
+            )
+            return
+        self._project.prim_name = token
         if self._project not in self._config.projects:
             self._config.user.add_project(self._project)
         self._config.current_project = self._project
-        self._project.save() # try to save, fail gracefully if cfg is not writable
+        self._project.save()
         self._config.save()
         self.close()
         self.project_changed.emit()
@@ -222,9 +256,17 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
             self._project_name_le.setText(self._config.current_project.name)
         self._project_name_le.textChanged.connect(self._project_name_changed)
         grid.addWidget(self._project_name_le, 0, 1, 1, -1)
+
+        lbl = QtWidgets.QLabel('Token (prim name):')
+        lbl.setToolTip('USD prim name in metadata. Letters, numbers, underscores only; must not start with a number.')
+        grid.addWidget(lbl, 1, 0)
+        self._project_token_le = QtWidgets.QLineEdit()
+        if self._config.current_project:
+            self._project_token_le.setText(getattr(self._config.current_project, 'prim_name', None) or deda.core._config._sanitize_prim_name(self._config.current_project.name))
+        grid.addWidget(self._project_token_le, 1, 1, 1, -1)
         
         lbl = QtWidgets.QLabel('Root Directory:')
-        grid.addWidget(lbl, 1, 0)
+        grid.addWidget(lbl, 2, 0)
         rootdir_widget = QtWidgets.QWidget()
         rootdir_hbox = QtWidgets.QHBoxLayout(rootdir_widget)
         rootdir_hbox.setContentsMargins(0, 0, 0, 0)
@@ -245,10 +287,10 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         browse_btn.setToolTip('Choose project root directory')
         browse_btn.clicked.connect(self._pick_project_rootdir)
         rootdir_hbox.addWidget(browse_btn)
-        grid.addWidget(rootdir_widget, 1, 1, 1, -1)
+        grid.addWidget(rootdir_widget, 2, 1, 1, -1)
 
         lbl = QtWidgets.QLabel('HDR / Environment directory:')
-        grid.addWidget(lbl, 2, 0)
+        grid.addWidget(lbl, 3, 0)
         hdr_widget = QtWidgets.QWidget()
         hdr_hbox = QtWidgets.QHBoxLayout(hdr_widget)
         hdr_hbox.setContentsMargins(0, 0, 0, 0)
@@ -271,10 +313,10 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         hdr_browse_btn.setToolTip('Choose HDR / environment textures directory')
         hdr_browse_btn.clicked.connect(self._pick_hdr_images_dir)
         hdr_hbox.addWidget(hdr_browse_btn)
-        grid.addWidget(hdr_widget, 2, 1, 1, -1)
+        grid.addWidget(hdr_widget, 3, 1, 1, -1)
 
         lbl = QtWidgets.QLabel('Lights root:')
-        grid.addWidget(lbl, 3, 0)
+        grid.addWidget(lbl, 4, 0)
         lights_widget = QtWidgets.QWidget()
         lights_hbox = QtWidgets.QHBoxLayout(lights_widget)
         lights_hbox.setContentsMargins(0, 0, 0, 0)
@@ -297,10 +339,10 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         lights_browse_btn.setToolTip('Choose lights root directory')
         lights_browse_btn.clicked.connect(self._pick_lights_root)
         lights_hbox.addWidget(lights_browse_btn)
-        grid.addWidget(lights_widget, 3, 1, 1, -1)
+        grid.addWidget(lights_widget, 4, 1, 1, -1)
 
         lbl = QtWidgets.QLabel('Materials root:')
-        grid.addWidget(lbl, 4, 0)
+        grid.addWidget(lbl, 5, 0)
         materials_widget = QtWidgets.QWidget()
         materials_hbox = QtWidgets.QHBoxLayout(materials_widget)
         materials_hbox.setContentsMargins(0, 0, 0, 0)
@@ -323,7 +365,7 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         materials_browse_btn.setToolTip('Choose materials root directory')
         materials_browse_btn.clicked.connect(self._pick_materials_root)
         materials_hbox.addWidget(materials_browse_btn)
-        grid.addWidget(materials_widget, 4, 1, 1, -1)
+        grid.addWidget(materials_widget, 5, 1, 1, -1)
         
         # TODO: check for perforce plugin
         #self._perforce_cb = QtWidgets.QCheckBox('Use Perforce')
@@ -372,6 +414,7 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
                 self._materials_root_le.clear()
                 return
             self._project_name_le.setText(current_project.name)
+            self._project_token_le.setText(getattr(current_project, 'prim_name', None) or deda.core._config._sanitize_prim_name(current_project.name))
             self._project_rootdir_le.setText(current_project.rootdir)
             self._hdr_images_dir_le.setText(
                 getattr(current_project, 'hdr_images_dir', None) or ''
@@ -491,10 +534,19 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         lights_root = self._lights_root_le.text().strip() or None
         materials_root = self._materials_root_le.text().strip() or None
 
+        token = self._project_token_le.text().strip()
+        if not token or not Tf.IsValidIdentifier(token):
+            QtWidgets.QMessageBox.warning(
+                self, 'Invalid Token',
+                'Token (prim name) must be a valid USD identifier: letters, numbers, underscores only; must not start with a number.'
+            )
+            return
+
         if proj is not None:
             # Editing existing project: update from form
             old_name = proj.name
             proj.name = proj_name
+            proj.prim_name = token
             proj.rootdir = rootdir
             proj.hdr_images_dir = hdr_dir
             proj.lights_root = lights_root
@@ -514,9 +566,10 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
                 return
             proj = deda.core.ProjectConfig.load(rootdir)
             if not proj:
-                proj = deda.core.ProjectConfig(name=proj_name, rootdir=rootdir)
+                proj = deda.core.ProjectConfig(name=proj_name, rootdir=rootdir, prim_name=token)
             else:
                 proj.name = proj_name
+                proj.prim_name = token
                 proj.rootdir = rootdir
             proj.hdr_images_dir = hdr_dir
             proj.lights_root = lights_root

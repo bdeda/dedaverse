@@ -21,7 +21,13 @@ import unittest
 import platform
 from unittest.mock import patch, MagicMock
 
+import deda.app._app as _app_module
 from deda.app._app import get_proc_under_mouse
+
+
+def _win32_available():
+    """True if pywin32 (win32gui, win32process) is available (Windows only)."""
+    return platform.system() == 'Windows' and getattr(_app_module, 'WIN32_AVAILABLE', False)
 
 
 class TestGetProcUnderMouse(unittest.TestCase):
@@ -33,7 +39,7 @@ class TestGetProcUnderMouse(unittest.TestCase):
             result = get_proc_under_mouse()
             self.assertIsNone(result)
 
-    @unittest.skipIf(platform.system() != 'Windows', "Windows-specific test")
+    @unittest.skipIf(not _win32_available(), "Windows and pywin32 required")
     @patch('deda.app._app.win32gui.WindowFromPoint')
     @patch('deda.app._app.win32gui.GetCursorPos')
     @patch('deda.app._app.win32process.GetWindowThreadProcessId')

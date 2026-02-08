@@ -30,22 +30,113 @@ except ImportError:
 finally:
     sys.path = sys.path[1:]
 import os
+import shlex
+import shutil
 import subprocess
+import webbrowser
 import logging
 import json
 import functools
 import html
 from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from PySide6 import QtWidgets, QtCore, QtGui
 
 from deda.core import LayeredConfig, Project
-from deda.core._config import AppConfig
+from deda.core._config import AppConfig, ServiceConfig, _sanitize_prim_name
+from deda.core.types import Asset, Collection
+
+# Asset types that are created as Collection in project USD metadata
+_COLLECTION_ASSET_TYPES = frozenset({'Collection', 'Sequence', 'Shot'})
+
+
+def _collect_usd_dependencies(root_file_path):
+    """Collect root USD file and all nested references; return list of (abs_path, relative_path).
+
+    relative_path is from the root file's directory, for use under an asset root.
+    Preserves directory structure. Returns [(abs_str, rel_str), ...].
+    """
+    root_path = Path(root_file_path).resolve()
+    if not root_path.is_file():
+        return [(str(root_path), root_path.name)]
+    root_dir = root_path.parent
+    result = {}  # abs_path_str -> relative_path_str
+
+    def process(path_str):
+        path = Path(path_str).resolve()
+        abs_str = str(path)
+        if abs_str in result:
+            return
+        try:
+            rel = path.relative_to(root_dir)
+        except ValueError:
+            rel = Path('external') / path.name
+        rel_str = str(rel).replace('\\', '/')
+        result[abs_str] = rel_str
+        if not path.is_file():
+            return
+        try:
+            from pxr import Sdf, UsdUtils
+        except ImportError:
+            return
+        layer = Sdf.Layer.FindOrOpen(abs_str)
+        if not layer:
+            return
+        rp = getattr(layer, 'realPath', None)
+        if not rp:
+            rp = abs_str
+        layer_dir = Path(rp).resolve().parent
+        try:
+            sublayers, refs, payloads = [], [], []
+            UsdUtils.ExtractExternalReferences(rp, sublayers, refs, payloads)
+            for ref in sublayers + refs + payloads:
+                ref_clean = ref.strip().strip('@')
+                if not ref_clean:
+                    continue
+                ref_path = (layer_dir / ref_clean).resolve()
+                if ref_path.is_file() and str(ref_path) not in result:
+                    process(str(ref_path))
+        except Exception:
+            pass
+
+    process(str(root_path))
+    # Root file first, then rest sorted by path (deepest last for move order)
+    root_abs = str(root_path)
+    root_rel = result.get(root_abs, root_path.name)
+    ordered = [(root_abs, root_rel)]
+    for abs_p in sorted(result.keys()):
+        if abs_p != root_abs:
+            ordered.append((abs_p, result[abs_p]))
+    return ordered
+
+
+# Extensions supported by Usd.Stage.Open and the deda viewer (order = resolution order).
+USD_FILE_EXTENSIONS = ('.usda', '.usd', '.usdc', '.usdz')
+
+
+def _first_usd_file_in_directory(asset_dir: Path, asset_name: str) -> Path | None:
+    """Return the first USD file in asset_dir, preferring asset_name + ext, then any *.{ext}.
+
+    Checks .usda, .usd, .usdc, .usdz in that order. Used when launching an app with an asset.
+    """
+    if not asset_dir.is_dir():
+        return None
+    for ext in USD_FILE_EXTENSIONS:
+        p = asset_dir / f"{asset_name}{ext}"
+        if p.is_file():
+            return p
+    for ext in USD_FILE_EXTENSIONS:
+        matches = sorted(asset_dir.glob(f"*{ext}"))
+        if matches:
+            return matches[0]
+    return None
+
 
 from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
-from ._dialogs import AddItemDialog, ConfigureItemDialog
+from ._dialogs import AddItemDialog, ConfigureItemDialog, CopyMoveUsdFilesDialog
 from ._panel import ItemTile, PanelHeader, Panel
 #from deda.core.viewer import UsdViewWidget
 
@@ -77,7 +168,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._proj_settings_dlg = None
         self._force_close = False
         self._asset_library = None
-        
+        self._assets_view_container = None  # Project | Collection | None; current level in Assets panel
+        self._pending_drop_file_path = None  # When set, after creating asset prompt to copy/move this file into it
+
         if app_name is None:
             app_name = "Dedaverse"
         self._settings = QtCore.QSettings("DedaFX", app_name)
@@ -189,13 +282,39 @@ class MainWindow(QtWidgets.QMainWindow):
         based on the config settings.
         
         """
+        # Disconnect view menu actions from previous panels so we don't hold references to
+        # deleted Panel widgets (avoids "Internal C++ object already deleted" when toggling view).
+        _connections = getattr(self, '_view_action_connections', None)
+        if _connections:
+            for conn in _connections.values():
+                try:
+                    QtCore.QObject.disconnect(conn)
+                except (RuntimeError, TypeError):
+                    pass
+            self._view_action_connections.clear()
+        else:
+            self._view_action_connections = {}
+
         widget = QtWidgets.QWidget(parent=self)
-        self.setCentralWidget(widget)        
+        self.setCentralWidget(widget)
         vbox = QtWidgets.QVBoxLayout()
         widget.setLayout(vbox)
-        
+
         current_project = self.current_project
-        
+
+        # Sync asset library and assets view to current project (covers app restart and project change)
+        if current_project:
+            self._asset_library = Project(
+                current_project.name,
+                current_project.rootdir,
+                prim_name=getattr(current_project, 'prim_name', None),
+            )
+            self._assets_view_container = self._asset_library
+            self._restore_assets_panel_path()
+        else:
+            self._asset_library = None
+            self._assets_view_container = None
+
         # TODO: get this list from a user/project config
         panels = {
             'Project': {'show_minmax': False, 
@@ -231,17 +350,38 @@ class MainWindow(QtWidgets.QMainWindow):
                 panel_settings['minimized'] = self._settings.value(
                     f'view/{panel.lower()}_minimized', False, type=bool
                 )
+            if panel == 'Assets':
+                # Top level (no container or container is Project) -> title "Project"
+                title = 'Project' if (
+                    self._assets_view_container is None
+                    or self._assets_view_container.parent is None
+                ) else self._assets_view_container.name
+                panel_settings['show_navigate_up'] = False
             panel_obj = Panel(panel, title, parent=self, **panel_settings)
             if panel == 'Assets':
                 panel_obj.item_created.connect(self._on_asset_created)
+                panel_obj.item_activated.connect(self._on_asset_panel_item_activated)
+                panel_obj.navigate_up_clicked.connect(self._on_assets_navigate_up)
+                panel_obj.file_dropped.connect(self._on_assets_panel_file_dropped)
+                panel_obj.item_removed.connect(self._on_asset_removed)
             elif panel == 'Apps':
                 panel_obj.item_created.connect(self._on_app_created)
                 panel_obj.item_updated.connect(self._on_app_updated)
                 panel_obj.item_activated.connect(self._on_app_activated)
-            # Connect item_created to add tile to the panel
-            panel_obj.item_created.connect(
-                lambda item, p=panel_obj: p.add_item_tile(item)
-            )
+                panel_obj.item_removed.connect(self._on_app_removed)
+            elif panel == 'Services':
+                panel_obj.item_created.connect(self._on_service_created)
+                panel_obj.item_updated.connect(self._on_service_updated)
+                panel_obj.item_removed.connect(self._on_service_removed)
+            if panel in ('Apps', 'Services'):
+                panel_obj.asset_dropped_on_tile.connect(
+                    self._on_asset_dropped_on_app if panel == 'Apps' else self._on_asset_dropped_on_service
+                )
+            # Connect item_created to add tile to the panel (Assets panel is populated by _load_assets_to_panel only)
+            if panel != 'Assets':
+                panel_obj.item_created.connect(
+                    lambda item, p=panel_obj: p.add_item_tile(item)
+                )
             vbox.addWidget(panel_obj)
             if panel != 'Project':
                 panel_obj.close_clicked.connect(
@@ -259,6 +399,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if apps_panel:
             self._load_apps_to_panel(apps_panel)
         
+        # Re-load services from project config (on startup or when project is switched)
+        services_panel = widget.findChild(Panel, 'Services')
+        if services_panel:
+            self._load_services_to_panel(services_panel)
+
+        # Load Assets panel from asset library (project or current collection)
+        assets_panel = widget.findChild(Panel, 'Assets')
+        if assets_panel:
+            self._load_assets_to_panel(assets_panel)
+
         #vbox.addWidget(AssetPanel(parent=self))
         #vbox.addWidget(AppPanel(parent=self))
         #vbox.addWidget(TaskPanel(parent=self))
@@ -290,7 +440,6 @@ class MainWindow(QtWidgets.QMainWindow):
             
     def _initialize_project(self, project):
         """Initialize the project with the new settings from the project arg."""
-        self._asset_library = Project(project.name, project.rootdir)
         self._create_main_widget()
                    
     def _action_for_panel_name(self, name):
@@ -310,12 +459,24 @@ class MainWindow(QtWidgets.QMainWindow):
             panel_obj.visibility = action.isChecked()
 
     def _connect_view_action_for_panel(self, panel_obj):
-        """Connect the View submenu action to show/hide this panel."""
+        """Connect the View submenu action to show/hide this panel by name.
+        Uses panel name so we never hold a reference to a deleted panel.
+        """
         action = self._action_for_panel_name(panel_obj.objectName())
-        if action:
-            action.triggered.connect(
-                lambda checked, p=panel_obj: self._on_view_toggled_for_panel(checked, p)
-            )
+        if not action:
+            return
+        panel_name = panel_obj.objectName()
+        # Disconnect previous connection for this panel if we rebuilt the main widget
+        existing = self._view_action_connections.get(panel_name)
+        if existing is not None:
+            try:
+                QtCore.QObject.disconnect(existing)
+            except (RuntimeError, TypeError):
+                pass
+        conn = action.triggered.connect(
+            lambda checked, name=panel_name: self._on_view_toggled_for_panel_by_name(checked, name)
+        )
+        self._view_action_connections[panel_name] = conn
 
     def _all_non_project_panels_hidden(self):
         """Return True if Assets, Apps, Services, and Tasks are all hidden."""
@@ -325,6 +486,19 @@ class MainWindow(QtWidgets.QMainWindow):
             w = item.widget() if item else None
             if w and isinstance(w, Panel) and w.objectName() in ('Assets', 'Apps', 'Services', 'Tasks'):
                 if w.visibility:
+                    return False
+        return True
+
+    def _all_visible_non_project_panels_collapsed(self):
+        """Return True if every visible non-Project panel is minimized (collapsed)."""
+        vbox = self.centralWidget().layout()
+        if vbox is None:
+            return False
+        for i in range(vbox.count()):
+            item = vbox.itemAt(i)
+            w = item.widget() if item else None
+            if w and isinstance(w, Panel) and w.objectName() in ('Assets', 'Apps', 'Services', 'Tasks'):
+                if w.visibility and not w.minimized:
                     return False
         return True
 
@@ -340,20 +514,36 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_panel_stack_layout()
 
     def _on_panel_minimized_changed(self, panel_name, minimized):
-        """Save the panel minimized state to QSettings."""
+        """Save the panel minimized state to QSettings and update stretch so collapsed panels stack at bottom."""
         self._settings.setValue(f'view/{panel_name.lower()}_minimized', minimized)
+        self._update_panel_stack_layout()
 
     def _on_view_toggled_for_panel(self, checked, panel_obj):
         """Handle View submenu toggle: show/hide panel and update layout."""
         panel_obj.visibility = checked
         self._update_panel_stack_layout()
 
+    def _on_view_toggled_for_panel_by_name(self, checked, panel_name):
+        """Handle View submenu toggle by panel name; finds current panel so we never touch a deleted widget."""
+        widget = self.centralWidget()
+        if not widget:
+            return
+        panel = widget.findChild(Panel, panel_name)
+        if panel is not None:
+            panel.visibility = checked
+            self._update_panel_stack_layout()
+
     def _update_panel_stack_layout(self):
-        """When all non-Project panels are hidden, add top stretch to pin Project at bottom."""
+        """When all non-Project panels are hidden or all visible ones are collapsed, add top stretch
+        so Project and collapsed panels stack in the lower right corner.
+        """
         vbox = self.centralWidget().layout()
         if vbox is None:
             return
-        need_stretch = self._all_non_project_panels_hidden()
+        need_stretch = (
+            self._all_non_project_panels_hidden()
+            or self._all_visible_non_project_panels_collapsed()
+        )
         if need_stretch and not self._panel_stack_has_top_stretch:
             vbox.insertStretch(0, 1)
             self._panel_stack_has_top_stretch = True
@@ -363,11 +553,319 @@ class MainWindow(QtWidgets.QMainWindow):
                 del item
             self._panel_stack_has_top_stretch = False
             
+    def _restore_assets_panel_path(self) -> None:
+        """Restore the Assets panel view to the saved path for the current project."""
+        if not self.current_project or not self._assets_view_container:
+            return
+        path = self._config.user.assets_panel_path.get(self.current_project.name) or []
+        if not path:
+            return
+        container = self._assets_view_container
+        for name in path:
+            children = {c['name']: c for c in container.get_immediate_children()}
+            if name not in children or not children[name].get('is_collection'):
+                break
+            container = Collection(name, container)
+        self._assets_view_container = container
+
+    def _save_assets_panel_path(self) -> None:
+        """Save the current Assets panel view path to user config."""
+        if not self.current_project or not self._assets_view_container:
+            return
+        if self._assets_view_container.parent is None:
+            path = []
+        else:
+            segments = []
+            c = self._assets_view_container
+            while c is not None and c.parent is not None:
+                segments.append(c.name)
+                c = c.parent
+            path = list(reversed(segments))
+        self._config.user.assets_panel_path[self.current_project.name] = path
+        try:
+            self._config.user.save()
+        except OSError as err:
+            log.warning("Could not save Assets panel path to user config: %s", err)
+
+    def _load_assets_to_panel(self, assets_panel):
+        """Populate the Assets panel from the current view container (Project or Collection)."""
+        if not assets_panel:
+            return
+        container = self._assets_view_container
+        if container is None or container.parent is None:
+            assets_panel.set_title('Project')
+            assets_panel.set_show_navigate_up(False)
+        else:
+            assets_panel.set_title(container.name)
+            assets_panel.set_show_navigate_up(True)
+
+        assets_panel._items.clear()
+        assets_panel._relayout_tiles()
+
+        if container is None:
+            return
+
+        for child in container.get_immediate_children():
+            item_data = {
+                'name': child['name'],
+                'type': child['type'],
+                'description': child.get('description', ''),
+                'title': child.get('title', ''),
+                'is_collection': child.get('is_collection', False),
+            }
+            assets_panel.add_item_tile(item_data)
+
+    def _on_asset_panel_item_activated(self, item_data):
+        """When a tile is double-clicked: if it is a collection, navigate into it."""
+        if not item_data.get('is_collection'):
+            return
+        container = self._assets_view_container
+        if container is None:
+            return
+        name = (item_data or {}).get('name', '').strip()
+        if not name:
+            return
+        self._assets_view_container = Collection(name, container)
+        assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
+        if assets_panel:
+            self._load_assets_to_panel(assets_panel)
+        self._save_assets_panel_path()
+
+    def _on_assets_navigate_up(self):
+        """Move the Assets panel view up one level in the hierarchy."""
+        container = self._assets_view_container
+        if container is None or container.parent is None:
+            return
+        self._assets_view_container = container.parent
+        assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
+        if assets_panel:
+            self._load_assets_to_panel(assets_panel)
+        self._save_assets_panel_path()
+
+    def _on_asset_removed(self, item_data):
+        """Remove the asset/collection from the parent's USD metadata, archive its directory, and reload the panel."""
+        if not item_data or not self._assets_view_container:
+            return
+        name = (item_data or {}).get('name', '').strip()
+        if not name:
+            return
+        container = self._assets_view_container
+        proj = container.project
+        child_prim_path = f"{container.prim_path}/{name}"
+        asset_dir = Path(proj.asset_directory_for_prim_path(child_prim_path)).resolve()
+
+        # Move all contents of asset root into archive/ (warn if archive would be overwritten)
+        if asset_dir.is_dir():
+            to_move = [p for p in asset_dir.iterdir() if p.name != "archive"]
+            if to_move:
+                archive_dir = asset_dir / "archive"
+                existing_in_archive = set(archive_dir.iterdir()) if archive_dir.exists() else []
+                existing_names = {p.name for p in existing_in_archive}
+                conflicts = [p.name for p in to_move if p.name in existing_names]
+                if conflicts:
+                    msg = (
+                        "The following items in the archive folder would be overwritten:\n\n"
+                        + "\n".join(conflicts)
+                        + "\n\nContinue and overwrite?"
+                    )
+                    box = QtWidgets.QMessageBox(self)
+                    box.setWindowTitle("Archive overwrite")
+                    box.setText(msg)
+                    box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+                    box.setStandardButtons(
+                        QtWidgets.QMessageBox.StandardButton.Cancel | QtWidgets.QMessageBox.StandardButton.Ok
+                    )
+                    box.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+                    if box.exec() != QtWidgets.QMessageBox.StandardButton.Ok:
+                        return
+                try:
+                    archive_dir.mkdir(parents=True, exist_ok=True)
+                    for p in to_move:
+                        dest = asset_dir / "archive" / p.name
+                        shutil.move(str(p), str(dest))
+                    log.info("Archived %s items from %s into archive/", len(to_move), asset_dir)
+                except OSError as err:
+                    log.error("Failed to archive asset directory %s: %s", asset_dir, err)
+                    self.show_message(
+                        "Archive failed",
+                        f"Could not move contents to archive: {err}",
+                        icon=QtWidgets.QSystemTrayIcon.Critical,
+                    )
+                    return
+
+        try:
+            if container.remove_child(name):
+                assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
+                if assets_panel:
+                    self._load_assets_to_panel(assets_panel)
+            else:
+                log.warning("Could not remove child %r from parent USDA.", name)
+        except Exception as err:
+            log.error("Failed to remove asset from parent collection USDA: %s", err)
+            log.exception(err)
+
+    def _on_assets_panel_file_dropped(self, paths):
+        """When files from outside the project are dropped on the Assets panel, open Create Asset dialog."""
+        if not paths or not self.current_project:
+            return
+        project_root = Path(self.current_project.rootdir).resolve()
+        for p in paths:
+            path = Path(p)
+            if not path.is_file():
+                continue
+            try:
+                path_resolved = path.resolve()
+                path_resolved.relative_to(project_root)
+                continue
+            except (OSError, ValueError):
+                pass
+            self._pending_drop_file_path = str(path)
+            initial_name = _sanitize_prim_name(path.stem) or path.stem or 'asset'
+            assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
+            parent_for_dlg = assets_panel._scroll_area if assets_panel and assets_panel._scroll_area else self
+            dlg = AddItemDialog('Asset', parent=parent_for_dlg, initial_name=initial_name)
+            dlg.item_created.connect(self._on_asset_created)
+            if parent_for_dlg and hasattr(parent_for_dlg, 'geometry'):
+                rect = parent_for_dlg.geometry()
+                dlg_rect = dlg.geometry()
+                pt = QtCore.QPoint(
+                    (rect.width() / 2) - (dlg_rect.width() / 2),
+                    (rect.height() / 2) - (dlg_rect.height() / 2)
+                )
+                dlg.move(parent_for_dlg.mapToGlobal(pt))
+            dlg.exec()
+            return
+
     def _on_asset_created(self, asset_info):
-        """Handle the creation of the asset in the asset library."""
+        """Handle the creation of the asset in the asset library and in project USD metadata."""
+        if not self.current_project:
+            return
         if not self._asset_library:
-            rootdir = None # get this from the project config
-            self._asset_library = Project.create(self.current_project, rootdir)
+            self._asset_library = Project.find_or_create(
+                self.current_project.name,
+                self.current_project.rootdir,
+                prim_name=getattr(self.current_project, 'prim_name', None),
+            )
+            self._assets_view_container = self._asset_library
+        container = self._assets_view_container or self._asset_library
+        if container is None:
+            return
+        name = (asset_info or {}).get('name', '').strip()
+        if not name:
+            return
+        asset_type = (asset_info or {}).get('type', 'Asset')
+        try:
+            if asset_type in _COLLECTION_ASSET_TYPES:
+                container.add_collection(name)
+            else:
+                container.add_asset(name)
+        except ValueError as e:
+            log.warning("Could not add asset to project metadata: %s", e)
+            self.show_message(
+                "Invalid asset name",
+                str(e) + "\n\nUse only letters, numbers, and underscores; must not start with a number.",
+                icon=QtWidgets.QSystemTrayIcon.Warning,
+            )
+            return
+        assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
+        if assets_panel:
+            self._load_assets_to_panel(assets_panel)
+
+        pending = getattr(self, '_pending_drop_file_path', None)
+        if pending and container and name:
+            self._pending_drop_file_path = None
+            asset_dir = container.project.asset_directory_for_prim_path(f"{container.prim_path}/{name}")
+            try:
+                asset_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+            file_list = _collect_usd_dependencies(pending)
+            if file_list:
+                root_abs, _ = file_list[0]
+                ext = Path(root_abs).suffix or '.usd'
+                file_list[0] = (root_abs, f"{name}{ext}")
+            dlg = CopyMoveUsdFilesDialog(file_list, parent=self)
+            dlg.exec()
+            action = dlg.result_action()
+            if action == CopyMoveUsdFilesDialog.CancelAction:
+                return
+            try:
+                if action == CopyMoveUsdFilesDialog.CopyAction:
+                    for src, rel in file_list:
+                        dest = asset_dir / rel
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, dest)
+                        log.info("Copied %s to %s", src, dest)
+                else:
+                    for src, rel in sorted(file_list, key=lambda x: -len(x[1].split('/'))):
+                        dest = asset_dir / rel
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(src, dest)
+                        log.info("Moved %s to %s", src, dest)
+            except OSError as err:
+                log.error("Failed to copy/move files: %s", err)
+                self.show_message("File operation failed", str(err), icon=QtWidgets.QSystemTrayIcon.Critical)
+
+    def _on_asset_dropped_on_app(self, asset_data, app_data):
+        """Launch the app with the USD file in the asset's root directory (e.g. .../Characters/Monsters/Kitchen_set/Kitchen_set.usd)."""
+        command = (app_data or {}).get('command', '').strip()
+        if not command:
+            log.warning("App item has no command; cannot launch with asset.")
+            return
+        container = self._assets_view_container
+        if not container:
+            log.warning("No asset view container; cannot resolve asset path.")
+            return
+        asset_name = (asset_data or {}).get('name', '').strip() or 'asset'
+        proj = container.project
+        child_prim_path = f"{container.prim_path}/{asset_name}"
+        asset_dir = proj.asset_directory_for_prim_path(child_prim_path)
+        usd_file = _first_usd_file_in_directory(asset_dir, asset_name)
+        if usd_file is None:
+            log.warning("No USD file (.usda, .usd, .usdc, .usdz) found in asset directory: %s", asset_dir)
+            self.show_message("No USD file", f"No USD file found in {asset_dir}.", icon=QtWidgets.QSystemTrayIcon.Warning)
+            return
+        arg = str(usd_file.resolve())
+        argv, use_env = self._parse_python_launch(command)
+        if argv is not None:
+            argv = argv + [arg]
+            kwargs = {'env': os.environ.copy()} if use_env else {}
+            try:
+                subprocess.Popen(argv, **kwargs)
+                log.info("Launched app with asset USD path %s: %s", arg, command)
+            except Exception as err:
+                log.error("Failed to launch app with asset: %s", err)
+                self.show_message("Launch failed", str(err), icon=QtWidgets.QSystemTrayIcon.Critical)
+            return
+        try:
+            safe_arg = shlex.quote(arg)
+            subprocess.Popen(f"{command} {safe_arg}", shell=True)
+            log.info("Launched app with asset USD path %s: %s", arg, command)
+        except Exception as err:
+            log.error("Failed to launch app with asset: %s", err)
+            self.show_message("Launch failed", str(err), icon=QtWidgets.QSystemTrayIcon.Critical)
+
+    def _on_asset_dropped_on_service(self, asset_data, service_data):
+        """Open the service URL with the dropped asset as a query parameter."""
+        url = (service_data or {}).get('url', '').strip()
+        if not url:
+            log.warning("Service item has no URL; cannot open with asset.")
+            return
+        asset_name = (asset_data or {}).get('name', '').strip() or 'asset'
+        try:
+            parsed = list(urlparse(url))
+            query = parse_qs(parsed[4])
+            query['asset'] = [asset_name]
+            parsed[4] = urlencode(query, doseq=True)
+            open_url = urlunparse(parsed)
+        except Exception:
+            open_url = f"{url}?asset={asset_name}" if '?' not in url else f"{url}&asset={asset_name}"
+        try:
+            webbrowser.open(open_url)
+            log.info(f"Opened service with asset '{asset_name}': {url}")
+        except Exception as err:
+            log.error(f"Failed to open service with asset: {err}")
+            self.show_message("Open failed", str(err), icon=QtWidgets.QSystemTrayIcon.Critical)
 
     def _on_app_activated(self, item_data):
         """Launch the app via its command in a subprocess (double-click on Apps panel tile)."""
@@ -429,11 +927,15 @@ class MainWindow(QtWidgets.QMainWindow):
         for app_config in merged:
             if not app_config.enabled:
                 continue
+            # Get layer information for this app
+            layer_name, is_writable = self._config.get_app_layer_info(app_config.name)
             item_data = {
                 'name': app_config.name,
                 'type': 'Command',
                 'description': '',
                 'command': app_config.command,
+                'layer': layer_name,  # 'site', 'user', or 'project'
+                'is_writable': is_writable,  # True if the layer's config file is writable
             }
             if app_config.icon_path:
                 item_data['icon'] = app_config.icon_path
@@ -441,6 +943,39 @@ class MainWindow(QtWidgets.QMainWindow):
             count += 1
 
         log.debug("Loaded %d apps from config layers (site + user + project)", count)
+
+    def _load_services_to_panel(self, services_panel):
+        """Load services from site (studio), user, and project config layers into the Services panel.
+        Later layers override earlier when the same service name exists.
+        """
+        if not services_panel:
+            return
+
+        merged = self._config.get_merged_services()
+
+        # Clear existing items in the panel
+        services_panel._items.clear()
+        services_panel._relayout_tiles()
+
+        count = 0
+        for service_config in merged:
+            if not service_config.enabled:
+                continue
+            # Get layer information for this service
+            layer_name, is_writable = self._config.get_service_layer_info(service_config.name)
+            item_data = {
+                'name': service_config.name,
+                'type': 'Service',
+                'description': service_config.url or '',
+                'url': service_config.url,
+                'params': service_config.params or [],
+                'layer': layer_name,  # 'site', 'user', or 'project'
+                'is_writable': is_writable,  # True if the layer's config file is writable
+            }
+            services_panel.add_item_tile(item_data)
+            count += 1
+
+        log.debug("Loaded %d services from config layers (site + user + project)", count)
 
     def _on_app_created(self, app_info):
         """Handle the creation of an app and save it to the project config."""
@@ -521,6 +1056,145 @@ class MainWindow(QtWidgets.QMainWindow):
             log.info("Updated app '%s' in project config", app_name)
         except Exception as err:
             log.error("Failed to update app in project config: %s", err)
+
+    def _on_service_created(self, service_info):
+        """Handle the creation of a service and save it to the project config."""
+        if not self.current_project:
+            log.warning("Cannot save service: no current project")
+            return
+        
+        # Convert item dict to ServiceConfig
+        service_name = service_info.get('name', 'Untitled')
+        url = service_info.get('url', '')
+        params = service_info.get('params', [])
+        
+        # Do not add if a service with the same name already exists
+        existing_names = {s.name for s in self.current_project.services}
+        if service_name in existing_names:
+            log.warning(f"Service '{service_name}' already exists in project config; not adding duplicate.")
+            return
+
+        # Create ServiceConfig with required fields
+        service_config = ServiceConfig(
+            name=service_name,
+            enabled=True,  # New services are enabled by default
+            url=url,
+            params=params if params else []
+        )
+
+        # Add to project config services list
+        self.current_project.services.append(service_config)
+
+        # Save the project config
+        try:
+            self.current_project.save()
+            log.info(f"Saved service '{service_name}' to project config")
+        except Exception as err:
+            log.error(f"Failed to save service to project config: {err}")
+
+    def _on_service_updated(self, item_index, updated_data):
+        """Handle the update of a service and persist to the project config (by name).
+        Panel order is merged (site + user + project), so we find or add by name in project.
+        """
+        if not self.current_project:
+            log.warning("Cannot update service: no current project")
+            return
+
+        service_name = updated_data.get('name', '').strip() or 'Untitled'
+        url = updated_data.get('url', '')
+        params = updated_data.get('params', [])
+
+        # Find service by name in project config (service may have come from site/user layer)
+        service_config = None
+        for s in self.current_project.services:
+            if s.name == service_name:
+                service_config = s
+                break
+
+        if service_config is None:
+            # Service came from site or user; add project-level override
+            service_config = ServiceConfig(
+                name=service_name,
+                enabled=True,
+                url=url,
+                params=params if params else []
+            )
+            self.current_project.services.append(service_config)
+        else:
+            service_config.url = url
+            service_config.params = params if params else []
+
+        try:
+            self.current_project.save()
+            log.info("Updated service '%s' in project config", service_name)
+        except Exception as err:
+            log.error("Failed to update service in project config: %s", err)
+
+    def _on_app_removed(self, item_data):
+        """Handle the removal of an app and delete it from the project config."""
+        if not self.current_project:
+            log.warning("Cannot remove app: no current project")
+            return
+        
+        app_name = item_data.get('name', '').strip()
+        if not app_name:
+            return
+
+        # Find and remove app by name from project config
+        removed = False
+        for i, app_config in enumerate(self.current_project.apps):
+            if app_config.name == app_name:
+                self.current_project.apps.pop(i)
+                removed = True
+                break
+
+        if removed:
+            try:
+                self.current_project.save()
+                log.info(f"Removed app '{app_name}' from project config")
+                # Reload the apps panel to reflect the change
+                widget = self.centralWidget()
+                if widget:
+                    apps_panel = widget.findChild(Panel, 'Apps')
+                    if apps_panel:
+                        self._load_apps_to_panel(apps_panel)
+            except Exception as err:
+                log.error(f"Failed to remove app from project config: {err}")
+        else:
+            log.warning(f"App '{app_name}' not found in project config (may be from site/user layer)")
+
+    def _on_service_removed(self, item_data):
+        """Handle the removal of a service and delete it from the project config."""
+        if not self.current_project:
+            log.warning("Cannot remove service: no current project")
+            return
+        
+        service_name = item_data.get('name', '').strip()
+        if not service_name:
+            return
+
+        # Find and remove service by name from project config
+        removed = False
+        for i, service_config in enumerate(self.current_project.services):
+            if service_config.name == service_name:
+                self.current_project.services.pop(i)
+                removed = True
+                break
+
+        if removed:
+            try:
+                self.current_project.save()
+                log.info(f"Removed service '{service_name}' from project config")
+                # Reload the services panel to reflect the change
+                widget = self.centralWidget()
+                if widget:
+                    services_panel = widget.findChild(Panel, 'Services')
+                    if services_panel:
+                        self._load_services_to_panel(services_panel)
+            except Exception as err:
+                log.error(f"Failed to remove service from project config: {err}")
+        else:
+            log.warning(f"Service '{service_name}' not found in project config (may be from site/user layer)")
     
     def _open_project_settings(self):
         

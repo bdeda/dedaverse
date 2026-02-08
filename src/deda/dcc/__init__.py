@@ -15,19 +15,4 @@
 # limitations under the License.
 #
 # ###################################################################################
-__all__ = ['initialize']
-
-
-import logging
-import coloredlogs
-
-
-def initialize(loglevel=logging.DEBUG):
-    """Initialize the logger for the given log level.
-    
-    Args:
-        loglevel: (str) The loglevel string.
-        
-    """
-    logger = logging.getLogger('deda')
-    coloredlogs.install(level=loglevel, logger=logger)
+"""DCC (Digital Content Creation) integration utilities."""
