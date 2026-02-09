@@ -30,11 +30,20 @@ class Element(Entity):
     An Element has no children. It inherits the full Entity API including
     name, parent, project, path, and from_path().
     """
-    
-    @property 
+
+    @property
+    def scope(self) -> Entity | None:
+        """The parent Asset or Collection that contains this element.
+
+        Resolves to the entity whose content root (rootdir) contains this
+        element's file. Use scope.rootdir for the asset content directory.
+        """
+        return self.parent
+
+    @property
     def metadata(self):
-        return # TODO
-    
+        return  # TODO
+
     @property
     def metadata_path(self) -> Path | None:
         """The dedaverse metadata path relative to the project rootdir.

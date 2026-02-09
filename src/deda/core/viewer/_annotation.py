@@ -81,6 +81,16 @@ class AnnotationGlOverlay:
         self._default_line_width = max(0.5, float(line_width))
         self._strokes: List[AnnotationStroke] = []
         self._active_stroke: Optional[AnnotationStroke] = None
+        self._dirty = False
+
+    @property
+    def dirty(self) -> bool:
+        """True if the user has modified annotations (e.g. drawn strokes) since last load/save."""
+        return self._dirty
+
+    def clear_dirty(self) -> None:
+        """Mark annotations as clean (e.g. after load or save)."""
+        self._dirty = False
 
     @property
     def enabled(self) -> bool:
@@ -89,6 +99,17 @@ class AnnotationGlOverlay:
     @enabled.setter
     def enabled(self, value: bool) -> None:
         self._enabled = bool(value)
+
+    @property
+    def default_color(self) -> _Color:
+        """Current default color for new strokes (RGBA 0–1)."""
+        return self._default_color
+
+    @default_color.setter
+    def default_color(self, value: Sequence[float]) -> None:
+        normalized = _normalize_color(value)
+        if normalized is not None:
+            self._default_color = normalized
 
     @property
     def strokes(self) -> List[AnnotationStroke]:
@@ -100,6 +121,10 @@ class AnnotationGlOverlay:
     def clear(self) -> None:
         self._strokes.clear()
         self._active_stroke = None
+
+    def _mark_dirty(self) -> None:
+        """Mark overlay as modified by the user."""
+        self._dirty = True
 
     def begin_stroke(
         self,
@@ -118,6 +143,8 @@ class AnnotationGlOverlay:
             ),
         )
         self._active_stroke = stroke
+        self._strokes.append(stroke)  # Add to list so it is drawn in the viewport
+        self._mark_dirty()
 
     def add_point(self, x: float, y: float) -> None:
         if self._active_stroke is None:
@@ -125,12 +152,14 @@ class AnnotationGlOverlay:
         if self._active_stroke is None:
             return
         self._active_stroke.points.append((float(x), float(y)))
+        self._mark_dirty()
 
     def end_stroke(self) -> None:
         if self._active_stroke is None:
             return
-        if len(self._active_stroke.points) > 1:
-            self._strokes.append(self._active_stroke)
+        # Remove from _strokes if stroke has fewer than 2 points (click with no drag)
+        if len(self._active_stroke.points) < 2 and self._active_stroke in self._strokes:
+            self._strokes.remove(self._active_stroke)
         self._active_stroke = None
 
     def add_stroke(
@@ -162,6 +191,7 @@ class AnnotationGlOverlay:
         strokes_data = payload.get("strokes", [])
         self._strokes = [AnnotationStroke.from_dict(item) for item in strokes_data]
         self._active_stroke = None
+        self._dirty = False
 
     def draw(
         self,

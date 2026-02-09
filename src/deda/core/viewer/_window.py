@@ -18,14 +18,20 @@
 # ###################################################################################
 """Main window and viewer widget for USD scene display."""
 
+import getpass
+import json
 import sys
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import unquote
 
 from pxr import Usd, UsdUtils
 
 from PySide6 import QtWidgets, QtCore, QtGui
 
 from pxr.Usdviewq.common import CameraMaskModes
+
+from deda.core.types import Element, Entity
 
 from ._usd_viewer import UsdViewWidget
 
@@ -141,6 +147,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._settings = QtCore.QSettings(_SETTINGS_ORG, _SETTINGS_APP)
         self._env_texture_path = None  # Track selected environment texture for persistence
         self._recent_files = self._load_recent_files()
+        self._opened_entity = None  # Project/Collection/Asset from Entity.from_path when a file is opened
         
         self.setWindowTitle('Dedaverse')
         # Use same star icon as main Dedaverse window (deda.app._main_window)
@@ -186,6 +193,8 @@ class MainWindow(QtWidgets.QMainWindow):
         open_action = file_menu.addAction('&Open...')
         open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self._on_open_file)
+        save_notes_action = file_menu.addAction('Save &Notes...')
+        save_notes_action.triggered.connect(self._on_save_annotations_to_notes)
         self._recent_files_menu = file_menu.addMenu('Recent &Files')
         self._update_recent_files_menu()
         view_menu = menu_bar.addMenu('&View')
@@ -215,6 +224,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._slate_layer_action.setCheckable(True)
         self._slate_layer_action.setChecked(self._viewer.slate_overlay.enabled)
         self._slate_layer_action.triggered.connect(self._on_slate_layer_toggled)
+        self._annotation_layer_action = view_menu.addAction('Annotation &Layer')
+        self._annotation_layer_action.setCheckable(True)
+        self._annotation_layer_action.setChecked(self._viewer.annotation_overlay.enabled)
+        self._annotation_layer_action.triggered.connect(self._on_annotation_layer_toggled)
+        annotation_color_action = view_menu.addAction('Annotation &Color...')
+        annotation_color_action.triggered.connect(self._on_annotation_color)
+        if hasattr(self._viewer, 'annotation_overlay_enabled_changed'):
+            self._viewer.annotation_overlay_enabled_changed.connect(self._on_annotation_overlay_enabled_changed)
+        self._load_notes_menu = view_menu.addMenu('Load &Notes')
+        self._load_notes_menu.aboutToShow.connect(self._populate_load_notes_menu)
         view_menu.addSeparator()
         self._build_aspect_ratio_submenu(view_menu)
         self._build_environment_texture_submenu(view_menu)
@@ -272,6 +291,32 @@ class MainWindow(QtWidgets.QMainWindow):
         self._viewer.slate_overlay.enabled = checked
         self._settings.setValue(_KEY_SLATE_ENABLED, checked)
         self._viewer.update_view(resetCam=False, forceComputeBBox=False)
+
+    def _on_annotation_layer_toggled(self):
+        """Turn annotation layer on or off from the View menu."""
+        checked = self._annotation_layer_action.isChecked()
+        self._viewer.annotation_overlay.enabled = checked
+        self._viewer.update_view(resetCam=False, forceComputeBBox=False)
+
+    def _on_annotation_overlay_enabled_changed(self, enabled: bool):
+        """Keep the Annotation Layer menu option checked when overlay is enabled (e.g. via 'a' key)."""
+        self._annotation_layer_action.setChecked(bool(enabled))
+
+    def _on_annotation_color(self):
+        """Open color chooser for annotation stroke color."""
+        overlay = self._viewer.annotation_overlay
+        r, g, b, a = overlay.default_color
+        initial = QtGui.QColor(
+            int(r * 255), int(g * 255), int(b * 255), int(a * 255)
+        )
+        color = QtWidgets.QColorDialog.getColor(
+            initial, self, "Annotation Stroke Color"
+        )
+        if color.isValid():
+            overlay.default_color = (
+                color.redF(), color.greenF(), color.blueF(), color.alphaF()
+            )
+            self._viewer.update_view(resetCam=False, forceComputeBBox=False)
 
     def _on_reticle_style_changed(self, style):
         """Set reticle style and save to settings. Uncheck other styles."""
@@ -478,6 +523,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _open_stage_file(self, file_path):
         """Load a USD stage from file_path and update the viewer. Used by Open and Recent Files."""
         self._show_loading_overlay()
+        self._opened_entity = None
         try:
             stage = Usd.Stage.Open(file_path)
             if stage:
@@ -492,6 +538,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._playbar.setFrame(start_frame)
                 self._viewer.set_dome_light_texture(self._env_texture_path)
                 self._add_to_recent_files(file_path)
+                # Resolve entity (Project/Collection/Asset) from path for content rootdir
+                self._opened_entity = Entity.from_path(file_path)
             else:
                 QtWidgets.QMessageBox.warning(
                     self,
@@ -507,6 +555,27 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             self._hide_loading_overlay()
 
+    @property
+    def opened_entity(self):
+        """Project, Collection, or Asset for the currently opened file, or None.
+
+        Set when a file is opened via Entity.from_path(file_path). None if the
+        opened path is not under a Dedaverse project or resolution failed.
+        """
+        return self._opened_entity
+
+    @property
+    def rootdir(self) -> Path:
+        """Content root directory for the opened entity, or empty Path.
+
+        When a Dedaverse asset/project file is opened, this is the entity's
+        rootdir (content directory, not metadata). Use for resolving paths as
+        we build up surrounding systems. Returns Path() when no entity is open.
+        """
+        if self._opened_entity is None:
+            return Path()
+        return Path(self._opened_entity.rootdir)
+
     def _on_open_file(self):
         """Open a file dialog and load the selected USD stage."""
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -517,6 +586,187 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if file_path:
             self._open_stage_file(file_path)
+
+    def _on_save_annotations_to_notes(self):
+        """Save annotation strokes and a viewport snapshot to notes/ under the asset root.
+
+        Resolves the opened file as an Element from the stage root layer identifier;
+        uses the Element's scope (parent Asset) rootdir for notes. Writes annotations
+        as JSON and the current view (with annotations) as PNG for later reference
+        and AI model input.
+        """
+        entity = self.opened_entity
+        if entity is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                'Save Notes',
+                'The opened file is not under a Dedaverse project. Open a file from an asset.',
+            )
+            return
+        if isinstance(entity, Element) and entity.scope is not None:
+            root = Path(entity.scope.rootdir)
+        else:
+            root = Path(entity.rootdir)
+        if not root or not root.is_dir():
+            QtWidgets.QMessageBox.warning(
+                self,
+                'Save Notes',
+                'Could not resolve asset content root for the opened file.',
+            )
+            return
+        notes_dir = root / 'notes'
+        try:
+            notes_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            QtWidgets.QMessageBox.warning(
+                self,
+                'Save Notes',
+                f'Could not create notes directory:\n{notes_dir}\n{e}',
+            )
+            return
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        overlay = self._viewer.annotation_overlay
+        payload = overlay.to_payload()
+        camera_transform = self._viewer.get_camera_transform()
+        if camera_transform is not None:
+            payload['camera_transform'] = camera_transform
+        try:
+            payload['user'] = getpass.getuser()
+        except Exception:
+            payload['user'] = ''
+        annotations_path = notes_dir / f'annotations_{ts}.json'
+        try:
+            with open(annotations_path, 'w') as f:
+                json.dump(payload, f, indent=2)
+        except OSError as e:
+            QtWidgets.QMessageBox.warning(
+                self,
+                'Save Notes',
+                f'Could not write notes file:\n{e}',
+            )
+            return
+        snapshot_path = notes_dir / f'snapshot_{ts}.png'
+        img = self._viewer.capture_viewport_image()
+        if img and not img.isNull():
+            try:
+                if not img.save(str(snapshot_path)):
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        'Save Notes',
+                        f'Saved notes to {annotations_path} but failed to save PNG to {snapshot_path}.',
+                    )
+                    return
+            except OSError as e:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    'Save Notes',
+                    f'Saved notes to {annotations_path} but could not save PNG:\n{e}',
+                )
+                return
+        else:
+            QtWidgets.QMessageBox.warning(
+                self,
+                'Save Notes',
+                f'Saved notes to {annotations_path} but could not capture viewport image.',
+            )
+            return
+        QtWidgets.QMessageBox.information(
+            self,
+            'Save Notes',
+            f'Saved to {notes_dir}\n  • {annotations_path.name}\n  • {snapshot_path.name}',
+        )
+        overlay.clear_dirty()
+
+    def _get_notes_dir(self) -> Path | None:
+        """Return the notes directory for the current element, or None."""
+        stage = self._viewer.stage
+        if not stage:
+            return None
+        root_layer = stage.GetRootLayer()
+        if not root_layer:
+            return None
+        identifier = root_layer.identifier
+        if not identifier:
+            return None
+        path_str = identifier
+        if identifier.startswith('file:'):
+            path_str = unquote(identifier.split('file:', 1)[1]).lstrip('/')
+        path_str = str(Path(path_str).resolve())
+        entity = Entity.from_path(path_str)
+        if entity is None:
+            return None
+        if isinstance(entity, Element) and entity.scope is not None:
+            root = Path(entity.scope.rootdir)
+        else:
+            root = Path(entity.rootdir)
+        if not root or not root.is_dir():
+            return None
+        notes_dir = root / 'notes'
+        return notes_dir if notes_dir.is_dir() else None
+
+    def _populate_load_notes_menu(self):
+        """Populate the Load Notes submenu with historic notes (newest first), including user."""
+        menu = self._load_notes_menu
+        menu.clear()
+        notes_dir = self._get_notes_dir()
+        if notes_dir is None:
+            action = menu.addAction('(No notes for current element)')
+            action.setEnabled(False)
+            return
+        files = sorted(notes_dir.glob('annotations_*.json'), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not files:
+            action = menu.addAction('(No saved notes)')
+            action.setEnabled(False)
+            return
+        for path in files:
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+                user = data.get('user', '') or '(unknown)'
+            except Exception:
+                user = '(unknown)'
+            try:
+                mtime = path.stat().st_mtime
+                dt = datetime.fromtimestamp(mtime)
+                date_str = dt.strftime('%Y-%m-%d %H:%M')
+            except Exception:
+                date_str = path.stem.replace('annotations_', '').replace('_', ' ')
+            label = f'{date_str} — {user}'
+            action = menu.addAction(label)
+            action.setData(str(path))
+            action.triggered.connect(lambda checked=False, p=str(path): self._on_load_historic_notes(p))
+
+    def _on_load_historic_notes(self, json_path: str):
+        """Load a historic notes file: replace annotations and set camera. Warn only if current notes are dirty."""
+        overlay = self._viewer.annotation_overlay
+        if overlay.dirty:
+            reply = QtWidgets.QMessageBox.warning(
+                self,
+                'Load Notes',
+                'Current notes will be replaced. Save them first if you need to keep them.',
+                QtWidgets.QMessageBox.StandardButton.Cancel | QtWidgets.QMessageBox.StandardButton.Ok,
+                QtWidgets.QMessageBox.StandardButton.Cancel,
+            )
+            if reply != QtWidgets.QMessageBox.StandardButton.Ok:
+                return
+        path = Path(json_path)
+        if not path.is_file():
+            QtWidgets.QMessageBox.warning(self, 'Load Notes', f'File not found:\n{path}')
+            return
+        try:
+            with open(path) as f:
+                payload = json.load(f)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, 'Load Notes', f'Could not read notes:\n{e}')
+            return
+        overlay.load_payload(payload)
+        overlay.enabled = True
+        self._annotation_layer_action.setChecked(True)
+        camera = payload.get('camera_transform')
+        if camera and isinstance(camera, list) and len(camera) == 16:
+            self._viewer.set_camera_transform(camera)
+        self._viewer.update_view(resetCam=False, forceComputeBBox=False)
+        QtWidgets.QApplication.processEvents()
 
     def _on_playbar_frame_changed(self, frame):
         """Sync the stage view to the playbar's current frame."""

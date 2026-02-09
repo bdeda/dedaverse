@@ -545,19 +545,20 @@ class Panel(QtWidgets.QFrame):
             idx = tile._item_index
             if 0 <= idx < len(self._items):
                 item_data = self._items[idx]
-                # Check if this item is from a writable layer (for apps, check layer writability)
-                is_writable = item_data.get('is_writable', True)  # Default to True for non-app items
-                
-                # Only show Configure/Remove if the item's layer is writable
-                if is_writable:
-                    # Item-specific actions when right-clicking on a tile
+                is_writable = item_data.get('is_writable', True)  # Default True for non-app items
+                is_apps_or_services = self.objectName() in ('Apps', 'Services')
+                # Configure: always show for Apps/Services; otherwise only when writable
+                show_configure = is_apps_or_services and is_writable
+                if show_configure:
                     config_icon_path = Path(__file__).parent / 'icons' / 'gear_icon_32.png'
                     config_icon = QtGui.QIcon(str(config_icon_path)) if config_icon_path.is_file() else QtGui.QIcon()
                     menu.addAction(config_icon, 'Configure...').triggered.connect(
                         lambda checked=False, i=idx: self._open_configure_dialog(i)
                     )
+                if is_writable:
                     remove_action = menu.addAction('Remove')
                     remove_action.triggered.connect(lambda checked=False, i=idx: self._remove_item_at(i))
+                if show_configure or is_writable:
                     menu.addSeparator()
 
         icon_path = Path(__file__).parent / 'icons' / 'green_plus.png'
