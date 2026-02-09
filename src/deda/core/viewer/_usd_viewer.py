@@ -223,6 +223,10 @@ class _StageView(StageView):
         self._prim_info_overlay = _PrimInfoOverlay(parent=self)
         self._prim_info_overlay.setParent(self)
         self.setMouseTracking(True)
+        self._annotation_mode_enabled = False
+        self._annotation_drawing = False
+        # Accept focus so keyPressEvent (e.g. "a" for annotation) is received when viewport is clicked
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
 
     def initializeGL(self):
         """Run base GL init (if any) then apply viewport enhancements."""
@@ -463,8 +467,31 @@ class _StageView(StageView):
             self._prim_info_overlay.hide()
             return False
 
+    def mousePressEvent(self, event):
+        """In annotation mode, left-drag paints a stroke; otherwise delegate to base."""
+        if (
+            self._annotation_mode_enabled
+            and event.button() == QtCore.Qt.MouseButton.LeftButton
+            and self._annotation_overlay
+        ):
+            pos = event.position().toPoint() if hasattr(event.position(), 'toPoint') else event.pos()
+            self._annotation_overlay.enabled = True
+            self._annotation_overlay.begin_stroke()
+            self._annotation_overlay.add_point(float(pos.x()), self._flip_y(pos.y()))
+            self._annotation_drawing = True
+            event.accept()
+            self.update()
+            return
+        super().mousePressEvent(event)
+
     def mouseMoveEvent(self, event):
-        """When Ctrl is held, pick prim under cursor and show floating prim info panel."""
+        """When Ctrl is held, pick prim under cursor; when annotation drawing, add stroke points."""
+        if self._annotation_drawing and self._annotation_overlay:
+            pos = event.position().toPoint() if hasattr(event.position(), 'toPoint') else event.pos()
+            self._annotation_overlay.add_point(float(pos.x()), self._flip_y(pos.y()))
+            event.accept()
+            self.update()
+            return
         super().mouseMoveEvent(event)
         pos = event.position().toPoint() if hasattr(event.position(), 'toPoint') else event.pos()
         if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
@@ -472,8 +499,37 @@ class _StageView(StageView):
         else:
             self._prim_info_overlay.hide()
 
+    def mouseReleaseEvent(self, event):
+        """End annotation stroke on left release when in annotation mode."""
+        if (
+            event.button() == QtCore.Qt.MouseButton.LeftButton
+            and self._annotation_drawing
+            and self._annotation_overlay
+        ):
+            self._annotation_overlay.end_stroke()
+            self._annotation_drawing = False
+            event.accept()
+            self.update()
+            return
+        super().mouseReleaseEvent(event)
+
+    def _flip_y(self, y: float) -> float:
+        """Convert Qt viewport y (0 at top) to overlay coords (0 at bottom)."""
+        h = self.size().height()
+        return float(h - 1 - y) if h else y
+
     def keyPressEvent(self, event):
-        """Show prim info overlay as soon as Ctrl is pressed if cursor is over a prim."""
+        """Toggle annotation mode with 'a'; show prim info overlay when Ctrl is pressed."""
+        if event.key() == QtCore.Qt.Key.Key_A and not event.modifiers():
+            self._annotation_mode_enabled = not self._annotation_mode_enabled
+            if self._annotation_mode_enabled and self._annotation_overlay:
+                self._annotation_overlay.enabled = True
+                parent = self.parent()
+                if hasattr(parent, 'annotation_overlay_enabled_changed'):
+                    parent.annotation_overlay_enabled_changed.emit(True)
+            event.accept()
+            self.update()
+            return
         if event.key() == QtCore.Qt.Key.Key_Control:
             pos = self.mapFromGlobal(QtGui.QCursor.pos())
             if self.rect().contains(pos):
@@ -518,10 +574,12 @@ class _StageView(StageView):
 
 class UsdViewWidget(QtWidgets.QWidget):
     """3D Viewport for rendering a USD scene."""
-    
+
+    annotation_overlay_enabled_changed = QtCore.Signal(bool)
+
     def __init__(self, stage=None, parent=None):
         super().__init__(parent=parent)
-        
+
         self._view = _StageView(parent=self)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -551,6 +609,112 @@ class UsdViewWidget(QtWidgets.QWidget):
     def slate_overlay(self):
         """Slate text overlay for this viewport."""
         return self._view.slate_overlay
+
+    @property
+    def annotation_overlay(self):
+        """Annotation overlay for this viewport (draw strokes with 'a' and drag)."""
+        return self._view.annotation_overlay
+
+    def capture_viewport_image(self):
+        """Capture the current viewport (scene + annotations) as a QImage.
+
+        Forces a repaint then grabs the framebuffer or widget. Call from main
+        window when saving annotations to notes. Returns None if capture fails.
+        """
+        view = self._view
+        if not view.isVisible() or view.size().width() <= 0 or view.size().height() <= 0:
+            return None
+        view.update()
+        QtWidgets.QApplication.processEvents()
+        if hasattr(view, 'grabFramebuffer'):
+            return view.grabFramebuffer()
+        pixmap = view.grab()
+        return pixmap.toImage() if not pixmap.isNull() else None
+
+    def get_camera_transform(self):
+        """Return the free camera transform as a 4x4 row-major list of 16 floats, or None.
+
+        Used when saving annotations to notes so the camera can be restored later.
+        Tries StageView GetFreeCameraMatrix / GetFreeCameraTransform and viewSettings.
+        """
+        view = self._view
+        mat = None
+        if hasattr(view, 'GetFreeCameraMatrix'):
+            try:
+                mat = view.GetFreeCameraMatrix()
+            except Exception:
+                pass
+        if mat is None and hasattr(view, 'GetFreeCameraTransform'):
+            try:
+                mat = view.GetFreeCameraTransform()
+            except Exception:
+                pass
+        if mat is None and hasattr(view, '_dataModel') and view._dataModel is not None:
+            vs = getattr(view._dataModel, 'viewSettings', None)
+            if vs is not None:
+                mat = getattr(vs, 'freeCameraMatrix', None) or getattr(vs, 'freeCameraTransform', None)
+        if mat is None:
+            return None
+        try:
+            from pxr import Gf
+            if not isinstance(mat, Gf.Matrix4d):
+                mat = Gf.Matrix4d(mat)
+            return [float(mat.GetRow(i)[j]) for i in range(4) for j in range(4)]
+        except Exception:
+            return None
+
+    def set_camera_transform(self, transform: list) -> bool:
+        """Set the free camera transform from a 4x4 row-major list of 16 floats.
+
+        Returns True if the camera was set, False otherwise. Used when loading
+        historic notes to restore the saved view.
+        """
+        if not transform or len(transform) != 16:
+            return False
+        view = self._view
+        try:
+            from pxr import Gf
+            mat = Gf.Matrix4d(*transform)
+        except Exception:
+            return False
+
+        def _apply_and_refresh() -> None:
+            self.update_view(resetCam=False, forceComputeBBox=False)
+            view.update()
+
+        # Prefer viewSettings (source of truth in usdview) so the view syncs on updateView.
+        if hasattr(view, '_dataModel') and view._dataModel is not None:
+            vs = getattr(view._dataModel, 'viewSettings', None)
+            if vs is not None:
+                if hasattr(vs, 'freeCameraMatrix'):
+                    try:
+                        vs.freeCameraMatrix = mat
+                        _apply_and_refresh()
+                        return True
+                    except Exception:
+                        pass
+                if hasattr(vs, 'freeCameraTransform'):
+                    try:
+                        vs.freeCameraTransform = mat
+                        _apply_and_refresh()
+                        return True
+                    except Exception:
+                        pass
+        if hasattr(view, 'SetFreeCameraMatrix'):
+            try:
+                view.SetFreeCameraMatrix(mat)
+                _apply_and_refresh()
+                return True
+            except Exception:
+                pass
+        if hasattr(view, 'SetFreeCameraTransform'):
+            try:
+                view.SetFreeCameraTransform(mat)
+                _apply_and_refresh()
+                return True
+            except Exception:
+                pass
+        return False
 
     @property
     def stage(self):
@@ -728,6 +892,15 @@ class UsdViewWidget(QtWidgets.QWidget):
             self.update_view(resetCam=True, forceComputeBBox=True)
         elif key == QtCore.Qt.Key.Key_Control:
             self._view.show_prim_info_at_cursor()
+        elif key == QtCore.Qt.Key.Key_A and not event.modifiers():
+            # Toggle annotation mode (also handled in _StageView when it has focus)
+            self._view._annotation_mode_enabled = not self._view._annotation_mode_enabled
+            if self._view._annotation_mode_enabled and self._view._annotation_overlay:
+                self._view._annotation_overlay.enabled = True
+                self.annotation_overlay_enabled_changed.emit(True)
+            event.accept()
+            self.update()
+            return
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):

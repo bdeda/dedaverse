@@ -24,7 +24,7 @@ from which metadata is serialized.
 
 from pathlib import Path
 
-from pxr import Sdf, Usd
+from pxr import Kind, Sdf, Usd
 
 from ._asset_id import AssetID
 
@@ -165,19 +165,145 @@ class Entity:
 
     @classmethod
     def from_path(cls, path: str) -> 'Entity | None':
-        """Create an entity instance from a file path.
+        """Return the proper entity type (Project, Collection, or Asset) from a file path.
 
-        If the path does not represent a valid entity of this type, returns None.
-        Subclasses must override to implement type-specific path parsing.
+        Accepts a project root directory (containing .dedaverse) or a path to a
+        USDA metadata file under .dedaverse. Returns None if the path is invalid
+        or not under a Dedaverse project.
 
         Args:
-            path: File path string (e.g., USD file path).
+            path: File path string: project root dir, or .dedaverse/*.usda path.
 
         Returns:
-            Instance of the entity subclass, or None if the path is invalid.
-
-        Raises:
-            NotImplementedError: When called on the base Entity class.
-                Subclasses must override this method.
+            Project, Collection, or Asset instance, or None if the path is invalid.
         """
-        raise NotImplementedError
+        p = Path(path).resolve()
+        if not p.exists():
+            return None
+        if p.is_dir():
+            return _project_from_root(p)
+        if p.is_file() and p.suffix.lower() in ('.usda', '.usd', '.usdc', '.usdz'):
+            entity = _entity_from_metadata_path(p)
+            if entity is not None:
+                return entity
+            return _element_from_content_path(p)
+        return None
+
+
+# --- Internal ---
+
+
+def _entity_from_metadata_path(meta_path: Path) -> 'Entity | None':
+    """Resolve Project/Collection/Asset from a path to a USDA file under .dedaverse."""
+    meta_path = meta_path.resolve()
+    dedaverse = meta_path.parent
+    while dedaverse != dedaverse.parent:
+        if (dedaverse / '.dedaverse').is_dir():
+            break
+        dedaverse = dedaverse.parent
+    else:
+        return None
+    dedaverse = dedaverse / '.dedaverse'
+    try:
+        rel = meta_path.relative_to(dedaverse)
+    except ValueError:
+        return None
+    parts = list(rel.parts)
+    if not parts:
+        return None
+    from ._project import Project
+    from ._collection import Collection
+    from ._asset import Asset
+    project_stage = next(
+        (f for f in dedaverse.iterdir() if f.is_file() and f.suffix.lower() == '.usda'),
+        None,
+    )
+    if not project_stage:
+        return None
+    rootdir = dedaverse.parent
+    prim_name = project_stage.stem
+    proj = Project(rootdir.name, rootdir, prim_name=prim_name)
+    if len(parts) == 1:
+        name = Path(parts[0]).stem
+        kind = _kind_of_usda(meta_path)
+        if kind == Kind.Tokens.group:
+            return Collection(name, proj)
+        return Asset(name, proj)
+    parent_meta = dedaverse / Path(*parts[:-2]) / (parts[-2].removesuffix('.usda') + '.usda')
+    parent_entity = _entity_from_metadata_path(parent_meta)
+    if parent_entity is None:
+        return None
+    name = Path(parts[-1]).stem
+    kind = _kind_of_usda(meta_path)
+    if kind == Kind.Tokens.group:
+        return Collection(name, parent_entity)
+    return Asset(name, parent_entity)
+
+
+def _kind_of_usda(usda_path: Path):
+    """Return the Kind of the default prim in the USDA file, or None."""
+    try:
+        stage = Usd.Stage.Open(str(usda_path))
+        if not stage:
+            return None
+        default_prim = stage.GetDefaultPrim()
+        if not default_prim or not default_prim.IsValid():
+            return None
+        return Usd.ModelAPI(default_prim).GetKind()
+    except Exception:
+        return None
+
+
+def _element_from_content_path(content_file_path: Path) -> 'Entity | None':
+    """Resolve an Element from a content file path under the project root (not under .dedaverse)."""
+    content_file_path = content_file_path.resolve()
+    rootdir = content_file_path.parent
+    while rootdir != rootdir.parent:
+        if (rootdir / '.dedaverse').is_dir():
+            break
+        rootdir = rootdir.parent
+    else:
+        return None
+    proj = _project_from_root(rootdir)
+    if proj is None:
+        return None
+    try:
+        rel = content_file_path.parent.relative_to(Path(proj.rootdir))
+    except ValueError:
+        return None
+    segments = list(rel.parts)
+    if not segments:
+        return None
+    from ._asset import Asset
+    from ._collection import Collection
+    from ._element import Element
+    current = proj
+    stage = proj.stage if hasattr(proj, 'stage') else None
+    for seg in segments:
+        prim_path = f'{current.prim_path}/{seg}'
+        kind = None
+        if stage:
+            prim = stage.GetPrimAtPath(prim_path)
+            if prim and prim.IsValid():
+                kind = Usd.ModelAPI(prim).GetKind()
+        if kind == Kind.Tokens.group:
+            current = Collection(seg, current)
+        else:
+            current = Asset(seg, current)
+    return Element(content_file_path.stem, current)
+
+
+def _project_from_root(rootdir: Path) -> 'Entity | None':
+    """Return a Project instance from a project root directory (containing .dedaverse)."""
+    dedaverse = rootdir / '.dedaverse'
+    if not dedaverse.is_dir():
+        return None
+    project_stage = next(
+        (f for f in dedaverse.iterdir() if f.is_file() and f.suffix.lower() == '.usda'),
+        None,
+    )
+    if not project_stage:
+        return None
+    from ._project import Project
+    prim_name = project_stage.stem
+    return Project(rootdir.name, rootdir, prim_name=prim_name)

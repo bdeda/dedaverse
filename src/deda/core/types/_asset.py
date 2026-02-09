@@ -96,8 +96,18 @@ class Asset(Entity):
         .dedaverse/collection_name.usda for a collection under project,
         .dedaverse/collection_name/asset_name.usda for an asset under collection.
         """
-        return self.parent.children_metadata_dir / f'{self.name}.usda'    
-    
+        return self.parent.children_metadata_dir / f'{self.name}.usda'
+
+    @property
+    def rootdir(self) -> Path:
+        """Root directory for this asset's content (not metadata).
+
+        Directory under the project root where this asset's files live (e.g. USD,
+        textures). Distinct from metadata_dir, which holds USDA metadata under
+        .dedaverse. Used by the viewer and surrounding systems as the content root.
+        """
+        return self.project.asset_directory_for_prim_path(self.prim_path)
+
     @classmethod
     def validate_name(cls, name: str):
         """Validate the name string and return True or False if the name is valid.
