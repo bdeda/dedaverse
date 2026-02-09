@@ -20,6 +20,7 @@
 
 import getpass
 import json
+import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,8 @@ from . import _annotation
 from . import _playbar
 from . import _reticle
 from . import _slate
+
+log = logging.getLogger(__name__)
 
 # Fallback HDR directory when project has none set (e.g. viewer run without project)
 _DEFAULT_HDR_IMAGES_DIR = Path(r'F:\hdri')
@@ -296,6 +299,8 @@ class MainWindow(QtWidgets.QMainWindow):
         """Turn annotation layer on or off from the View menu."""
         checked = self._annotation_layer_action.isChecked()
         self._viewer.annotation_overlay.enabled = checked
+        if not checked:
+            self._viewer.annotation_mode_enabled = False
         self._viewer.update_view(resetCam=False, forceComputeBBox=False)
 
     def _on_annotation_overlay_enabled_changed(self, enabled: bool):
@@ -628,8 +633,11 @@ class MainWindow(QtWidgets.QMainWindow):
         overlay = self._viewer.annotation_overlay
         payload = overlay.to_payload()
         camera_transform = self._viewer.get_camera_transform()
-        if camera_transform is not None:
-            payload['camera_transform'] = camera_transform
+        payload['camera_transform'] = camera_transform  # list of 16 floats or None
+        if camera_transform is None and self._viewer.stage is not None:
+            log.warning(
+                'Save Notes: could not read free camera matrix; camera will not be restored when loading these notes.',
+            )
         try:
             payload['user'] = getpass.getuser()
         except Exception:

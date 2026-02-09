@@ -42,6 +42,41 @@ from ._reticle import CameraReticleGlOverlay
 log = logging.getLogger(__name__)
 
 
+def _log_camera_attrs_hint(view) -> None:
+    """Log camera-related attribute/method names on view and viewSettings for debugging."""
+    try:
+        view_names = [n for n in dir(view) if 'camera' in n.lower()]
+        vs = getattr(view, '_dataModel', None) and getattr(view._dataModel, 'viewSettings', None)
+        vs_names = [n for n in dir(vs)] if vs else []
+        vs_camera = [n for n in vs_names if 'camera' in n.lower()]
+        log.info(
+            'get_camera_transform: no matrix found. View camera-related: %s; viewSettings camera-related: %s',
+            view_names,
+            vs_camera,
+        )
+    except Exception:
+        pass
+
+
+def _to_matrix4d(val):  # -> Gf.Matrix4d | None
+    """Convert a value to Gf.Matrix4d if possible; return None otherwise."""
+    if val is None:
+        return None
+    if isinstance(val, Gf.Matrix4d):
+        return val
+    try:
+        return Gf.Matrix4d(val)
+    except Exception:
+        pass
+    # Sequence of 16 numbers (row-major).
+    if hasattr(val, '__len__') and len(val) == 16:
+        try:
+            return Gf.Matrix4d(*[float(x) for x in val])
+        except Exception:
+            pass
+    return None
+
+
 def _create_engine_wrapper(engine, view_settings_getter):
     """Wrap UsdImagingGL.Engine to inject dome light texture from viewSettings."""
 
@@ -615,6 +650,15 @@ class UsdViewWidget(QtWidgets.QWidget):
         """Annotation overlay for this viewport (draw strokes with 'a' and drag)."""
         return self._view.annotation_overlay
 
+    @property
+    def annotation_mode_enabled(self) -> bool:
+        """Whether annotation mode is on (mouse drag adds strokes)."""
+        return self._view._annotation_mode_enabled
+
+    @annotation_mode_enabled.setter
+    def annotation_mode_enabled(self, value: bool) -> None:
+        self._view._annotation_mode_enabled = bool(value)
+
     def capture_viewport_image(self):
         """Capture the current viewport (scene + annotations) as a QImage.
 
@@ -635,45 +679,149 @@ class UsdViewWidget(QtWidgets.QWidget):
         """Return the free camera transform as a 4x4 row-major list of 16 floats, or None.
 
         Used when saving annotations to notes so the camera can be restored later.
-        Tries StageView GetFreeCameraMatrix / GetFreeCameraTransform and viewSettings.
+        Tries known StageView/viewSettings names, then discovers at runtime.
         """
         view = self._view
-        mat = None
-        if hasattr(view, 'GetFreeCameraMatrix'):
-            try:
-                mat = view.GetFreeCameraMatrix()
-            except Exception:
-                pass
-        if mat is None and hasattr(view, 'GetFreeCameraTransform'):
-            try:
-                mat = view.GetFreeCameraTransform()
-            except Exception:
-                pass
-        if mat is None and hasattr(view, '_dataModel') and view._dataModel is not None:
-            vs = getattr(view._dataModel, 'viewSettings', None)
-            if vs is not None:
-                mat = getattr(vs, 'freeCameraMatrix', None) or getattr(vs, 'freeCameraTransform', None)
+        mat = self._get_free_camera_matrix_from_view(view)
         if mat is None:
+            log.debug('get_camera_transform: no free camera matrix found on view or viewSettings')
+            _log_camera_attrs_hint(view)
             return None
         try:
-            from pxr import Gf
             if not isinstance(mat, Gf.Matrix4d):
                 mat = Gf.Matrix4d(mat)
             return [float(mat.GetRow(i)[j]) for i in range(4) for j in range(4)]
-        except Exception:
+        except Exception as e:
+            log.debug('get_camera_transform: failed to convert matrix to list: %s', e)
             return None
+
+    def _get_free_camera_matrix_from_view(self, view) -> "Gf.Matrix4d | None":
+        """Get the free camera 4x4 matrix from the StageView or its viewSettings."""
+        # Primary: viewSettings.freeCamera._camera (Gf.Camera) — the canonical source.
+        if hasattr(view, '_dataModel') and view._dataModel is not None:
+            vs = getattr(view._dataModel, 'viewSettings', None)
+            if vs is not None:
+                free_camera = getattr(vs, 'freeCamera', None)
+                if free_camera is not None:
+                    camera = getattr(free_camera, '_camera', None)
+                    if camera is not None and hasattr(camera, 'GetTransform'):
+                        try:
+                            mat = camera.GetTransform()
+                            m = _to_matrix4d(mat)
+                            if m is not None:
+                                log.debug('get_camera_transform: using viewSettings.freeCamera._camera.GetTransform()')
+                                return m
+                        except Exception as e:
+                            log.debug('get_camera_transform: viewSettings.freeCamera._camera.GetTransform() failed: %s', e)
+        mat = None
+        # Known StageView method names (C++ GetFreeCameraMatrix → Python binding may vary).
+        for getter_name in (
+            'GetFreeCameraMatrix', 'getFreeCameraMatrix',
+            'GetFreeCameraTransform', 'getFreeCameraTransform',
+            'GetViewMatrix', 'getViewMatrix',
+            'GetCameraMatrix', 'getCameraMatrix',
+        ):
+            getter = getattr(view, getter_name, None)
+            if callable(getter):
+                try:
+                    mat = getter()
+                    if mat is not None:
+                        return _to_matrix4d(mat)
+                except Exception as e:
+                    log.debug('get_camera_transform: view.%s failed: %s', getter_name, e)
+        # View properties.
+        for attr in ('freeCameraMatrix', 'freeCameraTransform'):
+            mat = getattr(view, attr, None)
+            if mat is not None:
+                return _to_matrix4d(mat)
+        # viewSettings (including possible private-style names from C++ bindings).
+        if hasattr(view, '_dataModel') and view._dataModel is not None:
+            vs = getattr(view._dataModel, 'viewSettings', None)
+            if vs is not None:
+                for attr in (
+                    'freeCameraMatrix', 'freeCameraTransform',
+                    'FreeCameraMatrix', 'FreeCameraTransform',
+                    '_freeCameraMatrix', '_freeCameraTransform',
+                ):
+                    mat = getattr(vs, attr, None)
+                    if mat is not None:
+                        return _to_matrix4d(mat)
+                # Discover: matrix/transform attributes.
+                for name in dir(vs):
+                    if 'camera' not in name.lower():
+                        continue
+                    if 'matrix' not in name.lower() and 'transform' not in name.lower():
+                        continue
+                    try:
+                        val = getattr(vs, name, None)
+                        if val is not None:
+                            m = _to_matrix4d(val)
+                            if m is not None:
+                                log.debug('get_camera_transform: found matrix on viewSettings.%s', name)
+                                return m
+                    except Exception:
+                        pass
+                # Discover: Gf.Camera (e.g. freeCamera) — get transform matrix.
+                for name in dir(vs):
+                    if 'camera' not in name.lower():
+                        continue
+                    try:
+                        val = getattr(vs, name, None)
+                        if val is not None and hasattr(val, 'GetTransform'):
+                            m = _to_matrix4d(val.GetTransform())
+                            if m is not None:
+                                log.debug('get_camera_transform: found Gf.Camera on viewSettings.%s', name)
+                                return m
+                    except Exception:
+                        pass
+        # Discover on view: methods/attrs that look like free camera matrix getters.
+        for name in dir(view):
+            if 'free' not in name.lower() or 'camera' not in name.lower():
+                continue
+            if 'matrix' not in name.lower() and 'transform' not in name.lower():
+                continue
+            try:
+                obj = getattr(view, name, None)
+                if callable(obj):
+                    val = obj()
+                else:
+                    val = obj
+                if val is not None:
+                    m = _to_matrix4d(val)
+                    if m is not None:
+                        log.debug('get_camera_transform: found matrix on view.%s', name)
+                        return m
+            except Exception:
+                pass
+        # Discover on view: Gf.Camera (e.g. freeCamera) — get transform matrix.
+        for name in dir(view):
+            if 'free' not in name.lower() or 'camera' not in name.lower():
+                continue
+            try:
+                obj = getattr(view, name, None)
+                if obj is not None and hasattr(obj, 'GetTransform'):
+                    get_transform = getattr(obj, 'GetTransform')
+                    val = get_transform() if callable(get_transform) else get_transform
+                    m = _to_matrix4d(val)
+                    if m is not None:
+                        log.debug('get_camera_transform: found Gf.Camera on view.%s', name)
+                        return m
+            except Exception:
+                pass
+        return None
 
     def set_camera_transform(self, transform: list) -> bool:
         """Set the free camera transform from a 4x4 row-major list of 16 floats.
 
-        Returns True if the camera was set, False otherwise. Used when loading
-        historic notes to restore the saved view.
+        Returns True if the camera was set on at least one sink, False otherwise.
+        Used when loading historic notes to restore the saved view. Applies to
+        all available sinks (viewSettings and view) and re-applies after the
+        next event loop so the view is not overwritten by updateView().
         """
         if not transform or len(transform) != 16:
             return False
         view = self._view
         try:
-            from pxr import Gf
             mat = Gf.Matrix4d(*transform)
         except Exception:
             return False
@@ -682,39 +830,94 @@ class UsdViewWidget(QtWidgets.QWidget):
             self.update_view(resetCam=False, forceComputeBBox=False)
             view.update()
 
-        # Prefer viewSettings (source of truth in usdview) so the view syncs on updateView.
+        set_count = 0
+
+        # Primary: viewSettings.freeCamera._camera (Gf.Camera) — set transform via SetTransform().
         if hasattr(view, '_dataModel') and view._dataModel is not None:
             vs = getattr(view._dataModel, 'viewSettings', None)
             if vs is not None:
-                if hasattr(vs, 'freeCameraMatrix'):
-                    try:
-                        vs.freeCameraMatrix = mat
-                        _apply_and_refresh()
-                        return True
-                    except Exception:
-                        pass
-                if hasattr(vs, 'freeCameraTransform'):
-                    try:
-                        vs.freeCameraTransform = mat
-                        _apply_and_refresh()
-                        return True
-                    except Exception:
-                        pass
-        if hasattr(view, 'SetFreeCameraMatrix'):
-            try:
-                view.SetFreeCameraMatrix(mat)
-                _apply_and_refresh()
-                return True
-            except Exception:
-                pass
-        if hasattr(view, 'SetFreeCameraTransform'):
-            try:
-                view.SetFreeCameraTransform(mat)
-                _apply_and_refresh()
-                return True
-            except Exception:
-                pass
-        return False
+                free_camera = getattr(vs, 'freeCamera', None)
+                if free_camera is not None:
+                    camera = getattr(free_camera, '_camera', None)
+                    if camera is not None and hasattr(camera, 'SetTransform'):
+                        try:
+                            camera.SetTransform(mat)
+                            set_count += 1
+                            log.debug('set_camera_transform: set via viewSettings.freeCamera._camera.SetTransform()')
+                        except Exception as e:
+                            log.debug('set_camera_transform: viewSettings.freeCamera._camera.SetTransform() failed: %s', e)
+                # Fallback: viewSettings attributes (usdview often uses this as source of truth).
+                for attr in ('freeCameraMatrix', 'freeCameraTransform'):
+                    if hasattr(vs, attr):
+                        try:
+                            setattr(vs, attr, mat)
+                            set_count += 1
+                        except Exception as e:
+                            log.debug('set_camera_transform: viewSettings.%s failed: %s', attr, e)
+
+        # StageView methods (names may vary by USD version).
+        for method_name in ('SetFreeCameraMatrix', 'SetFreeCameraTransform'):
+            setter = getattr(view, method_name, None)
+            if callable(setter):
+                try:
+                    setter(mat)
+                    set_count += 1
+                except Exception as e:
+                    log.debug('set_camera_transform: view.%s failed: %s', method_name, e)
+
+        if set_count == 0:
+            return False
+
+        _apply_and_refresh()
+
+        # Re-apply on next event loop in case updateView() overwrote the camera.
+        self._pending_camera_transform = list(transform)
+        QtCore.QTimer.singleShot(0, self._deferred_set_camera_transform)
+
+        return True
+
+    def _deferred_set_camera_transform(self) -> None:
+        """Re-apply the last saved camera transform after the event loop (e.g. after updateView)."""
+        transform = getattr(self, '_pending_camera_transform', None)
+        try:
+            delattr(self, '_pending_camera_transform')
+        except AttributeError:
+            return
+        if transform is None or len(transform) != 16:
+            return
+        view = self._view
+        try:
+            mat = Gf.Matrix4d(*transform)
+        except Exception:
+            return
+        if hasattr(view, '_dataModel') and view._dataModel is not None:
+            vs = getattr(view._dataModel, 'viewSettings', None)
+            if vs is not None:
+                # Primary: viewSettings.freeCamera._camera (Gf.Camera).
+                free_camera = getattr(vs, 'freeCamera', None)
+                if free_camera is not None:
+                    camera = getattr(free_camera, '_camera', None)
+                    if camera is not None and hasattr(camera, 'SetTransform'):
+                        try:
+                            camera.SetTransform(mat)
+                        except Exception:
+                            pass
+                # Fallback: viewSettings attributes.
+                for attr in ('freeCameraMatrix', 'freeCameraTransform'):
+                    if hasattr(vs, attr):
+                        try:
+                            setattr(vs, attr, mat)
+                        except Exception:
+                            pass
+        for method_name in ('SetFreeCameraMatrix', 'SetFreeCameraTransform'):
+            setter = getattr(view, method_name, None)
+            if callable(setter):
+                try:
+                    setter(mat)
+                except Exception:
+                    pass
+        self.update_view(resetCam=False, forceComputeBBox=False)
+        view.update()
 
     @property
     def stage(self):
