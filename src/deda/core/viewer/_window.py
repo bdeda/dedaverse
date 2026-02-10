@@ -32,7 +32,7 @@ from PySide6 import QtWidgets, QtCore, QtGui
 
 from pxr.Usdviewq.common import CameraMaskModes
 
-from deda.core.types import Element, Entity
+from deda.core.types import Element, Project
 
 from ._usd_viewer import UsdViewWidget
 
@@ -82,6 +82,22 @@ _KEY_RETICLE_STYLE = 'view/reticleStyle'
 _KEY_SLATE_ENABLED = 'view/slateEnabled'
 
 _MAX_RECENT_FILES = 10
+
+
+def _flatten_camera_transform(camera: list) -> list[float] | None:
+    """Return a flat list of 16 floats (row-major 4x4) from notes payload camera_transform.
+    Accepts either a flat list of 16 or a 4x4 nested list.
+    """
+    if not camera or not isinstance(camera, list):
+        return None
+    try:
+        if len(camera) == 16 and all(isinstance(x, (int, float)) for x in camera):
+            return [float(x) for x in camera]
+        if len(camera) == 4 and all(isinstance(r, list) and len(r) == 4 for r in camera):
+            return [float(camera[i][j]) for i in range(4) for j in range(4)]
+    except (TypeError, IndexError):
+        pass
+    return None
 
 
 class LoadingOverlay(QtWidgets.QWidget):
@@ -150,7 +166,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._settings = QtCore.QSettings(_SETTINGS_ORG, _SETTINGS_APP)
         self._env_texture_path = None  # Track selected environment texture for persistence
         self._recent_files = self._load_recent_files()
-        self._opened_entity = None  # Project/Collection/Asset from Entity.from_path when a file is opened
+        self._opened_entity = None  # Project/Collection/Asset from Project.from_path when a file is opened
         
         self.setWindowTitle('Dedaverse')
         # Use same star icon as main Dedaverse window (deda.app._main_window)
@@ -534,7 +550,10 @@ class MainWindow(QtWidgets.QMainWindow):
             if stage:
                 self._play_timer.stop()
                 self._viewer.stage = stage
-                self.setWindowTitle(f'Dedaverse - {Path(file_path).name}')
+                # Resolve entity for title (project name) and content rootdir
+                self._opened_entity = Project.from_path(file_path)
+                project_part = f'[{self._opened_entity.project.name}] ' if self._opened_entity else ''
+                self.setWindowTitle(f'Dedaverse - {project_part}{Path(file_path).name}')
                 start_frame = int(stage.GetStartTimeCode())
                 end_frame = int(stage.GetEndTimeCode())
                 if end_frame <= start_frame:
@@ -543,8 +562,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._playbar.setFrame(start_frame)
                 self._viewer.set_dome_light_texture(self._env_texture_path)
                 self._add_to_recent_files(file_path)
-                # Resolve entity (Project/Collection/Asset) from path for content rootdir
-                self._opened_entity = Entity.from_path(file_path)
             else:
                 QtWidgets.QMessageBox.warning(
                     self,
@@ -564,7 +581,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def opened_entity(self):
         """Project, Collection, or Asset for the currently opened file, or None.
 
-        Set when a file is opened via Entity.from_path(file_path). None if the
+        Set when a file is opened via Project.from_path(file_path). None if the
         opened path is not under a Dedaverse project or resolution failed.
         """
         return self._opened_entity
@@ -630,8 +647,18 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        # Prompt for optional extra information to store in the notes JSON
+        description, ok = QtWidgets.QInputDialog.getMultiLineText(
+            self,
+            'Save Notes',
+            'Add information for this note (optional). You can describe the feedback, context, or reference for future use:',
+            '',
+        )
+        info = description.strip() if (ok and description) else ''
         overlay = self._viewer.annotation_overlay
         payload = overlay.to_payload()
+        if info:
+            payload['description'] = info
         camera_transform = self._viewer.get_camera_transform()
         payload['camera_transform'] = camera_transform  # list of 16 floats or None
         if camera_transform is None and self._viewer.stage is not None:
@@ -700,7 +727,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if identifier.startswith('file:'):
             path_str = unquote(identifier.split('file:', 1)[1]).lstrip('/')
         path_str = str(Path(path_str).resolve())
-        entity = Entity.from_path(path_str)
+        entity = Project.from_path(path_str)
         if entity is None:
             return None
         if isinstance(entity, Element) and entity.scope is not None:
@@ -770,9 +797,13 @@ class MainWindow(QtWidgets.QMainWindow):
         overlay.load_payload(payload)
         overlay.enabled = True
         self._annotation_layer_action.setChecked(True)
+        # Refresh view so annotations are visible, then restore free camera from saved transform
+        self._viewer.update_view(resetCam=False, forceComputeBBox=False)
         camera = payload.get('camera_transform')
-        if camera and isinstance(camera, list) and len(camera) == 16:
-            self._viewer.set_camera_transform(camera)
+        if camera is not None:
+            flat = _flatten_camera_transform(camera)
+            if flat is not None and len(flat) == 16:
+                self._viewer.set_camera_transform(flat)
         self._viewer.update_view(resetCam=False, forceComputeBBox=False)
         QtWidgets.QApplication.processEvents()
 
