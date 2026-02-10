@@ -262,6 +262,71 @@ class _StageView(StageView):
         self._annotation_drawing = False
         # Accept focus so keyPressEvent (e.g. "a" for annotation) is received when viewport is clicked
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+        # Load pencil cursor for annotation mode
+        self._pencil_cursor = self._load_pencil_cursor()
+
+    def _load_pencil_cursor(self) -> QtGui.QCursor | None:
+        """Load the pencil cursor icon: scale to cursor size, rotate 270° clockwise, transparent bg.
+        
+        Returns:
+            QCursor with pencil icon, or None if the icon file cannot be loaded.
+        """
+        # Standard cursor size (e.g. Windows default)
+        cursor_size = 32
+        icon_paths = [
+            Path(__file__).parent.parent.parent / 'app' / 'icons' / 'pencil_cursor.png',
+            Path(__file__).parent / 'pencil_cursor.png',
+        ]
+        for icon_path in icon_paths:
+            if not icon_path.is_file():
+                continue
+            image = QtGui.QImage(str(icon_path))
+            if image.isNull():
+                continue
+            # Ensure format has alpha so background is transparent
+            if image.format() != QtGui.QImage.Format.Format_ARGB32:
+                image = image.convertToFormat(QtGui.QImage.Format.Format_ARGB32)
+            # Rotate 270° clockwise (90° + 180°): -270 in Qt
+            #transform = QtGui.QTransform().rotate(-270.0)
+            #image = image.transformed(transform, QtCore.Qt.TransformationMode.SmoothTransformation)
+            # Scale to cursor size, keeping aspect ratio, then center on cursor_size square
+            #scaled = image.scaled(
+            #    cursor_size,
+            #    cursor_size,
+            #    QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            #    QtCore.Qt.TransformationMode.SmoothTransformation,
+            #)
+            #if scaled.format() != QtGui.QImage.Format.Format_ARGB32:
+            #    scaled = scaled.convertToFormat(QtGui.QImage.Format.Format_ARGB32)
+            # Use QPixmap and fill with transparent so Windows draws alpha correctly (no white bg)
+            #pixmap = QtGui.QPixmap(cursor_size, cursor_size)
+            #pixmap.fill(QtCore.Qt.GlobalColor.transparent)
+            #x = (cursor_size - scaled.width()) // 2
+            #y = (cursor_size - scaled.height()) // 2
+            pixmap = QtGui.QPixmap(image)
+            painter = QtGui.QPainter(pixmap)
+            #painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
+            painter.drawImage(0, 0, image)
+            painter.end()
+            if pixmap.isNull():
+                continue
+            # Hot spot at tip of pencil (after 270° CW rotation, tip is top-left)
+            #ahot_x = 4
+            #hot_y = 4
+            return QtGui.QCursor(pixmap, 0, 0)
+        log.warning("Could not load pencil cursor icon, falling back to crosshair")
+        return None
+
+    def _update_annotation_cursor(self) -> None:
+        """Set cursor to pencil icon when in annotation mode, else restore default."""
+        if self._annotation_mode_enabled:
+            if self._pencil_cursor is not None:
+                self.setCursor(self._pencil_cursor)
+            else:
+                # Fallback to crosshair if pencil cursor failed to load
+                self.setCursor(QtCore.Qt.CursorShape.CrossCursor)
+        else:
+            self.unsetCursor()
 
     def initializeGL(self):
         """Run base GL init (if any) then apply viewport enhancements."""
@@ -557,6 +622,7 @@ class _StageView(StageView):
         """Toggle annotation mode with 'a'; show prim info overlay when Ctrl is pressed."""
         if event.key() == QtCore.Qt.Key.Key_A and not event.modifiers():
             self._annotation_mode_enabled = not self._annotation_mode_enabled
+            self._update_annotation_cursor()
             if self._annotation_mode_enabled and self._annotation_overlay:
                 self._annotation_overlay.enabled = True
                 parent = self.parent()
@@ -658,6 +724,7 @@ class UsdViewWidget(QtWidgets.QWidget):
     @annotation_mode_enabled.setter
     def annotation_mode_enabled(self, value: bool) -> None:
         self._view._annotation_mode_enabled = bool(value)
+        self._view._update_annotation_cursor()
 
     def capture_viewport_image(self):
         """Capture the current viewport (scene + annotations) as a QImage.
@@ -698,117 +765,9 @@ class UsdViewWidget(QtWidgets.QWidget):
     def _get_free_camera_matrix_from_view(self, view) -> "Gf.Matrix4d | None":
         """Get the free camera 4x4 matrix from the StageView or its viewSettings."""
         # Primary: viewSettings.freeCamera._camera (Gf.Camera) — the canonical source.
-        if hasattr(view, '_dataModel') and view._dataModel is not None:
-            vs = getattr(view._dataModel, 'viewSettings', None)
-            if vs is not None:
-                free_camera = getattr(vs, 'freeCamera', None)
-                if free_camera is not None:
-                    camera = getattr(free_camera, '_camera', None)
-                    if camera is not None and hasattr(camera, 'GetTransform'):
-                        try:
-                            mat = camera.GetTransform()
-                            m = _to_matrix4d(mat)
-                            if m is not None:
-                                log.debug('get_camera_transform: using viewSettings.freeCamera._camera.GetTransform()')
-                                return m
-                        except Exception as e:
-                            log.debug('get_camera_transform: viewSettings.freeCamera._camera.GetTransform() failed: %s', e)
-        mat = None
-        # Known StageView method names (C++ GetFreeCameraMatrix → Python binding may vary).
-        for getter_name in (
-            'GetFreeCameraMatrix', 'getFreeCameraMatrix',
-            'GetFreeCameraTransform', 'getFreeCameraTransform',
-            'GetViewMatrix', 'getViewMatrix',
-            'GetCameraMatrix', 'getCameraMatrix',
-        ):
-            getter = getattr(view, getter_name, None)
-            if callable(getter):
-                try:
-                    mat = getter()
-                    if mat is not None:
-                        return _to_matrix4d(mat)
-                except Exception as e:
-                    log.debug('get_camera_transform: view.%s failed: %s', getter_name, e)
-        # View properties.
-        for attr in ('freeCameraMatrix', 'freeCameraTransform'):
-            mat = getattr(view, attr, None)
-            if mat is not None:
-                return _to_matrix4d(mat)
-        # viewSettings (including possible private-style names from C++ bindings).
-        if hasattr(view, '_dataModel') and view._dataModel is not None:
-            vs = getattr(view._dataModel, 'viewSettings', None)
-            if vs is not None:
-                for attr in (
-                    'freeCameraMatrix', 'freeCameraTransform',
-                    'FreeCameraMatrix', 'FreeCameraTransform',
-                    '_freeCameraMatrix', '_freeCameraTransform',
-                ):
-                    mat = getattr(vs, attr, None)
-                    if mat is not None:
-                        return _to_matrix4d(mat)
-                # Discover: matrix/transform attributes.
-                for name in dir(vs):
-                    if 'camera' not in name.lower():
-                        continue
-                    if 'matrix' not in name.lower() and 'transform' not in name.lower():
-                        continue
-                    try:
-                        val = getattr(vs, name, None)
-                        if val is not None:
-                            m = _to_matrix4d(val)
-                            if m is not None:
-                                log.debug('get_camera_transform: found matrix on viewSettings.%s', name)
-                                return m
-                    except Exception:
-                        pass
-                # Discover: Gf.Camera (e.g. freeCamera) — get transform matrix.
-                for name in dir(vs):
-                    if 'camera' not in name.lower():
-                        continue
-                    try:
-                        val = getattr(vs, name, None)
-                        if val is not None and hasattr(val, 'GetTransform'):
-                            m = _to_matrix4d(val.GetTransform())
-                            if m is not None:
-                                log.debug('get_camera_transform: found Gf.Camera on viewSettings.%s', name)
-                                return m
-                    except Exception:
-                        pass
-        # Discover on view: methods/attrs that look like free camera matrix getters.
-        for name in dir(view):
-            if 'free' not in name.lower() or 'camera' not in name.lower():
-                continue
-            if 'matrix' not in name.lower() and 'transform' not in name.lower():
-                continue
-            try:
-                obj = getattr(view, name, None)
-                if callable(obj):
-                    val = obj()
-                else:
-                    val = obj
-                if val is not None:
-                    m = _to_matrix4d(val)
-                    if m is not None:
-                        log.debug('get_camera_transform: found matrix on view.%s', name)
-                        return m
-            except Exception:
-                pass
-        # Discover on view: Gf.Camera (e.g. freeCamera) — get transform matrix.
-        for name in dir(view):
-            if 'free' not in name.lower() or 'camera' not in name.lower():
-                continue
-            try:
-                obj = getattr(view, name, None)
-                if obj is not None and hasattr(obj, 'GetTransform'):
-                    get_transform = getattr(obj, 'GetTransform')
-                    val = get_transform() if callable(get_transform) else get_transform
-                    m = _to_matrix4d(val)
-                    if m is not None:
-                        log.debug('get_camera_transform: found Gf.Camera on view.%s', name)
-                        return m
-            except Exception:
-                pass
-        return None
+        camera = view._dataModel.viewSettings.freeCamera._camera
+        if camera:
+            return camera.transform
 
     def set_camera_transform(self, transform: list) -> bool:
         """Set the free camera transform from a 4x4 row-major list of 16 floats.
@@ -1098,6 +1057,7 @@ class UsdViewWidget(QtWidgets.QWidget):
         elif key == QtCore.Qt.Key.Key_A and not event.modifiers():
             # Toggle annotation mode (also handled in _StageView when it has focus)
             self._view._annotation_mode_enabled = not self._view._annotation_mode_enabled
+            self._view._update_annotation_cursor()
             if self._view._annotation_mode_enabled and self._view._annotation_overlay:
                 self._view._annotation_overlay.enabled = True
                 self.annotation_overlay_enabled_changed.emit(True)
