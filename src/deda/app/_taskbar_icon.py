@@ -77,10 +77,32 @@ class TaskbarIcon(QtWidgets.QSystemTrayIcon):
         self._action_tasks.setCheckable(True)
         self._action_tasks.setChecked(self._settings.value(_KEY_VIEW_TASKS, True, type=bool))
         self._action_tasks.triggered.connect(lambda: self._on_view_toggled(_KEY_VIEW_TASKS, self._action_tasks))
-        
-        menu.addAction('Restart', self._on_restart)
+
+        self._action_update_restart = None
+        self._action_restart = menu.addAction('Restart', self._on_restart)
         #menu.addAction('Exit', self._on_exit)
         return menu
+
+    def set_update_available(self, available: bool, latest_version: str | None = None) -> None:
+        """Show or hide the 'Update and restart' menu action. Only shown when an update is available.
+
+        Args:
+            available: Whether an update is available.
+            latest_version: Optional version string to show in the action text.
+        """
+        if not available:
+            if self._action_update_restart is not None:
+                self._menu.removeAction(self._action_update_restart)
+                self._action_update_restart.deleteLater()
+                self._action_update_restart = None
+            return
+        text = f'Update and restart (v{latest_version})' if latest_version else 'Update and restart'
+        if self._action_update_restart is None:
+            self._action_update_restart = QtWidgets.QAction(text, self._menu)
+            self._action_update_restart.triggered.connect(self._on_update_restart)
+            self._menu.insertAction(self._action_restart, self._action_update_restart)
+        else:
+            self._action_update_restart.setText(text)
 
     def _on_view_toggled(self, key, action):
         """Save the checked state of a View submenu item to QSettings."""
@@ -92,11 +114,17 @@ class TaskbarIcon(QtWidgets.QSystemTrayIcon):
         QtWidgets.QApplication.instance().quit()
         
     def _on_restart(self):
-        """Restart the application"""
+        """Restart the application."""
         import deda.app
         log.warning('Restarting dedaverse system...')
         sys.exit(deda.app.RESTART_CODE)
-        
+
+    def _on_update_restart(self):
+        """Exit with update code so the launcher runs install then restart."""
+        import deda.app
+        log.warning('Update and restart dedaverse...')
+        sys.exit(deda.app.UPDATE_CODE)
+
     def format_tool_tip(self, project):
         msg = f'<b>Dedaverse :: {project}</b>'
         self.setToolTip(msg)

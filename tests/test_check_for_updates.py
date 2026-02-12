@@ -39,7 +39,7 @@ class TestCheckForUpdates(unittest.TestCase):
         self.assertIsNotNone(result)
         mock_get.assert_called_once()
 
-    @patch.dict(os.environ, {'DEDAVERSE_GITUB_API_ROOT_URL': 'https://custom.github.com'})
+    @patch.dict(os.environ, {'DEDAVERSE_GITHUB_API_ROOT_URL': 'https://custom.github.com'})
     @patch('deda.core._check_for_updates.requests.get')
     def test_get_latest_release_name_custom_url(self, mock_get):
         """Test getting latest release with custom GitHub URL."""
