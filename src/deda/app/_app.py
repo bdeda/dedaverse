@@ -38,10 +38,25 @@ from PySide6 import QtGui, QtWidgets, QtCore
 
 import deda.log
 import deda.core
+from deda.core import check_for_updates, is_dev_mode
 from ._main_window import MainWindow
 
 
 log = logging.getLogger(__name__)
+
+
+class _UpdateCheckWorker(QtCore.QObject):
+    """Worker that runs check_for_updates() in a background thread and emits the result."""
+
+    result = QtCore.Signal(bool, object)  # (update_available, latest_version_str | None)
+
+    def run(self) -> None:
+        try:
+            available, latest = check_for_updates()
+            self.result.emit(available, latest)
+        except Exception as err:
+            log.debug('Update check failed: %s', err)
+            self.result.emit(False, None)
 
 
 class Application(QtWidgets.QApplication):
@@ -98,6 +113,19 @@ def run(loglevel='DEBUG'):
         except Exception as err:
             log.error(f'Unexpected error loading plugin {plugin.name}: {err}')
             log.exception(err)
+    # Run update check in background when not in dev mode (only for installed builds).
+    if not is_dev_mode():
+        update_thread = QtCore.QThread()
+        update_worker = _UpdateCheckWorker()
+        update_worker.moveToThread(update_thread)
+        update_thread.started.connect(update_worker.run)
+        update_worker.result.connect(w._on_update_check_result, QtCore.Qt.ConnectionType.QueuedConnection)
+        update_worker.result.connect(update_thread.quit)
+        update_thread.finished.connect(update_thread.deleteLater)
+        update_thread.finished.connect(update_worker.deleteLater)
+        w._update_check_thread = update_thread
+        w._update_check_worker = update_worker
+        update_thread.start()
     ret = app.exec_()
     log.debug(f'Returning {ret}')
     return ret

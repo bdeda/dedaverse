@@ -15,65 +15,116 @@
 # limitations under the License.
 #
 # ###################################################################################
-__all__ = ['check_for_updates', 'get_latest_release_name']
+__all__ = ['check_for_updates', 'get_installed_version', 'get_latest_release_name', 'is_dev_mode']
 
-import os
 import logging
-import requests
-from packaging.version import Version
+import os
+from importlib.metadata import PackageNotFoundError, version as get_package_version
 
+import requests
+from packaging.version import InvalidVersion, Version
 
 log = logging.getLogger(__name__)
 
-
-def get_latest_release_name(owner, repo):
-    """Check if dataverse has had any new releases in the github repository, 
-    and notify the user if there are updates available.
-    
-    Uses the DEDAVERSE_GITUB_API_ROOT_URL env var to check for an updated release.
-    This can be mapped to an internal github enterprise server where internal 
-    Pipeline teams are managing the releases for their team.
-    
-    """
-    github_api_root_url = os.getenv('DEDAVERSE_GITUB_API_ROOT_URL', 'http://api.github.com')
-    url = f'{github_api_root_url}/repos/{owner}/{repo}/releases/latest'
-    response = requests.get(url)
-    data = response.json()
-    log.debug(data)
-    if data.get('status') == '404':
-        log.error(data)
-    version = data.get('tag_name')
-    if not version:    
-        version = data.get("name", '0.1.0')
-    if version.startswith('v'):
-        version = version[1:]
-    return Version(version)
+_DEFAULT_GITHUB_API = 'https://api.github.com'
+_REPO_OWNER = 'bdeda'
+_REPO_NAME = 'dedaverse'
+_PACKAGE_NAME = 'dedaverse'
 
 
-def check_for_updates():
-    """Check if dataverse has had any new releases in the github repository, 
-    and notify the user if there are updates available.
-    
+def get_installed_version() -> str | None:
+    """Return the installed Dedaverse package version, or None if running in dev (not installed).
+
     Returns:
-        (bool) True if there are updates available, otherwise False.
-    
+        Version string (e.g. '0.1.0') or None when package is not installed (dev mode).
     """
-    import deda
-    latest_version = get_latest_release_name('bdeda', 'dedaverse')
-    log.info(f'Latest release is {latest_version}')
-    current_version = Version(deda.__version__)
-    log.info(f'Current version is {current_version}')
-    if latest_version > current_version:
-        return True
-    
-    # TODO: check for plugin updates in their repos.
-    # example on how to check a github repo for updated release
-    usd_version = get_latest_release_name('PixarAnimationStudios', 'OpenUSD')
-    log.info(f'Usd version available: {usd_version}')
-    
-    
+    try:
+        return get_package_version(_PACKAGE_NAME)
+    except PackageNotFoundError:
+        return None
+
+
+def is_dev_mode() -> bool:
+    """Return True if running from source / not installed (dev mode)."""
+    return get_installed_version() is None
+
+
+def get_latest_release_name(owner: str, repo: str) -> Version | None:
+    """Fetch the latest release version from a GitHub repository.
+
+    Uses the DEDAVERSE_GITHUB_API_ROOT_URL env var (or the misspelling
+    DEDAVERSE_GITUB_API_ROOT_URL for backward compatibility) to allow mapping to an
+    internal GitHub Enterprise server.
+
+    Args:
+        owner: GitHub repository owner (e.g. 'bdeda').
+        repo: Repository name (e.g. 'dedaverse').
+
+    Returns:
+        Parsed Version of the latest release tag, or None on error or 404.
+    """
+    root = (
+        os.getenv('DEDAVERSE_GITHUB_API_ROOT_URL')
+        or os.getenv('DEDAVERSE_GITUB_API_ROOT_URL', _DEFAULT_GITHUB_API)
+    )
+    base = root.rstrip('/')
+    if not base.startswith('http'):
+        base = 'https://' + base.lstrip('://')
+    url = f'{base}/repos/{owner}/{repo}/releases/latest'
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code == 404:
+            log.debug('No latest release found for %s/%s', owner, repo)
+            return None
+        response.raise_for_status()
+        data = response.json()
+        log.debug(data)
+        raw = data.get('tag_name') or data.get('name') or '0.0.0'
+        if isinstance(raw, str) and raw.startswith('v'):
+            raw = raw[1:]
+        return Version(raw)
+    except (requests.RequestException, InvalidVersion, KeyError) as err:
+        log.debug('Failed to get latest release for %s/%s: %s', owner, repo, err)
+        return None
+
+
+def check_for_updates() -> tuple[bool, str | None]:
+    """Check if a newer Dedaverse release is available on GitHub.
+
+    Skips the check when running in dev mode (package not installed). Compares
+    the installed version with the latest release at https://github.com/bdeda/dedaverse.
+
+    Returns:
+        (update_available, latest_version_str): True and version string if an update
+        is available; False and None otherwise. When in dev mode, returns (False, None).
+    """
+    if is_dev_mode():
+        log.debug('Skipping update check (dev mode).')
+        return False, None
+
+    current_str = get_installed_version()
+    if not current_str:
+        return False, None
+    try:
+        current = Version(current_str)
+    except InvalidVersion:
+        log.debug('Installed version not parseable: %s', current_str)
+        return False, None
+
+    latest = get_latest_release_name(_REPO_OWNER, _REPO_NAME)
+    if latest is None:
+        return False, None
+
+    log.info('Latest release is %s; current is %s', latest, current)
+    if latest > current:
+        return True, str(latest)
+    return False, None
+
+
 if __name__ == '__main__':
     import deda.log
+
     deda.log.initialize(logging.DEBUG)
-    check_for_updates()
+    available, ver = check_for_updates()
+    print(f'Update available: {available}, latest: {ver}')
     

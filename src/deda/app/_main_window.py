@@ -246,6 +246,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         super().closeEvent(event)
         
+    def _on_update_check_result(self, available: bool, latest_version: str | None) -> None:
+        """Handle result of background update check: notify user and enable Update and restart if available."""
+        if not available:
+            return
+        self._icon.set_update_available(True, latest_version)
+        msg = f'A new version (v{latest_version}) is available. Use the taskbar menu: Update and restart.'
+        self.show_message('Dedaverse update available', msg, icon=QtWidgets.QSystemTrayIcon.Information)
+
     def message_clicked(self):
         if not self._config.current_project:
             self._open_project_settings()
