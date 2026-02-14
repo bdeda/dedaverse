@@ -19,7 +19,7 @@
 Graphics views for panels and browsers.
 """
 
-__all__ = ["AddItemDialog", "ConfigureItemDialog", "CopyMoveUsdFilesDialog"]
+__all__ = ["AddItemDialog", "ConfigureAssetDialog", "ConfigureItemDialog", "CopyMoveUsdFilesDialog"]
 
 import os
 from pathlib import Path
@@ -27,6 +27,36 @@ from pathlib import Path
 from PySide6 import QtWidgets, QtGui, QtCore
 
 from ..core import _types
+
+
+def _default_icon_path_for_asset_type(asset_type: str) -> Path | None:
+    """Return the path to the default icon for an asset type (black bg, white outline style).
+
+    Actor/Character -> figure; Collection -> open box; Kit -> assembly; Prop -> object;
+    Sequence -> film reel; Set -> stage; Shot -> single frame; others -> coin stack.
+    """
+    icons_dir = Path(__file__).parent / 'icons'
+    if not icons_dir.is_dir():
+        return None
+    if asset_type == 'Actor':
+        p = icons_dir / 'icon_actor.png'
+    elif asset_type == 'Character':
+        p = icons_dir / 'icon_character.png'
+    elif asset_type == 'Collection':
+        p = icons_dir / 'icon_collection.png'
+    elif asset_type == 'Kit':
+        p = icons_dir / 'icon_kit.png'
+    elif asset_type == 'Prop':
+        p = icons_dir / 'icon_prop.png'
+    elif asset_type == 'Sequence':
+        p = icons_dir / 'icon_sequence.png'
+    elif asset_type == 'Set':
+        p = icons_dir / 'icon_set.png'
+    elif asset_type == 'Shot':
+        p = icons_dir / 'icon_shot.png'
+    else:
+        p = icons_dir / 'icon_asset.png'
+    return p if p.is_file() else None
 
 
 class ClickableLabel(QtWidgets.QLabel):
@@ -69,12 +99,9 @@ class AddItemDialog(QtWidgets.QDialog):
         grid = QtWidgets.QGridLayout()
         vbox.addLayout(grid)
 
-        # default icon for type
-        icon_path = Path(__file__).parent / 'icons' / 'questionmark_small.png'
-        questionmark_icon = QtGui.QPixmap(str(icon_path))
-        # customization of icon allows drag and drop, resize and store icon on drop
+        # Icon: for Asset type use default-by-type (updated when type changes); else question mark
+        default_icon_path = Path(__file__).parent / 'icons' / 'questionmark_small.png'
         self._icon_lbl = ClickableLabel()
-        self._icon_lbl.setPixmap(questionmark_icon)
         self._selected_icon_path = None
         grid.addWidget(self._icon_lbl, 0, 0, 2, 1)
         self._icon_lbl.clicked.connect(self._open_icon_browser)
@@ -111,6 +138,9 @@ class AddItemDialog(QtWidgets.QDialog):
             self._types_cb.setCurrentIndex(idx)
         self._types_cb.currentTextChanged.connect(self._on_type_changed)
 
+        # Set initial icon (for Asset, use default icon for current type)
+        self._update_dialog_icon()
+
         if type_name == 'App':
             grid.addWidget(self._types_cb, 1, 3)
             
@@ -142,8 +172,30 @@ class AddItemDialog(QtWidgets.QDialog):
             self._name_changed(initial_name.strip())
 
     def _on_type_changed(self, text: str) -> None:
-        """Persist the selected type for this dialog category."""
+        """Persist the selected type and, for Asset dialog, update the icon to the type default."""
         self._settings.setValue(f'AddItemDialog/{self._type_name}/lastType', text)
+        if self._type_name == 'Asset':
+            self._update_dialog_icon()
+
+    def _update_dialog_icon(self) -> None:
+        """Set the icon label from the current type default (Asset) or question mark."""
+        icons_dir = Path(__file__).parent / 'icons'
+        size = 64
+        if self._type_name == 'Asset':
+            path = _default_icon_path_for_asset_type(self._types_cb.currentText())
+            if path:
+                self._selected_icon_path = None
+                pixmap = QtGui.QPixmap(str(path))
+        else:
+            path = icons_dir / 'questionmark_small.png'
+            pixmap = QtGui.QPixmap(str(path)) if path.is_file() else QtGui.QPixmap()
+        if not pixmap.isNull():
+            pixmap = pixmap.scaled(
+                size, size,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation,
+            )
+            self._icon_lbl.setPixmap(pixmap)
 
     def _create_item(self):
         item = {
@@ -310,6 +362,98 @@ class ConfigureItemDialog(QtWidgets.QDialog):
             updated['params'] = self._item_data.get('params', [])  # Preserve existing params
         self.item_updated.emit(self._item_index, updated)
         self.close()
+
+
+class ConfigureAssetDialog(QtWidgets.QDialog):
+    """Dialog to set asset metadata: Title, Description, Asset Type. Stored in USD as lowercase snake_case."""
+
+    asset_metadata_updated = QtCore.Signal(int, object)  # (item_index, updated_item_data)
+
+    def __init__(self, entity, item_data, item_index, parent=None):
+        """Open the configure dialog for an asset or collection.
+
+        Args:
+            entity: Asset or Collection instance (must have get_metadata/set_metadata and prim).
+            item_data: Current item dict (name, type, title, description, is_collection).
+            item_index: Index of the item in the panel's _items list.
+            parent: Optional parent widget.
+        """
+        super().__init__(parent=parent)
+        self.setWindowTitle('Configure asset')
+        icon_path = Path(__file__).parent / 'icons' / 'gear_icon_32.png'
+        if icon_path.is_file():
+            self.setWindowIcon(QtGui.QIcon(str(icon_path)))
+        self._entity = entity
+        self._item_data = dict(item_data)
+        self._item_index = item_index
+
+        vbox = QtWidgets.QVBoxLayout()
+        self.setLayout(vbox)
+        grid = QtWidgets.QGridLayout()
+        vbox.addLayout(grid)
+
+        # Title
+        grid.addWidget(QtWidgets.QLabel('Title:'), 0, 0)
+        self._title_le = QtWidgets.QLineEdit()
+        self._title_le.setText(
+            entity.get_metadata('title', '') or self._item_data.get('title', '') or self._item_data.get('name', '')
+        )
+        self._title_le.setPlaceholderText('Optional display title')
+        grid.addWidget(self._title_le, 0, 1)
+
+        # Description
+        grid.addWidget(QtWidgets.QLabel('Description:'), 1, 0)
+        self._desc_le = QtWidgets.QLineEdit()
+        self._desc_le.setText(
+            entity.get_metadata('description', '') or self._item_data.get('description', '')
+        )
+        self._desc_le.setPlaceholderText('Optional description')
+        grid.addWidget(self._desc_le, 1, 1)
+
+        # Asset Type
+        grid.addWidget(QtWidgets.QLabel('Asset Type:'), 2, 0)
+        self._type_cb = QtWidgets.QComboBox()
+        self._type_cb.addItems(_types.all_default_asset_types())
+        current = entity.get_metadata('asset_type', '') or self._item_data.get('type', 'Asset')
+        idx = self._type_cb.findText(current)
+        if idx >= 0:
+            self._type_cb.setCurrentIndex(idx)
+        else:
+            self._type_cb.setCurrentIndex(0)
+        grid.addWidget(self._type_cb, 2, 1)
+
+        btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Save | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        vbox.addWidget(btns)
+        btns.accepted.connect(self._save)
+        btns.rejected.connect(self.reject)
+
+    def _save(self):
+        title = self._title_le.text().strip()
+        description = self._desc_le.text().strip()
+        asset_type = self._type_cb.currentText().strip() or 'Asset'
+        try:
+            self._entity.set_metadata('title', title)
+            self._entity.set_metadata('description', description)
+            self._entity.set_metadata('asset_type', asset_type)
+        except (RuntimeError, Exception) as err:
+            QtWidgets.QMessageBox.warning(
+                self,
+                'Save failed',
+                f'Could not save metadata to USD: {err}',
+            )
+            return
+        updated = {
+            'name': self._item_data.get('name', ''),
+            'type': asset_type,
+            'title': title,
+            'description': description,
+            'is_collection': self._item_data.get('is_collection', False),
+        }
+        self.asset_metadata_updated.emit(self._item_index, updated)
+        self.accept()
 
 
 class CopyMoveUsdFilesDialog(QtWidgets.QDialog):

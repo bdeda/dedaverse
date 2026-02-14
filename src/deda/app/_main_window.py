@@ -136,7 +136,7 @@ def _first_usd_file_in_directory(asset_dir: Path, asset_name: str) -> Path | Non
 
 from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
-from ._dialogs import AddItemDialog, ConfigureItemDialog, CopyMoveUsdFilesDialog
+from ._dialogs import AddItemDialog, ConfigureAssetDialog, ConfigureItemDialog, CopyMoveUsdFilesDialog
 from ._panel import ItemTile, PanelHeader, Panel
 #from deda.core.viewer import UsdViewWidget
 
@@ -369,6 +369,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if panel == 'Assets':
                 panel_obj.item_created.connect(self._on_asset_created)
                 panel_obj.item_activated.connect(self._on_asset_panel_item_activated)
+                panel_obj.asset_configure_requested.connect(self._on_asset_configure_requested)
                 panel_obj.navigate_up_clicked.connect(self._on_assets_navigate_up)
                 panel_obj.file_dropped.connect(self._on_assets_panel_file_dropped)
                 panel_obj.item_removed.connect(self._on_asset_removed)
@@ -613,14 +614,48 @@ class MainWindow(QtWidgets.QMainWindow):
         if container is None:
             return
 
+        icons_dir = Path(__file__).parent / 'icons'
+        icon_actor = icons_dir / 'icon_actor.png'
+        icon_asset = icons_dir / 'icon_asset.png'
+        icon_character = icons_dir / 'icon_character.png'
+        icon_collection = icons_dir / 'icon_collection.png'
+        icon_kit = icons_dir / 'icon_kit.png'
+        icon_prop = icons_dir / 'icon_prop.png'
+        icon_sequence = icons_dir / 'icon_sequence.png'
+        icon_set = icons_dir / 'icon_set.png'
+        icon_shot = icons_dir / 'icon_shot.png'
         for child in container.get_immediate_children():
+            is_collection = child.get('is_collection', False)
+            child_type = child.get('type', 'Asset')
+            if child_type == 'Actor' and icon_actor.is_file():
+                default_icon = icon_actor
+            elif child_type == 'Character' and icon_character.is_file():
+                default_icon = icon_character
+            elif child_type == 'Kit' and icon_kit.is_file():
+                default_icon = icon_kit
+            elif child_type == 'Prop' and icon_prop.is_file():
+                default_icon = icon_prop
+            elif child_type == 'Sequence' and icon_sequence.is_file():
+                default_icon = icon_sequence
+            elif child_type == 'Set' and icon_set.is_file():
+                default_icon = icon_set
+            elif child_type == 'Shot' and icon_shot.is_file():
+                default_icon = icon_shot
+            elif is_collection and icon_collection.is_file():
+                default_icon = icon_collection
+            elif icon_asset.is_file():
+                default_icon = icon_asset
+            else:
+                default_icon = None
             item_data = {
                 'name': child['name'],
                 'type': child['type'],
                 'description': child.get('description', ''),
                 'title': child.get('title', ''),
-                'is_collection': child.get('is_collection', False),
+                'is_collection': is_collection,
             }
+            if default_icon:
+                item_data['icon'] = str(default_icon)
             assets_panel.add_item_tile(item_data)
 
     def _on_asset_panel_item_activated(self, item_data):
@@ -649,6 +684,38 @@ class MainWindow(QtWidgets.QMainWindow):
         if assets_panel:
             self._load_assets_to_panel(assets_panel)
         self._save_assets_panel_path()
+
+    def _on_asset_configure_requested(self, item_index: int) -> None:
+        """Open the Configure Asset dialog for the asset/collection at the given index."""
+        assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
+        if not assets_panel or item_index < 0 or item_index >= len(assets_panel._items):
+            return
+        container = self._assets_view_container
+        if container is None:
+            return
+        item_data = assets_panel._items[item_index]
+        name = (item_data or {}).get('name', '').strip()
+        if not name:
+            return
+        entity = Collection(name, container) if item_data.get('is_collection') else Asset(name, container)
+        dlg = ConfigureAssetDialog(entity, item_data, item_index, parent=self)
+        dlg.asset_metadata_updated.connect(self._on_asset_metadata_updated)
+        if assets_panel._scroll_area:
+            rect = assets_panel._scroll_area.geometry()
+            dlg_rect = dlg.geometry()
+            pt = QtCore.QPoint(
+                (rect.width() / 2) - (dlg_rect.width() / 2),
+                (rect.height() / 2) - (dlg_rect.height() / 2),
+            )
+            dlg.move(assets_panel._scroll_area.mapToGlobal(pt))
+        dlg.exec()
+
+    def _on_asset_metadata_updated(self, item_index: int, updated_data: dict) -> None:
+        """Update the Assets panel item after Configure Asset dialog save."""
+        assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
+        if assets_panel and 0 <= item_index < len(assets_panel._items):
+            assets_panel._items[item_index] = updated_data
+            assets_panel._relayout_tiles()
 
     def _on_asset_removed(self, item_data):
         """Remove the asset/collection from the parent's USD metadata, archive its directory, and reload the panel."""
@@ -745,7 +812,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
     def _on_asset_created(self, asset_info):
-        """Handle the creation of the asset in the asset library and in project USD metadata."""
+        """Handle the creation of the asset in the asset library and in project USD metadata.
+
+        The new asset is added to the active collection (the one currently shown in the
+        Assets panel), not its parent.
+        """
         if not self.current_project:
             return
         if not self._asset_library:
@@ -754,8 +825,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.current_project.rootdir,
                 prim_name=getattr(self.current_project, 'prim_name', None),
             )
-            self._assets_view_container = self._asset_library
-        container = self._assets_view_container or self._asset_library
+            if self._assets_view_container is None:
+                self._assets_view_container = self._asset_library
+        container = self._assets_view_container if self._assets_view_container is not None else self._asset_library
         if container is None:
             return
         name = (asset_info or {}).get('name', '').strip()

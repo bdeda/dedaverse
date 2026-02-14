@@ -50,9 +50,24 @@ class Entity:
         
     
         
-    @property 
+    @property
     def metadata(self):
-        return # TODO
+        """Custom data on this entity's prim (e.g. title, description, asset_type).
+
+        Returns a dict-like of the prim's customData. Only valid for entities
+        with a prim (e.g. Asset, Collection). Returns an empty dict if the
+        prim is invalid or has no custom data.
+        """
+        if not hasattr(self, 'prim'):
+            return {}
+        prim = self.prim
+        if not prim.IsValid():
+            return {}
+        try:
+            custom = prim.GetCustomData()
+        except RuntimeError:
+            return {}
+        return dict(custom) if custom else {}
     
     @property
     def metadata_path(self) -> Path | None:
@@ -77,9 +92,13 @@ class Entity:
     def prim_path(self) -> str:
         """USD prim path for this entity in the project stage.
 
-        Root (project) is /{name}; children are {parent.prim_path}/{name}.
+        The project has no prim; its stage composes sublayers. Direct children
+        of the project are top-level prims (e.g. /Assets). Other children are
+        {parent.prim_path}/{name}.
         """
         if self._parent is None:
+            return f'/{self._name}'
+        if self._parent.parent is None:
             return f'/{self._name}'
         return f'{self._parent.prim_path}/{self._name}'
 
@@ -125,16 +144,49 @@ class Entity:
             Requires self.prim (e.g. on Asset and subclasses). Not defined
             on Entity when prim is not available.
         """
-        stage = self.prim.GetStage()
-        if self.prim.IsPseudoRoot():
-            return stage.GetRootLayer()
-        for spec in self.prim.GetPrimStack():
-            if spec.specifier != Sdf.SpecifierDef:
-                continue
-            if spec.layer.IsAnonymous():
-                continue
-            return spec.layer
+        prim = self.prim
+        if not prim.IsValid():
+            return None
+        try:
+            stage = prim.GetStage()
+            if prim.IsPseudoRoot():
+                return stage.GetRootLayer()
+            for spec in prim.GetPrimStack():
+                if spec.specifier != Sdf.SpecifierDef:
+                    continue
+                if _layer_is_anonymous(spec.layer):
+                    continue
+                return spec.layer
+        except RuntimeError:
+            return None
         return None
+
+    def get_metadata(self, name: str, default=None):
+        """Return custom metadata from this entity's prim.
+
+        Reads from the prim's custom data (e.g. Usd.Prim.GetCustomDataByKey).
+        Only valid for entities that have a prim (e.g. Asset, Collection).
+        Handles expired prims by returning default if the prim is invalid when accessed.
+
+        Args:
+            name: Key for the custom metadata (use lowercase snake_case).
+            default: Value to return if the key is missing.
+
+        Returns:
+            The stored value, or default if the key is not set or prim is invalid.
+        """
+        if not hasattr(self, 'prim'):
+            return default
+        prim = self.prim
+        if not prim.IsValid():
+            return default
+        try:
+            custom = prim.GetCustomData()
+        except RuntimeError:
+            return default
+        if not custom:
+            return default
+        return custom.get(name, default)
 
     def set_metadata(self, name: str, value) -> None:
         """Set custom metadata on this entity's prim and save the edit target layer.
@@ -155,13 +207,50 @@ class Entity:
         Note:
             Requires self.prim (e.g. on Asset and subclasses).
         """
+        prim = self.prim
+        if not prim.IsValid():
+            raise RuntimeError("Prim is not valid; cannot set metadata.")
         layer = self.get_edit_target()
         if layer is None:
             raise RuntimeError("No edit target for this entity; cannot set metadata.")
-        stage = self.prim.GetStage()
-        stage.SetEditTarget(Usd.EditTarget(layer))
-        self.prim.SetCustomDataByKey(name, value)
-        layer.Save()
+        try:
+            stage = prim.GetStage()
+            stage.SetEditTarget(Usd.EditTarget(layer))
+            prim.SetCustomDataByKey(name, value)
+            layer.Save()
+        except RuntimeError as e:
+            raise RuntimeError("Prim is not valid or expired; cannot set metadata.") from e
+
+    @classmethod
+    def from_prim(cls, prim, parent: 'Entity | None') -> 'Entity':
+        """Construct the appropriate entity (Collection or Asset) from a prim.
+
+        The parent is required so the entity does not need to look it up.
+        Collection is returned when the prim has Kind group; otherwise Asset.
+
+        Args:
+            prim: Usd.Prim for the entity (e.g. a child of a collection).
+            parent: Parent entity (Collection or Project). Must not be None.
+
+        Returns:
+            Collection or Asset instance for the given prim.
+
+        Raises:
+            ValueError: If parent is None or prim is invalid.
+        """
+        if parent is None:
+            raise ValueError("parent is required for Entity.from_prim")
+        if not prim or not prim.IsValid():
+            raise ValueError("prim is invalid")
+        name = prim.GetName()
+        if not name:
+            raise ValueError("prim has no name")
+        kind = Usd.ModelAPI(prim).GetKind()
+        from ._asset import Asset
+        from ._collection import Collection
+        if kind == Kind.Tokens.group:
+            return Collection(name, parent)
+        return Asset(name, parent)
 
     @classmethod
     def from_path(cls, path: str) -> 'Entity | None':
@@ -191,6 +280,15 @@ class Entity:
 
 
 # --- Internal ---
+
+
+def _layer_is_anonymous(layer) -> bool:
+    """Return True if the layer is anonymous (in-memory only). Works across USD Python binding variants."""
+    try:
+        return layer.IsAnonymous()
+    except AttributeError:
+        ident = getattr(layer, 'identifier', None) or ''
+        return not ident or str(ident).startswith('anon:')
 
 
 def _entity_from_metadata_path(meta_path: Path) -> 'Entity | None':

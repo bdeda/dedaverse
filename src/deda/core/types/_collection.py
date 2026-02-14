@@ -27,6 +27,54 @@ from ._asset import Asset
 __all__ = ['Collection']
 
 
+def _create_entity_usda(
+    usda_path: Path,
+    path_segments: list[str],
+    kind_tokens: Kind.Tokens,
+    *,
+    asset_identifier: str | None = None,
+) -> None:
+    """Create a USDA file with a hierarchy of Scope prims and set the leaf's kind.
+
+    path_segments is the full prim path segments (e.g. ["KCRC", "Assets", "Monsters", "Cletus"]).
+    The leaf prim gets the given kind (e.g. group or model). If asset_identifier is set,
+    the leaf gets assetInfo (SetAssetName, SetAssetIdentifier).
+
+    Args:
+        usda_path: Path to the USDA file to create.
+        path_segments: Full prim path segment names from root to leaf.
+        kind_tokens: Kind for the leaf prim (e.g. Kind.Tokens.group, Kind.Tokens.model).
+        asset_identifier: If set, set assetInfo on the leaf (for assets).
+    """
+    usda_path = Path(usda_path)
+    usda_path.parent.mkdir(parents=True, exist_ok=True)
+    if usda_path.exists():
+        stage = Usd.Stage.Open(str(usda_path))
+        for prim in list(stage.GetPseudoRoot().GetChildren()):
+            stage.RemovePrim(prim.GetPath())
+    else:
+        stage = Usd.Stage.CreateNew(str(usda_path))
+    if not path_segments:
+        stage.GetRootLayer().Save()
+        return
+    # Build hierarchy: /seg0/seg1/.../segN; set kind on each (ancestors = group, leaf = kind_tokens)
+    path = Sdf.Path("/" + path_segments[0])
+    prim = stage.DefinePrim(path, "Scope")
+    is_leaf = len(path_segments) == 1
+    Usd.ModelAPI(prim).SetKind(kind_tokens if is_leaf else Kind.Tokens.group)
+    for i, seg in enumerate(path_segments[1:], start=1):
+        path = path.AppendChild(seg)
+        prim = stage.DefinePrim(path, "Scope")
+        is_leaf = i == len(path_segments) - 1
+        Usd.ModelAPI(prim).SetKind(kind_tokens if is_leaf else Kind.Tokens.group)
+    stage.SetDefaultPrim(prim)
+    if asset_identifier:
+        model_api = Usd.ModelAPI(prim)
+        model_api.SetAssetName(path_segments[-1])
+        model_api.SetAssetIdentifier(Sdf.AssetPath(asset_identifier))
+    stage.GetRootLayer().Save()
+
+
 def _asset_id_string(parent: Asset, name: str) -> str:
     """Build asset identifier in form project_name:collection_name:...:name::."""
     parts: list[str] = []
@@ -52,10 +100,9 @@ class Collection(Asset):
     def add_asset(self, name: str) -> Asset:
         """Add a new asset as a child of this collection.
 
-        Validates the name, creates the asset's USDA file on disk under
-        children_metadata_dir, defines a root prim with that name as default,
-        sets Kind to Model and assetInfo. Adds a child prim with reference on
-        this collection's get_edit_target layer.
+        Validates the name, creates the asset's USDA file with the full prim
+        hierarchy (parent chain + name), sets Kind to Model and assetInfo.
+        Adds the child's USDA as a sublayer on this collection's layer.
 
         Args:
             name: Prim name for the new asset (must be a valid USD identifier).
@@ -73,27 +120,25 @@ class Collection(Asset):
         asset_dir = proj.asset_directory_for_prim_path(child_prim_path)
         asset_dir.mkdir(parents=True, exist_ok=True)
         child_path = self.children_metadata_dir / f"{name}.usda"
-        child_path.parent.mkdir(parents=True, exist_ok=True)
-        stage = Usd.Stage.CreateNew(str(child_path))
-        prim_path_on_stage = Sdf.Path("/" + name)
-        prim = stage.DefinePrim(prim_path_on_stage, "Scope")
-        stage.SetDefaultPrim(prim)
-        model_api = Usd.ModelAPI(prim)
-        model_api.SetKind(Kind.Tokens.model)
-        identifier = _asset_id_string(self, name)
-        model_api.SetAssetName(name)
-        model_api.SetAssetIdentifier(Sdf.AssetPath(identifier))
-        stage.GetRootLayer().Save()
-        _add_child_prim_with_reference(self, name, child_path)
+        if self.parent is None:
+            path_segments = [name]
+        else:
+            path_segments = [self.name, name]  # include parent collection as root prim
+        _create_entity_usda(
+            child_path,
+            path_segments,
+            Kind.Tokens.model,
+            asset_identifier=_asset_id_string(self, name),
+        )
+        _add_child_sublayer(self, name, child_path)
         return Asset(name, self)
 
     def add_collection(self, name: str) -> "Collection":
         """Add a new collection as a child of this collection.
 
-        Validates the name, creates the collection's USDA file on disk under
-        children_metadata_dir, defines a root prim with that name as default,
-        sets Kind to Group. Adds a child prim with reference on this
-        collection's get_edit_target layer.
+        Validates the name, creates the collection's USDA file with the full
+        prim hierarchy (parent chain + name), sets Kind to Group. Adds the
+        child's USDA as a sublayer on this collection's layer.
 
         Args:
             name: Prim name for the new collection (must be a valid USD identifier).
@@ -111,47 +156,34 @@ class Collection(Asset):
         asset_dir = proj.asset_directory_for_prim_path(child_prim_path)
         asset_dir.mkdir(parents=True, exist_ok=True)
         child_path = self.children_metadata_dir / f"{name}.usda"
-        child_path.parent.mkdir(parents=True, exist_ok=True)
-        stage = Usd.Stage.CreateNew(str(child_path))
-        prim_path_on_stage = Sdf.Path("/" + name)
-        prim = stage.DefinePrim(prim_path_on_stage, "Scope")
-        stage.SetDefaultPrim(prim)
-        Usd.ModelAPI(prim).SetKind(Kind.Tokens.group)
-        stage.GetRootLayer().Save()
-        _add_child_prim_with_reference(self, name, child_path)
+        if self.parent is None:
+            path_segments = [name]
+        else:
+            path_segments = [self.name, name]  # include parent collection as root prim
+        _create_entity_usda(child_path, path_segments, Kind.Tokens.group)
+        _add_child_sublayer(self, name, child_path)
         return Collection(name, self)
 
     def remove_child(self, name: str) -> bool:
-        """Remove a child prim from this collection's USDA metadata.
+        """Remove a child from this collection's USDA metadata by removing its sublayer.
 
-        Edits the parent's layer to remove the child prim (and its reference).
         Does not delete the child's USDA file on disk.
 
         Args:
             name: Name of the child asset or collection to remove.
 
         Returns:
-            True if the child was removed, False if the prim did not exist or
-            the edit could not be applied.
+            True if the sublayer was found and removed, False otherwise.
         """
-        root_prim_name = getattr(self, "prim_name", None) or self.name
-        child_prim_path = Sdf.Path("/" + root_prim_name + "/" + name)
-        stage = Usd.Stage.Open(str(self.metadata_path))
-        root_layer = stage.GetRootLayer()
-        if not root_layer.GetPrimAtPath(child_prim_path):
-            return False
-        edit = Sdf.BatchNamespaceEdit()
-        edit.Add(child_prim_path, Sdf.Path())  # empty path = delete
-        if not root_layer.Apply(edit):
-            return False
-        root_layer.Save()
-        return True
+        child_path = self.children_metadata_dir / f"{name}.usda"
+        return _remove_child_sublayer(self, name, child_path)
 
     def get_immediate_children(self) -> list[dict]:
         """Return immediate child prims of this collection on the project stage.
 
         Each item is a dict with keys: name, type ('Collection' or 'Asset'),
-        is_collection (True for Collection, False for Asset).
+        is_collection (True for Collection, False for Asset). For the project
+        (no prim), uses the stage's root-level prims (from sublayers).
 
         Returns:
             List of dicts suitable for use in the Assets panel grid.
@@ -159,20 +191,26 @@ class Collection(Asset):
         stage = self.project.stage
         if stage is None:
             return []
-        prim = stage.GetPrimAtPath(self.prim_path)
-        if not prim.IsValid():
-            return []
+        if self.parent is None:
+            prim = stage.GetPseudoRoot()
+        else:
+            prim = stage.GetPrimAtPath(self.prim_path)
+            if not prim.IsValid():
+                return []
         result = []
         for child in prim.GetChildren():
             name = child.GetName()
             kind = Usd.ModelAPI(child).GetKind()
             typ = 'Collection' if kind == Kind.Tokens.group else 'Asset'
+            custom = child.GetCustomData() if hasattr(child, 'GetCustomData') else {}
+            if not custom:
+                custom = {}
             result.append({
                 'name': name,
-                'type': typ,
+                'type': custom.get('asset_type', typ),
                 'is_collection': typ == 'Collection',
-                'description': '',
-                'title': '',
+                'description': (custom.get('description') or '') if isinstance(custom.get('description'), str) else '',
+                'title': (custom.get('title') or '') if isinstance(custom.get('title'), str) else '',
             })
         return result
 
@@ -181,20 +219,42 @@ class Collection(Asset):
             yield Asset._from_prim(prim)
 
 
-def _add_child_prim_with_reference(
-    parent: Collection, name: str, child_path: Path
-) -> None:
-    """Add a child prim on parent's layer with reference to child_path.
+def _add_child_sublayer(parent: Collection, name: str, child_path: Path) -> None:
+    """Add the child's USDA as a sublayer on the parent's root layer."""
+    parent_path = parent.metadata_path.resolve()
+    parent_dir = parent_path.parent
+    rel = os.path.relpath(str(child_path.resolve()), str(parent_dir))
+    rel = rel.replace("\\", "/")
+    layer = Sdf.Layer.FindOrOpen(str(parent_path))
+    if layer is None:
+        raise RuntimeError(f"Parent layer not found: {parent_path}")
+    sub_paths = list(layer.subLayerPaths)
+    if rel not in sub_paths:
+        sub_paths.append(rel)
+        layer.subLayerPaths = sub_paths
+    layer.Save()
+    proj = parent.project
+    if hasattr(proj, "_stage"):
+        proj._stage = None
 
-    Path on the layer is /RootPrimName/name. Root prim name is parent.prim_name
-    for Project (USD identifier), or parent.name for Collection/Asset.
-    """
-    parent_dir = parent.metadata_path.resolve().parent
-    ref_path = os.path.relpath(str(child_path.resolve()), str(parent_dir))
-    stage = Usd.Stage.Open(str(parent.metadata_path))
-    stage.SetEditTarget(stage.GetRootLayer())
-    root_prim_name = getattr(parent, "prim_name", None) or parent.name
-    child_prim_path = Sdf.Path("/" + root_prim_name + "/" + name)
-    prim = stage.DefinePrim(child_prim_path, "Scope")
-    prim.GetReferences().AddReference(ref_path)
-    stage.GetRootLayer().Save()
+
+def _remove_child_sublayer(parent: Collection, name: str, child_path: Path) -> bool:
+    """Remove the child's USDA from the parent's subLayerPaths. Returns True if removed."""
+    parent_path = parent.metadata_path.resolve()
+    parent_dir = parent_path.parent
+    rel = os.path.relpath(str(child_path.resolve()), str(parent_dir))
+    rel = rel.replace("\\", "/")
+    layer = Sdf.Layer.FindOrOpen(str(parent_path))
+    if layer is None:
+        return False
+    sub_paths = list(layer.subLayerPaths)
+    try:
+        sub_paths.remove(rel)
+    except ValueError:
+        return False
+    layer.subLayerPaths = sub_paths
+    layer.Save()
+    proj = parent.project
+    if hasattr(proj, "_stage"):
+        proj._stage = None
+    return True

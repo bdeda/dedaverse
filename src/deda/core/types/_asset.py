@@ -52,11 +52,13 @@ class Asset(Entity):
     def prim(self):
         """Usd.Prim for this asset on the project stage.
 
-        The prim may be created later. If the prim is not valid (e.g. stage
-        reloaded), it is re-acquired from the project stage.
+        Re-acquires the prim from the project stage whenever the current prim
+        is not valid (e.g. expired after a reload). Returns only a valid prim
+        or an empty invalid Usd.Prim(); never returns an expired prim.
 
         Returns:
-            Usd.Prim at this asset's prim_path; may be invalid if not yet created.
+            Usd.Prim at this asset's prim_path if valid; otherwise Usd.Prim()
+            (invalid, so callers can check IsValid()).
         """
         proj = self.project
         if not hasattr(proj, 'stage'):
@@ -67,8 +69,9 @@ class Asset(Entity):
         path = Sdf.Path(self.prim_path)
         prim = stage.GetPrimAtPath(path)
         if not prim.IsValid():
-            prim = stage.GetPrimAtPath(path)
-        return prim
+            stage = proj.stage
+            prim = stage.GetPrimAtPath(path) if stage else Usd.Prim()
+        return prim if prim.IsValid() else Usd.Prim()
 
     @property
     def children_metadata_dir(self) -> Path:
@@ -78,10 +81,6 @@ class Asset(Entity):
         For an asset under collection: .dedaverse/collection_name/asset_name.
         """
         return self.parent.children_metadata_dir / self.name
-
-    @property
-    def metadata(self):
-        return  # TODO
 
     @property
     def metadata_dir(self) -> Path:

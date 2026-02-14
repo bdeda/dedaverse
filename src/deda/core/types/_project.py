@@ -19,7 +19,7 @@
 
 from pathlib import Path
 
-from pxr import Kind, Sdf, Tf, Usd
+from pxr import Sdf, Tf, Usd
 
 from deda.core import LayeredConfig
 from deda.core._config import _sanitize_prim_name
@@ -29,13 +29,44 @@ from ._entity import Entity
 
 __all__ = ['Project']
 
+# Registry of Project instances by (resolved_rootdir, prim_name) so the same project returns the same instance.
+_project_registry: dict[tuple[Path, str], 'Project'] = {}
+
 
 class Project(Collection):
     """Root entity representing a Dedaverse project.
 
     A Project is the top-level Collection that contains all assets, sequences,
     and shots. Has a rootdir that points to the project directory on disk.
+    The same project (rootdir + prim_name) always returns the same instance;
+    the Usd.Stage is stored on the project and reused.
     """
+
+    def __new__(cls, name=None, rootdir=None, parent=None, prim_name=None):
+        """Return the existing Project instance for this (rootdir, prim_name) if one exists."""
+        if name is None and rootdir is None:
+            config = LayeredConfig.instance().current_project
+            if config is None:
+                return super().__new__(cls)
+            root = Path(config.rootdir).resolve()
+            pname = getattr(config, 'prim_name', None) or _sanitize_prim_name(config.name)
+        else:
+            if parent is not None or name is None or rootdir is None:
+                return super().__new__(cls)
+            if not isinstance(rootdir, (str, Path)):
+                return super().__new__(cls)
+            root = Path(rootdir).resolve()
+            pname = (
+                prim_name
+                if prim_name is not None
+                else _sanitize_prim_name(name) if name else 'Project'
+            )
+        key = (root, pname)
+        existing = _project_registry.get(key)
+        if existing is not None:
+            existing._reused_from_registry = True
+            return existing
+        return super().__new__(cls)
 
     def __init__(
         self,
@@ -61,6 +92,10 @@ class Project(Collection):
             ValueError: If parent is not None, or prim_name is invalid when provided.
             RuntimeError: If no arguments and no current project is set.
         """
+        if getattr(self, '_reused_from_registry', False):
+            del self._reused_from_registry
+            return
+        self._stage = None
         if name is None and rootdir is None:
             config = LayeredConfig.instance().current_project
             if config is None:
@@ -68,6 +103,7 @@ class Project(Collection):
             Entity.__init__(self, config.name, None)
             self._rootdir = Path(config.rootdir)
             self._prim_name = getattr(config, 'prim_name', None) or _sanitize_prim_name(config.name)
+            _project_registry[(self._rootdir.resolve(), self._prim_name)] = self
             return
         if parent is not None:
             raise ValueError("Project parent must be None.")
@@ -79,6 +115,7 @@ class Project(Collection):
             self._prim_name = prim_name
         else:
             self._prim_name = _sanitize_prim_name(name) if name else "Project"
+        _project_registry[(self._rootdir.resolve(), self._prim_name)] = self
 
     @property
     def layer(self):
@@ -122,7 +159,7 @@ class Project(Collection):
 
     @property
     def prim_path(self) -> str:
-        """USD prim path for the project root prim (/{prim_name})."""
+        """USD prim path; the project file has no prim, so this is for compatibility only."""
         return f'/{self._prim_name}'
 
     @property
@@ -133,31 +170,34 @@ class Project(Collection):
     def asset_directory_for_prim_path(self, prim_path: str) -> Path:
         """Return the directory under project root that mirrors the prim path.
 
-        The path is the prim path with the top-level (project) prim removed,
-        e.g. /KCRC/Foobar -> rootdir/Foobar, /KCRC/Characters/Heroes -> rootdir/Characters/Heroes.
+        The project stage has no root prim; top-level prims are direct children
+        (e.g. /Assets, /Assets/Monsters). So /Assets -> rootdir/Assets.
 
         Args:
-            prim_path: USD prim path (e.g. /{prim_name}/Foobar).
+            prim_path: USD prim path (e.g. /Assets, /Assets/Monsters).
 
         Returns:
             Path under project rootdir for this asset/collection.
         """
         segments = prim_path.strip("/").split("/")
-        if len(segments) <= 1:
+        if not segments:
             return self._rootdir
-        return self._rootdir.joinpath(*segments[1:])
+        return self._rootdir.joinpath(*segments)
 
     @property
     def stage(self):
-        """Usd.Stage opened from the project's USDA metadata file.
+        """Usd.Stage for the project's USDA metadata file, cached on the project.
 
-        If the USDA file does not exist, it is created (find_or_create semantics)
+        Opens the stage on first access and reuses the same instance. If the
+        USDA file does not exist, it is created (find_or_create semantics)
         for backwards compatibility with projects that predate the asset metadata.
         """
-        path = self.metadata_path
-        if not path.is_file():
-            _create_project_stage_usda(self.rootdir, self.prim_name)
-        return Usd.Stage.Open(str(path))
+        if self._stage is None:
+            path = self.metadata_path
+            if not path.is_file():
+                _create_project_stage_usda(self.rootdir, self.prim_name)
+            self._stage = Usd.Stage.Open(str(path))
+        return self._stage
 
     @classmethod
     def create(
@@ -200,6 +240,7 @@ class Project(Collection):
                 f"Project metadata already exists: {usda_path}. Use force=True to overwrite."
             )
         if usda_path.is_file() and force:
+            _project_registry.pop((root, pname), None)
             usda_path.unlink()
         _create_project_stage_usda(root, pname)
         return cls(name, rootdir, prim_name=pname)
@@ -245,15 +286,14 @@ class Project(Collection):
 
 
 def _create_project_stage_usda(project_root: Path, prim_name: str) -> Path:
-    """Create a new USDA stage at project_root/.dedaverse/{prim_name}.usda.
+    """Create the project USDA file with no prims; child assets are added as sublayers.
 
-    Ensures .dedaverse exists, creates the stage with a root prim at /{prim_name},
-    sets Kind to group (same as Collection), and saves it.
-    prim_name must be a valid USD prim identifier.
+    The project file is unique: it has no root prim. The project is the root of
+    all prims (composed from sublayers). prim_name is only used for the filename.
 
     Args:
         project_root: Project root directory on disk.
-        prim_name: Valid USD prim name (used for filename and root prim path).
+        prim_name: Used for the USDA filename ({prim_name}.usda).
 
     Returns:
         Path to the created USDA file.
@@ -263,9 +303,5 @@ def _create_project_stage_usda(project_root: Path, prim_name: str) -> Path:
     dedaverse_dir.mkdir(parents=True, exist_ok=True)
     usda_path = dedaverse_dir / f'{prim_name}.usda'
     stage = Usd.Stage.CreateNew(str(usda_path))
-    prim_path = Sdf.Path('/' + prim_name)
-    prim = stage.DefinePrim(prim_path, 'Scope')
-    stage.SetDefaultPrim(prim)
-    Usd.ModelAPI(prim).SetKind(Kind.Tokens.group)
     stage.GetRootLayer().Save()
     return usda_path
