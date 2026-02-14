@@ -313,6 +313,7 @@ class Panel(QtWidgets.QFrame):
     minimized_changed = QtCore.Signal(str, bool)
     navigate_up_clicked = QtCore.Signal()
     asset_dropped_on_tile = QtCore.Signal(object, object)  # (asset_data, target_tile_item_data)
+    asset_configure_requested = QtCore.Signal(int)  # item_index when user chooses Configure on an asset tile
     file_dropped = QtCore.Signal(object)  # list of file path strings from external drag (e.g. file manager)
 
     def __init__(self, type_name, name,
@@ -547,14 +548,20 @@ class Panel(QtWidgets.QFrame):
                 item_data = self._items[idx]
                 is_writable = item_data.get('is_writable', True)  # Default True for non-app items
                 is_apps_or_services = self.objectName() in ('Apps', 'Services')
-                # Configure: always show for Apps/Services; otherwise only when writable
-                show_configure = is_apps_or_services and is_writable
+                is_assets = self.objectName() == 'Assets'
+                # Configure: for Apps/Services use ConfigureItemDialog; for Assets use Configure (metadata dialog)
+                show_configure = (is_apps_or_services and is_writable) or is_assets
                 if show_configure:
                     config_icon_path = Path(__file__).parent / 'icons' / 'gear_icon_32.png'
                     config_icon = QtGui.QIcon(str(config_icon_path)) if config_icon_path.is_file() else QtGui.QIcon()
-                    menu.addAction(config_icon, 'Configure...').triggered.connect(
-                        lambda checked=False, i=idx: self._open_configure_dialog(i)
-                    )
+                    if is_assets:
+                        menu.addAction(config_icon, 'Configure').triggered.connect(
+                            lambda checked=False, i=idx: self.asset_configure_requested.emit(i)
+                        )
+                    else:
+                        menu.addAction(config_icon, 'Configure...').triggered.connect(
+                            lambda checked=False, i=idx: self._open_configure_dialog(i)
+                        )
                 if is_writable:
                     remove_action = menu.addAction('Remove')
                     remove_action.triggered.connect(lambda checked=False, i=idx: self._remove_item_at(i))

@@ -435,6 +435,7 @@ def load_project(self, proj_name: str) -> ProjectConfig | None:
 
 ### 16. References
 
+- **[docs/ASSET_METADATA_DESIGN.md](docs/ASSET_METADATA_DESIGN.md)** - Directory structure and USD metadata file layout for `.dedaverse` and asset content folders; keep agentic and manual code changes aligned with this design
 - **BRANCHING_STRATEGY.md** - Git branching workflow; use this when creating branches and PRs
 - **IMPROVEMENTS.md** - List of known issues and improvements
 - **README.md** - Project overview and getting started
@@ -475,13 +476,14 @@ PluginRegistry().register(MyPlugin('Name', version='1.0.0'))
 When asked to modify or add code:
 
 1. **Read the relevant files** - Understand the existing code structure
-2. **Check BRANCHING_STRATEGY.md** - When creating branches or PRs, follow the documented workflow (feature/bugfix → dev → main)
-3. **Check IMPROVEMENTS.md** - See if your change addresses a known issue
-4. **Follow patterns** - Match existing code style and architecture
-5. **Add type hints** - Always include type information
-6. **Handle errors** - Use specific exceptions and proper logging
-7. **Test imports** - Ensure new code can be imported
-8. **Update docs** - Add/update docstrings as needed
+2. **Check [docs/ASSET_METADATA_DESIGN.md](docs/ASSET_METADATA_DESIGN.md)** - When changing asset hierarchy, `.dedaverse` layout, USDA structure, or asset content paths
+3. **Check BRANCHING_STRATEGY.md** - When creating branches or PRs, follow the documented workflow (feature/bugfix → dev → main)
+4. **Check IMPROVEMENTS.md** - See if your change addresses a known issue
+5. **Follow patterns** - Match existing code style and architecture
+6. **Add type hints** - Always include type information
+7. **Handle errors** - Use specific exceptions and proper logging
+8. **Test imports** - Ensure new code can be imported
+9. **Update docs** - Add/update docstrings as needed
 
 ## 📝 Notes
 
