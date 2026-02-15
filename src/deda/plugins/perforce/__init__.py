@@ -19,11 +19,9 @@
 The builtin Asset Manager plugin connects to perforce and uses p4python to handle file operations. 
 
 """
-import os
 import logging
 from contextlib import contextmanager
 from pathlib import Path
-import P4
 
 import deda.core
 
@@ -39,6 +37,13 @@ def P4Connection():
     """The p4 plugin uses env variables to connect to Perforce. 
 
     """
+    try:
+        import P4
+    except ModuleNotFoundError as err:
+        raise ModuleNotFoundError(
+            'The p4python package is required to use the Perforce plugin.'
+        ) from err
+
     p4c = P4.P4()
     try:
         p4c.connect()
