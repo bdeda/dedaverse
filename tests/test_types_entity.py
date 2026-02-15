@@ -32,10 +32,10 @@ class TestEntity(unittest.TestCase):
         self.assertEqual(entity._name, 'TestEntity')
         self.assertIs(entity.parent, parent)
 
-    def test_entity_from_path_not_implemented(self):
-        """Test that Entity.from_path() raises NotImplementedError."""
-        with self.assertRaises(NotImplementedError):
-            Entity.from_path('/path/to/entity')
+    def test_entity_from_path_invalid_returns_none(self):
+        """Entity.from_path() with nonexistent or invalid path returns None."""
+        self.assertIsNone(Entity.from_path('/nonexistent/path/to/entity'))
+        self.assertIsNone(Entity.from_path('/path/to/entity'))
 
 
 if __name__ == '__main__':

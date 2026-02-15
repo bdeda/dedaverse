@@ -126,10 +126,9 @@ class TestEntityAPIForSubclasses(unittest.TestCase):
                 obj = instances[cls]["obj"]
                 _ = obj.metadata_path  # May be None
 
-    def test_entity_from_path_raises_not_implemented(self):
-        """Entity.from_path raises NotImplementedError."""
-        with self.assertRaises(NotImplementedError):
-            Entity.from_path('/some/path')
+    def test_entity_from_path_invalid_returns_none(self):
+        """Entity.from_path with nonexistent or invalid path returns None."""
+        self.assertIsNone(Entity.from_path('/some/path'))
 
 
 class TestEntityInheritanceChain(unittest.TestCase):

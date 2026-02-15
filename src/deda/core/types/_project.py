@@ -19,7 +19,7 @@
 
 from pathlib import Path
 
-from pxr import Sdf, Tf, Usd, Vt
+from pxr import Kind, Sdf, Tf, Usd, Vt
 
 from deda.core import LayeredConfig
 from deda.core._config import _sanitize_prim_name
@@ -389,6 +389,10 @@ def _create_project_stage_usda(project_root: Path, prim_name: str) -> Path:
     dedaverse_dir.mkdir(parents=True, exist_ok=True)
     usda_path = dedaverse_dir / f'{prim_name}.usda'
     stage = Usd.Stage.CreateNew(str(usda_path))
+    root_path = Sdf.Path('/' + prim_name)
+    root_prim = stage.DefinePrim(root_path, 'Scope')
+    Usd.ModelAPI(root_prim).SetKind(Kind.Tokens.group)
+    stage.SetDefaultPrim(root_prim)
     stage.GetRootLayer().Save()
     user_settings_path = dedaverse_dir / 'user_settings.usda'
     if not user_settings_path.exists():

@@ -37,6 +37,10 @@ log = logging.getLogger(__name__)
 
 _Segment = Tuple[Tuple[float, float], Tuple[float, float]]
 
+# Broadcast safe zones: fraction of frame from edge (inset). Action-safe 5%, title-safe 10%.
+_ACTION_SAFE_INSET = 0.05  # 90% of frame
+_TITLE_SAFE_INSET = 0.10   # 80% of frame
+
 
 class CameraReticleGlOverlay:
     """OpenGL helper that draws a camera reticle overlay in screen space.
@@ -137,6 +141,38 @@ class CameraReticleGlOverlay:
             return
         self._color = normalized
 
+    def _safe_zone_segments(
+        self, viewport_width: float, viewport_height: float
+    ) -> List[_Segment]:
+        """Return line segments for action-safe and title-safe rectangles (broadcast safe zones)."""
+        if viewport_width <= 0 or viewport_height <= 0:
+            return []
+        segments: List[_Segment] = []
+
+        def rect_segments(left: float, bottom: float, right: float, top: float) -> List[_Segment]:
+            return [
+                ((left, bottom), (right, bottom)),
+                ((right, bottom), (right, top)),
+                ((right, top), (left, top)),
+                ((left, top), (left, bottom)),
+            ]
+
+        # Action-safe: 90% of frame (inset 5% each side)
+        a_left = viewport_width * _ACTION_SAFE_INSET
+        a_right = viewport_width * (1.0 - _ACTION_SAFE_INSET)
+        a_bottom = viewport_height * _ACTION_SAFE_INSET
+        a_top = viewport_height * (1.0 - _ACTION_SAFE_INSET)
+        segments.extend(rect_segments(a_left, a_bottom, a_right, a_top))
+
+        # Title-safe: 80% of frame (inset 10% each side)
+        t_left = viewport_width * _TITLE_SAFE_INSET
+        t_right = viewport_width * (1.0 - _TITLE_SAFE_INSET)
+        t_bottom = viewport_height * _TITLE_SAFE_INSET
+        t_top = viewport_height * (1.0 - _TITLE_SAFE_INSET)
+        segments.extend(rect_segments(t_left, t_bottom, t_right, t_top))
+
+        return segments
+
     def build_segments(self, viewport_width: float, viewport_height: float) -> List[_Segment]:
         """Return reticle line segments in pixel coordinates."""
         if viewport_width <= 0 or viewport_height <= 0:
@@ -153,9 +189,7 @@ class CameraReticleGlOverlay:
                     ((center_x, center_y - half_size), (center_x, center_y + half_size)),
                 ]
             )
-            return segments
-
-        if self._style == "frame":
+        elif self._style == "frame":
             third_w = viewport_width / 3.0
             third_h = viewport_height / 3.0
             segments.extend(
@@ -168,9 +202,7 @@ class CameraReticleGlOverlay:
                     ((center_x, center_y - half_size), (center_x, center_y + half_size)),
                 ]
             )
-            return segments
-
-        if self._style == "grid":
+        elif self._style == "grid":
             spacing = self._grid_spacing_px
             x = spacing
             while x < viewport_width:
@@ -186,8 +218,8 @@ class CameraReticleGlOverlay:
                     ((center_x, center_y - half_size), (center_x, center_y + half_size)),
                 ]
             )
-            return segments
 
+        segments.extend(self._safe_zone_segments(viewport_width, viewport_height))
         return segments
 
     def build_ndc_segments(
