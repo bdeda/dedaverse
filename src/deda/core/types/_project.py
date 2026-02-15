@@ -19,7 +19,7 @@
 
 from pathlib import Path
 
-from pxr import Sdf, Tf, Usd
+from pxr import Sdf, Tf, Usd, Vt
 
 from deda.core import LayeredConfig
 from deda.core._config import _sanitize_prim_name
@@ -153,6 +153,15 @@ class Project(Collection):
         return self.metadata_dir / f'{self._prim_name}.usda'
 
     @property
+    def user_settings_path(self) -> Path:
+        """Path to the project's user_settings.usda (session layer for the project stage).
+
+        Returns:
+            Path to {project_root}/.dedaverse/user_settings.usda.
+        """
+        return self.metadata_dir / 'user_settings.usda'
+
+    @property
     def prim_name(self) -> str:
         """USD prim name (valid identifier) used in metadata and for the root prim."""
         return self._prim_name
@@ -191,13 +200,88 @@ class Project(Collection):
         Opens the stage on first access and reuses the same instance. If the
         USDA file does not exist, it is created (find_or_create semantics)
         for backwards compatibility with projects that predate the asset metadata.
+        user_settings.usda is loaded as the session layer for user overrides and
+        user-facing metadata; call save_session_layer() after editing it.
         """
         if self._stage is None:
             path = self.metadata_path
             if not path.is_file():
                 _create_project_stage_usda(self.rootdir, self.prim_name)
-            self._stage = Usd.Stage.Open(str(path))
+            root_layer = Sdf.Layer.FindOrOpen(str(path))
+            us_path = self.user_settings_path
+            if us_path.exists():
+                session_layer = Sdf.Layer.FindOrOpen(str(us_path))
+            else:
+                us_path.parent.mkdir(parents=True, exist_ok=True)
+                session_layer = Sdf.Layer.CreateNew(str(us_path))
+                session_layer.Save()
+            if root_layer is not None and session_layer is not None:
+                self._stage = Usd.Stage.Open(root_layer, session_layer)
+            else:
+                self._stage = Usd.Stage.Open(str(path))
         return self._stage
+
+    def save_session_layer(self) -> None:
+        """Save the project stage's session layer (user_settings.usda) if it is file-backed and dirty.
+
+        Call this after editing the session layer (e.g. applying user overrides or
+        user-facing metadata) so changes persist to disk.
+        """
+        if self._stage is None:
+            return
+        session = self._stage.GetSessionLayer()
+        if session is None:
+            return
+        real = getattr(session, 'realPath', None) or getattr(session, 'identifier', None)
+        if real and Path(real).resolve() == self.user_settings_path.resolve():
+            if session.dirty:
+                session.Save()
+
+    def get_collection_sort_order(self, prim_path: str) -> list[str] | None:
+        """Return the user's sort order for a collection's children from the session layer (user_settings).
+
+        Args:
+            prim_path: USD prim path of the collection (e.g. /Sequences).
+
+        Returns:
+            List of child names in order, or None if no sort_order is stored.
+        """
+        stage = self.stage
+        if stage is None:
+            return None
+        prim = stage.GetPrimAtPath(Sdf.Path(prim_path))
+        if not prim.IsValid():
+            return None
+        custom = prim.GetCustomData()
+        if not custom:
+            return None
+        order = custom.get('sort_order')
+        if order is None:
+            return None
+        try:
+            return list(order)
+        except (TypeError, ValueError):
+            return None
+
+    def set_collection_sort_order(self, prim_path: str, names: list[str]) -> None:
+        """Store the sort order for a collection's children in the session layer (user_settings).
+
+        Args:
+            prim_path: USD prim path of the collection (e.g. /Sequences).
+            names: List of child names in the desired order.
+        """
+        stage = self.stage
+        if stage is None:
+            return
+        session = stage.GetSessionLayer()
+        if session is None:
+            return
+        path = Sdf.Path(prim_path)
+        stage.SetEditTarget(Usd.EditTarget(session))
+        prim = stage.OverridePrim(path)
+        if prim.IsValid():
+            prim.SetCustomDataByKey('sort_order', Vt.StringArray(names))
+        self.save_session_layer()
 
     @classmethod
     def create(
@@ -207,10 +291,11 @@ class Project(Collection):
         prim_name: str | None = None,
         force: bool = False,
     ) -> 'Project':
-        """Create the USDA stage for the project and return a Project instance.
+        """Create the USDA stage and user_settings.usda for the project and return a Project instance.
 
         The stage is saved as {project_root}/.dedaverse/{prim_name}.usda with
-        a root prim at /{prim_name}. prim_name must be a valid USD identifier.
+        a root prim at /{prim_name}. user_settings.usda is created in the same
+        directory and used as the stage session layer. prim_name must be a valid USD identifier.
 
         Args:
             name: Project display name.
@@ -252,10 +337,10 @@ class Project(Collection):
         rootdir: str | Path,
         prim_name: str | None = None,
     ) -> 'Project':
-        """Return a Project instance, creating the USDA stage only if it does not exist.
+        """Return a Project instance, creating the USDA stage and user_settings.usda only if missing.
 
         If {project_root}/.dedaverse/{prim_name}.usda exists, it is not
-        overwritten. Otherwise the stage is created with a root prim at /{prim_name}.
+        overwritten. Otherwise the stage and user_settings.usda are created.
         prim_name must be a valid USD identifier.
 
         Args:
@@ -286,17 +371,18 @@ class Project(Collection):
 
 
 def _create_project_stage_usda(project_root: Path, prim_name: str) -> Path:
-    """Create the project USDA file with no prims; child assets are added as sublayers.
+    """Create the project USDA file and user_settings.usda; child assets are added as sublayers.
 
     The project file is unique: it has no root prim. The project is the root of
     all prims (composed from sublayers). prim_name is only used for the filename.
+    user_settings.usda is created beside it and will be used as the stage session layer.
 
     Args:
         project_root: Project root directory on disk.
         prim_name: Used for the USDA filename ({prim_name}.usda).
 
     Returns:
-        Path to the created USDA file.
+        Path to the created project USDA file.
     """
     project_root = Path(project_root)
     dedaverse_dir = project_root / '.dedaverse'
@@ -304,4 +390,8 @@ def _create_project_stage_usda(project_root: Path, prim_name: str) -> Path:
     usda_path = dedaverse_dir / f'{prim_name}.usda'
     stage = Usd.Stage.CreateNew(str(usda_path))
     stage.GetRootLayer().Save()
+    user_settings_path = dedaverse_dir / 'user_settings.usda'
+    if not user_settings_path.exists():
+        session_layer = Sdf.Layer.CreateNew(str(user_settings_path))
+        session_layer.Save()
     return usda_path

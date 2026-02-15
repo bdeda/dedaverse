@@ -83,7 +83,7 @@ class AddItemDialog(QtWidgets.QDialog):
     
     item_created = QtCore.Signal(object)
     
-    def __init__(self, type_name, parent=None, initial_name=None):
+    def __init__(self, type_name, parent=None, initial_name=None, initial_asset_type=None):
         super().__init__(parent=parent)
 
         self.setWindowTitle(f'Add {type_name}')
@@ -130,12 +130,16 @@ class AddItemDialog(QtWidgets.QDialog):
             items = ['Work', 'Review', 'Notify']        
         self._types_cb.addItems(items)
 
-        # Restore last selected type from settings
         self._settings = QtCore.QSettings('DedaFX', 'Dedaverse')
-        last_type = self._settings.value(f'AddItemDialog/{type_name}/lastType', '', type=str)
-        idx = self._types_cb.findText(last_type)
-        if idx >= 0:
-            self._types_cb.setCurrentIndex(idx)
+        if type_name == 'Asset' and initial_asset_type:
+            idx = self._types_cb.findText(initial_asset_type)
+            if idx >= 0:
+                self._types_cb.setCurrentIndex(idx)
+        else:
+            last_type = self._settings.value(f'AddItemDialog/{type_name}/lastType', '', type=str)
+            idx = self._types_cb.findText(last_type)
+            if idx >= 0:
+                self._types_cb.setCurrentIndex(idx)
         self._types_cb.currentTextChanged.connect(self._on_type_changed)
 
         # Set initial icon (for Asset, use default icon for current type)

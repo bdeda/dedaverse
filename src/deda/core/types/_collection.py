@@ -100,8 +100,9 @@ class Collection(Asset):
     def add_asset(self, name: str) -> Asset:
         """Add a new asset as a child of this collection.
 
-        Validates the name, creates the asset's USDA file with the full prim
-        hierarchy (parent chain + name), sets Kind to Model and assetInfo.
+        Validates the name, creates the asset's USDA file with a prim for every
+        level of the hierarchy (from root scope down to this child), sets Kind
+        to Model and assetInfo.
         Adds the child's USDA as a sublayer on this collection's layer.
 
         Args:
@@ -123,7 +124,7 @@ class Collection(Asset):
         if self.parent is None:
             path_segments = [name]
         else:
-            path_segments = [self.name, name]  # include parent collection as root prim
+            path_segments = self.prim_path.strip("/").split("/") + [name]
         _create_entity_usda(
             child_path,
             path_segments,
@@ -136,8 +137,9 @@ class Collection(Asset):
     def add_collection(self, name: str) -> "Collection":
         """Add a new collection as a child of this collection.
 
-        Validates the name, creates the collection's USDA file with the full
-        prim hierarchy (parent chain + name), sets Kind to Group. Adds the
+        Validates the name, creates the collection's USDA file with a prim for
+        every level of the hierarchy (from root scope down to this child), sets
+        Kind to Group. Adds the
         child's USDA as a sublayer on this collection's layer.
 
         Args:
@@ -159,7 +161,7 @@ class Collection(Asset):
         if self.parent is None:
             path_segments = [name]
         else:
-            path_segments = [self.name, name]  # include parent collection as root prim
+            path_segments = self.prim_path.strip("/").split("/") + [name]
         _create_entity_usda(child_path, path_segments, Kind.Tokens.group)
         _add_child_sublayer(self, name, child_path)
         return Collection(name, self)
@@ -181,9 +183,10 @@ class Collection(Asset):
     def get_immediate_children(self) -> list[dict]:
         """Return immediate child prims of this collection on the project stage.
 
-        Each item is a dict with keys: name, type ('Collection' or 'Asset'),
-        is_collection (True for Collection, False for Asset). For the project
-        (no prim), uses the stage's root-level prims (from sublayers).
+        Only direct children (one level below this scope) are returned, not
+        descendants. Each item is a dict with keys: name, type ('Collection' or
+        'Asset'), is_collection (True for Collection, False for Asset). For the
+        project (no prim), uses the stage's root-level prims (from sublayers).
 
         Returns:
             List of dicts suitable for use in the Assets panel grid.
@@ -197,8 +200,11 @@ class Collection(Asset):
             prim = stage.GetPrimAtPath(self.prim_path)
             if not prim.IsValid():
                 return []
+        scope_path = prim.GetPath()
         result = []
         for child in prim.GetChildren():
+            if child.GetPath().GetParentPath() != scope_path:
+                continue
             name = child.GetName()
             kind = Usd.ModelAPI(child).GetKind()
             typ = 'Collection' if kind == Kind.Tokens.group else 'Asset'
