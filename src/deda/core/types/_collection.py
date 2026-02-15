@@ -131,7 +131,7 @@ class Collection(Asset):
             Kind.Tokens.model,
             asset_identifier=_asset_id_string(self, name),
         )
-        _add_child_sublayer(self, name, child_path)
+        _add_child_reference(self, name, child_path)
         return Asset(name, self)
 
     def add_collection(self, name: str) -> "Collection":
@@ -163,11 +163,11 @@ class Collection(Asset):
         else:
             path_segments = self.prim_path.strip("/").split("/") + [name]
         _create_entity_usda(child_path, path_segments, Kind.Tokens.group)
-        _add_child_sublayer(self, name, child_path)
+        _add_child_reference(self, name, child_path)
         return Collection(name, self)
 
     def remove_child(self, name: str) -> bool:
-        """Remove a child from this collection's USDA metadata by removing its sublayer.
+        """Remove a child from this collection's USDA metadata by removing its prim.
 
         Does not delete the child's USDA file on disk.
 
@@ -175,10 +175,10 @@ class Collection(Asset):
             name: Name of the child asset or collection to remove.
 
         Returns:
-            True if the sublayer was found and removed, False otherwise.
+            True if the child prim was found and removed, False otherwise.
         """
         child_path = self.children_metadata_dir / f"{name}.usda"
-        return _remove_child_sublayer(self, name, child_path)
+        return _remove_child_reference(self, name, child_path)
 
     def get_immediate_children(self) -> list[dict]:
         """Return immediate child prims of this collection on the project stage.
@@ -186,7 +186,7 @@ class Collection(Asset):
         Only direct children (one level below this scope) are returned, not
         descendants. Each item is a dict with keys: name, type ('Collection' or
         'Asset'), is_collection (True for Collection, False for Asset). For the
-        project (no prim), uses the stage's root-level prims (from sublayers).
+        project, uses the default prim's children (child references).
 
         Returns:
             List of dicts suitable for use in the Assets panel grid.
@@ -195,7 +195,8 @@ class Collection(Asset):
         if stage is None:
             return []
         if self.parent is None:
-            prim = stage.GetPseudoRoot()
+            default_prim = stage.GetDefaultPrim()
+            prim = default_prim if default_prim.IsValid() else stage.GetPseudoRoot()
         else:
             prim = stage.GetPrimAtPath(self.prim_path)
             if not prim.IsValid():
@@ -225,8 +226,8 @@ class Collection(Asset):
             yield Asset._from_prim(prim)
 
 
-def _add_child_sublayer(parent: Collection, name: str, child_path: Path) -> None:
-    """Add the child's USDA as a sublayer on the parent's root layer."""
+def _add_child_reference(parent: Collection, name: str, child_path: Path) -> None:
+    """Add a child prim on the parent's layer that references the child's USDA file."""
     parent_path = parent.metadata_path.resolve()
     parent_dir = parent_path.parent
     rel = os.path.relpath(str(child_path.resolve()), str(parent_dir))
@@ -234,32 +235,29 @@ def _add_child_sublayer(parent: Collection, name: str, child_path: Path) -> None
     layer = Sdf.Layer.FindOrOpen(str(parent_path))
     if layer is None:
         raise RuntimeError(f"Parent layer not found: {parent_path}")
-    sub_paths = list(layer.subLayerPaths)
-    if rel not in sub_paths:
-        sub_paths.append(rel)
-        layer.subLayerPaths = sub_paths
-    layer.Save()
+    stage = Usd.Stage.Open(layer)
+    child_prim_path = parent.prim_path + "/" + name
+    child_prim = stage.DefinePrim(Sdf.Path(child_prim_path), "Scope")
+    child_prim.GetReferences().AddReference(rel)
+    stage.GetRootLayer().Save()
     proj = parent.project
     if hasattr(proj, "_stage"):
         proj._stage = None
 
 
-def _remove_child_sublayer(parent: Collection, name: str, child_path: Path) -> bool:
-    """Remove the child's USDA from the parent's subLayerPaths. Returns True if removed."""
+def _remove_child_reference(parent: Collection, name: str, child_path: Path) -> bool:
+    """Remove the child prim from the parent's layer. Returns True if removed."""
     parent_path = parent.metadata_path.resolve()
-    parent_dir = parent_path.parent
-    rel = os.path.relpath(str(child_path.resolve()), str(parent_dir))
-    rel = rel.replace("\\", "/")
     layer = Sdf.Layer.FindOrOpen(str(parent_path))
     if layer is None:
         return False
-    sub_paths = list(layer.subLayerPaths)
-    try:
-        sub_paths.remove(rel)
-    except ValueError:
+    stage = Usd.Stage.Open(layer)
+    child_prim_path = parent.prim_path + "/" + name
+    child_prim = stage.GetPrimAtPath(Sdf.Path(child_prim_path))
+    if not child_prim.IsValid():
         return False
-    layer.subLayerPaths = sub_paths
-    layer.Save()
+    stage.RemovePrim(child_prim_path)
+    stage.GetRootLayer().Save()
     proj = parent.project
     if hasattr(proj, "_stage"):
         proj._stage = None
