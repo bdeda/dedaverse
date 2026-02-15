@@ -47,7 +47,8 @@ jobs:
                       libxcb-xkb1 \
                       libglib2.0-0 \
                       libfontconfig1 \
-                      libdbus-1-3
+                      libdbus-1-3 \
+                      xvfb
 
             - name: Install Python dependencies
               run: |
@@ -72,10 +73,10 @@ jobs:
 
             - name: Run pytest with coverage
               env:
-                  DISPLAY: :99
                   QT_QPA_PLATFORM: offscreen
               run: |
-                  # Set up virtual display for headless PySide6
+                  # Start virtual framebuffer so Qt/PySide6 can clean up without aborting (exit 134)
+                  Xvfb :99 -screen 0 1024x768x24 &
                   export DISPLAY=:99
                   export QT_QPA_PLATFORM=offscreen
                   # Run tests with coverage
