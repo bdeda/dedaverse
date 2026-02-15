@@ -136,7 +136,13 @@ def _first_usd_file_in_directory(asset_dir: Path, asset_name: str) -> Path | Non
 
 from ._project_settings import ProjectSettingsDialog, StartProjectDialog
 from ._taskbar_icon import TaskbarIcon
-from ._dialogs import AddItemDialog, ConfigureAssetDialog, ConfigureItemDialog, CopyMoveUsdFilesDialog
+from ._dialogs import (
+    AddItemDialog,
+    ConfigureAssetDialog,
+    ConfigureItemDialog,
+    CopyMoveUsdFilesDialog,
+    _default_icon_path_for_asset_type,
+)
 from ._panel import ItemTile, PanelHeader, Panel
 #from deda.core.viewer import UsdViewWidget
 
@@ -373,6 +379,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 panel_obj.navigate_up_clicked.connect(self._on_assets_navigate_up)
                 panel_obj.file_dropped.connect(self._on_assets_panel_file_dropped)
                 panel_obj.item_removed.connect(self._on_asset_removed)
+                panel_obj.asset_order_changed.connect(self._on_assets_order_changed)
+                panel_obj.get_default_asset_type = self._get_default_asset_type_for_add
+                panel_obj.can_reorder_assets = lambda: (
+                    self._assets_view_container is not None and self._assets_view_container.parent is not None
+                )
             elif panel == 'Apps':
                 panel_obj.item_created.connect(self._on_app_created)
                 panel_obj.item_updated.connect(self._on_app_updated)
@@ -596,8 +607,18 @@ class MainWindow(QtWidgets.QMainWindow):
         except OSError as err:
             log.warning("Could not save Assets panel path to user config: %s", err)
 
+    def _get_default_asset_type_for_add(self) -> str | None:
+        """Return the default asset type for the Add Asset dialog based on the current scope (e.g. Sequence when under Sequences)."""
+        container = self._assets_view_container
+        if container is None:
+            return None
+        name = (container.name or '').strip().lower()
+        if name in ('sequences', 'seq'):
+            return 'Sequence'
+        return None
+
     def _load_assets_to_panel(self, assets_panel):
-        """Populate the Assets panel from the current view container (Project or Collection)."""
+        """Populate the Assets panel with only the immediate children of the selected scope (current view container)."""
         if not assets_panel:
             return
         container = self._assets_view_container
@@ -624,7 +645,23 @@ class MainWindow(QtWidgets.QMainWindow):
         icon_sequence = icons_dir / 'icon_sequence.png'
         icon_set = icons_dir / 'icon_set.png'
         icon_shot = icons_dir / 'icon_shot.png'
-        for child in container.get_immediate_children():
+        children = container.get_immediate_children()
+        default_sort_key = lambda c: (c.get('type', 'Asset'), (c.get('name') or '').lower())
+        if container.parent is not None:
+            sort_order = container.project.get_collection_sort_order(container.prim_path)
+            if sort_order:
+                by_name = {c['name']: c for c in children}
+                ordered = []
+                for name in sort_order:
+                    if name in by_name:
+                        ordered.append(by_name.pop(name))
+                ordered.extend(sorted(by_name.values(), key=default_sort_key))
+                children = ordered
+            else:
+                children.sort(key=default_sort_key)
+        else:
+            children.sort(key=default_sort_key)
+        for child in children:
             is_collection = child.get('is_collection', False)
             child_type = child.get('type', 'Asset')
             if child_type == 'Actor' and icon_actor.is_file():
@@ -711,11 +748,33 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.exec()
 
     def _on_asset_metadata_updated(self, item_index: int, updated_data: dict) -> None:
-        """Update the Assets panel item after Configure Asset dialog save."""
+        """Update the Assets panel item after Configure Asset dialog save; refresh view (preserve custom order if set)."""
         assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
         if assets_panel and 0 <= item_index < len(assets_panel._items):
+            asset_type = updated_data.get('type', 'Asset')
+            icon_path = _default_icon_path_for_asset_type(asset_type)
+            if icon_path is not None:
+                updated_data['icon'] = str(icon_path)
+            else:
+                updated_data.pop('icon', None)
             assets_panel._items[item_index] = updated_data
+            container = self._assets_view_container
+            has_custom_order = (
+                container is not None
+                and container.parent is not None
+                and container.project.get_collection_sort_order(container.prim_path)
+            )
+            if not has_custom_order:
+                assets_panel._items.sort(key=lambda i: (i.get('type', 'Asset'), (i.get('name') or '').lower()))
             assets_panel._relayout_tiles()
+
+    def _on_assets_order_changed(self, names: list) -> None:
+        """Persist the new asset order to the collection's sort_order in user_settings (session layer)."""
+        container = self._assets_view_container
+        if container is None or container.parent is None:
+            return
+        proj = container.project
+        proj.set_collection_sort_order(container.prim_path, names)
 
     def _on_asset_removed(self, item_data):
         """Remove the asset/collection from the parent's USD metadata, archive its directory, and reload the panel."""
@@ -770,6 +829,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         try:
             if container.remove_child(name):
+                if container.parent is not None:
+                    order = proj.get_collection_sort_order(container.prim_path)
+                    if order and name in order:
+                        new_order = [n for n in order if n != name]
+                        proj.set_collection_sort_order(container.prim_path, new_order)
                 assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
                 if assets_panel:
                     self._load_assets_to_panel(assets_panel)
@@ -798,7 +862,8 @@ class MainWindow(QtWidgets.QMainWindow):
             initial_name = _sanitize_prim_name(path.stem) or path.stem or 'asset'
             assets_panel = self.centralWidget().findChild(Panel, 'Assets') if self.centralWidget() else None
             parent_for_dlg = assets_panel._scroll_area if assets_panel and assets_panel._scroll_area else self
-            dlg = AddItemDialog('Asset', parent=parent_for_dlg, initial_name=initial_name)
+            initial_asset_type = self._get_default_asset_type_for_add()
+            dlg = AddItemDialog('Asset', parent=parent_for_dlg, initial_name=initial_name, initial_asset_type=initial_asset_type)
             dlg.item_created.connect(self._on_asset_created)
             if parent_for_dlg and hasattr(parent_for_dlg, 'geometry'):
                 rect = parent_for_dlg.geometry()
@@ -836,9 +901,13 @@ class MainWindow(QtWidgets.QMainWindow):
         asset_type = (asset_info or {}).get('type', 'Asset')
         try:
             if asset_type in _COLLECTION_ASSET_TYPES:
-                container.add_collection(name)
+                entity = container.add_collection(name)
             else:
-                container.add_asset(name)
+                entity = container.add_asset(name)
+            try:
+                entity.set_metadata('asset_type', asset_type)
+            except (RuntimeError, Exception) as err:
+                log.warning("Could not set asset_type on new entity %s: %s", name, err)
         except ValueError as e:
             log.warning("Could not add asset to project metadata: %s", e)
             self.show_message(

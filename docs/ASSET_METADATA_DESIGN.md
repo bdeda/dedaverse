@@ -15,6 +15,7 @@ This document describes the directory structure and USD metadata layout for asse
 {project_root}/
 └── .dedaverse/
     ├── {project_name}.usda          # Project stage (single root USDA; project_name from project config)
+    ├── user_settings.usda           # Session layer: user overrides and user-facing metadata
     ├── {CollectionA}.usda         # Collection directly under project (e.g. Sequences, Assets)
     ├── {CollectionA}/             # Child metadata dir for CollectionA
     │   ├── {AssetB}.usda         # Asset or collection under CollectionA
@@ -26,7 +27,7 @@ This document describes the directory structure and USD metadata layout for asse
 
 Rules:
 
-- **Project**: One USDA file at `.dedaverse/{project_name}.usda`. The project stage has **no root prim**; the root layer only has `subLayerPaths` pointing to child USDA files. `project_name` comes from project config (e.g. `KCIRC`).
+- **Project**: One USDA file at `.dedaverse/{project_name}.usda`. The project stage has **no root prim**; the root layer only has `subLayerPaths` pointing to child USDA files. `project_name` comes from project config (e.g. `KCIRC`). A second file `.dedaverse/user_settings.usda` is created alongside it and loaded as the stage’s **session layer** for user overrides and user-facing metadata; it is saved whenever it is edited.
 - **Collection under project**: One USDA at `.dedaverse/{collection_name}.usda`. Its **children** are described by USDA files under `.dedaverse/{collection_name}/{name}.usda` (sublayers).
 - **Asset or collection under a collection**: USDA at `.dedaverse/{ParentName}/{ChildName}.usda` (or deeper for nested parents). The **parent’s** layer lists this file in `subLayerPaths` (path relative to the parent layer’s directory).
 
@@ -46,15 +47,15 @@ So:
 
 ## 2. USD Metadata File Structure
 
-### 2.1 Project Stage (`.dedaverse/{project_name}.usda`)
+### 2.1 Project Stage (`.dedaverse/{project_name}.usda`) and Session Layer (`user_settings.usda`)
 
-- **No root prim.** The layer only contains `subLayerPaths` (e.g. `["Sequences.usda", "Assets.usda"]`).
-- Child prims (e.g. `/Sequences`, `/Assets`) are composed from those sublayers.
-- The project’s `Usd.Stage` is opened on this file; composition brings in all child USDA files.
+- **Root layer**: No root prim. The layer only contains `subLayerPaths` (e.g. `["Sequences.usda", "Assets.usda"]`). Child prims (e.g. `/Sequences`, `/Assets`) are composed from those sublayers.
+- **Session layer**: `.dedaverse/user_settings.usda` is created whenever the project USDA is created and is loaded as the project `Usd.Stage`’s session layer. User overrides and user-facing metadata applied to the asset library are stored here. The session layer must be saved whenever it is edited (e.g. via `Project.save_session_layer()`). **Collection sort order**: for each collection prim, the session layer can hold an override with custom metadata `sort_order` (a list of child names in display order). This is used by the Assets panel to show and persist the user’s chosen order for that collection’s immediate children (`Project.get_collection_sort_order` / `set_collection_sort_order`).
+- The project’s `Usd.Stage` is opened on the root layer; the session layer is attached so that session edits compose over the root and sublayers.
 
 ### 2.2 Collection or Asset USDA (child USDA files)
 
-- **Root prims**: For a **child under the project**, the USDA has a single root prim (e.g. `/Sequences`). For a **child under a collection**, the USDA includes the **parent collection as the root prim** and the new entity as its child (e.g. `/Sequences/INTRO`).
+- **Root prims**: The USDA contains a **prim for every level** of the hierarchy from the root scope down to the new entity. For a **child under the project**, that is a single root prim (e.g. `/Sequences`). For a **nested child**, the file includes the full chain (e.g. `/Sequences/INTRO/Scene_01` with prims at each level).
 - **Prim types**: All are `Scope`. Kinds are set via `Usd.ModelAPI`:
   - **Collection (group)**: `Kind.Tokens.group` on the leaf; ancestor scopes also get `group`.
   - **Asset (model)**: `Kind.Tokens.model` on the leaf; ancestors get `group`.
@@ -103,7 +104,7 @@ So: **metadata path under `.dedaverse`** and **content path under project root**
 
 ## 4. References in Code
 
-- **Project**: `src/deda/core/types/_project.py` — `metadata_dir`, `metadata_path`, `children_metadata_dir`, `asset_directory_for_prim_path`, stage creation.
+- **Project**: `src/deda/core/types/_project.py` — `metadata_dir`, `metadata_path`, `user_settings_path`, `children_metadata_dir`, `asset_directory_for_prim_path`, `stage` (root + session layer), `save_session_layer()`, stage creation.
 - **Collection / Asset**: `src/deda/core/types/_asset.py`, `_collection.py` — `metadata_path`, `children_metadata_dir`, `rootdir` (content), `add_asset` / `add_collection`, `remove_child`, `_create_entity_usda`, sublayer add/remove.
 - **Entity base**: `src/deda/core/types/_entity.py` — `prim_path`, resolution from path.
 

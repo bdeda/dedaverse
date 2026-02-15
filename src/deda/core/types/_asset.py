@@ -19,8 +19,8 @@
 
 Assets are backed by a usda file under the project root .dedaverse directory.
 That directory follows the form:
-    <project_rootdir>/.dedaverse/project.cfg  -- config data for the project
     <project_rootdir>/.dedaverse/{project_name}.usda -- project stage (metadata, assets)
+    <project_rootdir>/.dedaverse/user_settings.usda -- session layer (user overrides)
 """
 
 from pathlib import Path

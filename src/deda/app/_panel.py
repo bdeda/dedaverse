@@ -314,6 +314,7 @@ class Panel(QtWidgets.QFrame):
     navigate_up_clicked = QtCore.Signal()
     asset_dropped_on_tile = QtCore.Signal(object, object)  # (asset_data, target_tile_item_data)
     asset_configure_requested = QtCore.Signal(int)  # item_index when user chooses Configure on an asset tile
+    asset_order_changed = QtCore.Signal(object)  # list of child names in new order (for persisting sort order)
     file_dropped = QtCore.Signal(object)  # list of file path strings from external drag (e.g. file manager)
 
     def __init__(self, type_name, name,
@@ -372,31 +373,137 @@ class Panel(QtWidgets.QFrame):
             self._scroll_area.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
             self._scroll_area.customContextMenuRequested.connect(self._show_context_menu)
             self._items = []
+            # Reorder drag state (Assets panel): original list, dragged item, preview index
+            self._reorder_original_items = []
+            self._reorder_dragged_item = None
+            self._reorder_preview_index = None
 
             if type_name == 'Assets':
                 self._scroll_area.viewport().setAcceptDrops(True)
                 self._scroll_area.viewport().installEventFilter(self)
 
     def eventFilter(self, obj, event):
-        """Handle file drops on Assets panel scroll viewport."""
+        """Handle file drops and asset reorder drag/drop on Assets panel scroll viewport and on tiles/placeholder."""
+        t = event.type()
+        # Drop on a tile or placeholder: we receive it here because we install the filter on them
+        if (
+            self.objectName() == 'Assets'
+            and hasattr(obj, '_item_index')
+            and t == QtCore.QEvent.Type.Drop
+            and event.mimeData().hasFormat(ASSET_MIME_TYPE)
+            and getattr(self, 'can_reorder_assets', lambda: False)()
+            and self._reorder_dragged_item is not None
+        ):
+            try:
+                pos_in_widget = event.position().toPoint()
+                before = pos_in_widget.x() < obj.width() // 2 if obj.width() > 0 else True
+                idx = obj._item_index if before else obj._item_index + 1
+                n = len(self._reorder_original_items)
+                idx = max(0, min(idx, n))
+                self._items = [
+                    item for item in self._reorder_original_items
+                    if item.get('name') != self._reorder_dragged_item.get('name')
+                ]
+                self._items.insert(idx, self._reorder_dragged_item)
+                self._reorder_original_items = []
+                self._reorder_dragged_item = None
+                self._reorder_preview_index = None
+                self._relayout_tiles()
+                self.asset_order_changed.emit([item.get('name', '') for item in self._items])
+                event.acceptProposedAction()
+            except (TypeError, ValueError):
+                pass
+            return True
+
         if (
             self.objectName() == 'Assets'
             and self._scroll_area
             and obj is self._scroll_area.viewport()
         ):
-            t = event.type()
+            # Only drag/drop events have mimeData
+            if t == QtCore.QEvent.Type.DragLeave:
+                if self._reorder_dragged_item is not None:
+                    self._items = list(self._reorder_original_items)
+                    self._reorder_original_items = []
+                    self._reorder_dragged_item = None
+                    self._reorder_preview_index = None
+                    self._relayout_tiles()
+                return False
+            if t not in (
+                QtCore.QEvent.Type.DragEnter,
+                QtCore.QEvent.Type.DragMove,
+                QtCore.QEvent.Type.Drop,
+            ):
+                return super().eventFilter(obj, event)
+            mime = event.mimeData()
+            can_reorder = getattr(self, 'can_reorder_assets', lambda: False)()
+
+            # Asset reorder (internal drag): preview and drop
+            if can_reorder and mime.hasFormat(ASSET_MIME_TYPE):
+                if t == QtCore.QEvent.Type.DragEnter:
+                    try:
+                        raw = bytes(mime.data(ASSET_MIME_TYPE))
+                        dragged = json.loads(raw.decode('utf-8'))
+                        name = dragged.get('name')
+                        if name and any(item.get('name') == name for item in self._items):
+                            self._reorder_original_items = list(self._items)
+                            self._reorder_dragged_item = dragged
+                            self._reorder_preview_index = next(
+                                i for i, item in enumerate(self._items) if item.get('name') == name
+                            )
+                            event.acceptProposedAction()
+                            return True
+                    except (json.JSONDecodeError, TypeError, StopIteration):
+                        pass
+                    return False
+                if t == QtCore.QEvent.Type.DragMove:
+                    if self._reorder_dragged_item is not None:
+                        pos = event.position().toPoint()
+                        cell = self._cell_index_at_position(pos)
+                        if cell is not None:
+                            n = len(self._reorder_original_items)
+                            cell = max(0, min(cell, n - 1))
+                            if cell != self._reorder_preview_index:
+                                self._reorder_preview_index = cell
+                                self._items = [
+                                    item for item in self._reorder_original_items
+                                    if item.get('name') != self._reorder_dragged_item.get('name')
+                                ]
+                                self._relayout_tiles()
+                        event.acceptProposedAction()
+                        return True
+                    return False
+                if t == QtCore.QEvent.Type.Drop:
+                    if self._reorder_dragged_item is not None:
+                        idx = self._index_at_position(event.position().toPoint())
+                        n = len(self._reorder_original_items)
+                        idx = max(0, min(idx, n))
+                        self._items = [
+                            item for item in self._reorder_original_items
+                            if item.get('name') != self._reorder_dragged_item.get('name')
+                        ]
+                        self._items.insert(idx, self._reorder_dragged_item)
+                        self._reorder_original_items = []
+                        self._reorder_dragged_item = None
+                        self._reorder_preview_index = None
+                        self._relayout_tiles()
+                        self.asset_order_changed.emit([item.get('name', '') for item in self._items])
+                        event.acceptProposedAction()
+                        return True
+                    return False
+            # File drops
             if t == QtCore.QEvent.Type.DragEnter:
-                if event.mimeData().hasUrls():
+                if mime.hasUrls():
                     event.acceptProposedAction()
                 return False
             if t == QtCore.QEvent.Type.DragMove:
-                if event.mimeData().hasUrls():
+                if mime.hasUrls():
                     event.acceptProposedAction()
                 return False
             if t == QtCore.QEvent.Type.Drop:
-                if event.mimeData().hasUrls():
+                if mime.hasUrls():
                     paths = []
-                    for url in event.mimeData().urls():
+                    for url in mime.urls():
                         if url.isLocalFile():
                             p = Path(url.toLocalFile())
                             if p.is_file():
@@ -440,7 +547,8 @@ class Panel(QtWidgets.QFrame):
         
     def _add_item(self):
         self.add_item.emit(self._type_name)
-        dlg = AddItemDialog(self._type_name, parent=self._scroll_area)
+        initial_asset_type = getattr(self, 'get_default_asset_type', lambda: None)() if self._type_name == 'Asset' else None
+        dlg = AddItemDialog(self._type_name, parent=self._scroll_area, initial_asset_type=initial_asset_type)
         dlg.item_created.connect(self.item_created.emit) # propogate signal
         if self._scroll_area:
             rect = self._scroll_area.geometry()
@@ -483,7 +591,7 @@ class Panel(QtWidgets.QFrame):
         QtCore.QTimer.singleShot(0, self._update_tile_size)
 
     def _relayout_tiles(self):
-        """Relayout all tiles in the grid."""
+        """Relayout all tiles in the grid. During reorder preview, shows a placeholder at drop index."""
         if not self._tiles_container:
             return
         # Remove all widgets from layout
@@ -498,9 +606,31 @@ class Panel(QtWidgets.QFrame):
         tile_width = max(80, (available_width - (self._tiles_per_row - 1) * spacing) // self._tiles_per_row)
         is_assets = self.objectName() == 'Assets'
         is_apps_or_services = self.objectName() in ('Apps', 'Services')
-        for idx, item_data in enumerate(self._items):
-            row = idx // self._tiles_per_row
-            col = idx % self._tiles_per_row
+        in_reorder = is_assets and self._reorder_preview_index is not None
+        n_total = len(self._reorder_original_items) if in_reorder else len(self._items)
+        items_to_show = self._items  # During reorder this is original minus dragged
+        # Placeholder at "insert at end" (index n_total) is shown in the last grid cell
+        placeholder_pos = min(self._reorder_preview_index, n_total - 1) if in_reorder else -1
+
+        for pos in range(n_total):
+            row = pos // self._tiles_per_row
+            col = pos % self._tiles_per_row
+            if in_reorder and pos == placeholder_pos:
+                placeholder = QtWidgets.QFrame(parent=self._tiles_container)
+                placeholder.setFixedSize(tile_width, tile_width)
+                placeholder.setFrameShape(QtWidgets.QFrame.Shape.Box)
+                placeholder.setStyleSheet(
+                    "background-color: rgba(60,60,60,0.5); border: 2px dashed rgb(120,120,120); border-radius: 3px;"
+                )
+                placeholder._item_index = self._reorder_preview_index  # report real drop index for hit-test
+                placeholder.installEventFilter(self)
+                self._tiles_layout.addWidget(
+                    placeholder, row, col,
+                    alignment=QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft
+                )
+                continue
+            j = pos if not in_reorder else (pos if pos < placeholder_pos else pos - 1)
+            item_data = items_to_show[j]
             tile = ItemTile(
                 item_data,
                 tile_width,
@@ -508,10 +638,12 @@ class Panel(QtWidgets.QFrame):
                 draggable=is_assets,
                 accept_asset_drop=is_apps_or_services,
             )
-            tile._item_index = idx  # used by context menu to find item
+            tile._item_index = pos
             tile.activated.connect(self.item_activated.emit)
             if is_apps_or_services:
                 tile.asset_dropped.connect(self.asset_dropped_on_tile.emit)
+            if is_assets:
+                tile.installEventFilter(self)
             self._tiles_layout.addWidget(
                 tile, row, col,
                 alignment=QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft
@@ -524,6 +656,36 @@ class Panel(QtWidgets.QFrame):
         self._items.append(item_data)
         self._update_tile_size()
         
+    def _cell_index_at_position(self, viewport_position: QtCore.QPoint) -> int | None:
+        """Return the grid cell index (slot) under the position, or None if not over a cell."""
+        viewport = self._scroll_area.viewport()
+        w = viewport.childAt(viewport_position)
+        while w is not None and w != self._tiles_container:
+            if hasattr(w, '_item_index'):
+                return w._item_index
+            w = w.parentWidget()
+        return None
+
+    def _is_over_grid_cell(self, viewport_position: QtCore.QPoint) -> bool:
+        """Return True if the viewport position is over a tile or placeholder (a grid cell)."""
+        return self._cell_index_at_position(viewport_position) is not None
+
+    def _index_at_position(self, viewport_position: QtCore.QPoint) -> int:
+        """Return insertion index (0..n) for reorder drop. Position in viewport coordinates."""
+        viewport = self._scroll_area.viewport()
+        w = viewport.childAt(viewport_position)
+        n = len(self._reorder_original_items) if self._reorder_preview_index is not None else len(self._items)
+        # Resolve to tile or placeholder (both have _item_index set during layout)
+        while w is not None and w != self._tiles_container:
+            if hasattr(w, '_item_index'):
+                local = viewport.mapTo(w, viewport_position)
+                # Left half = insert before, right half = insert after
+                before = local.x() < w.width() // 2 if w.width() > 0 else True
+                idx = w._item_index
+                return idx #if before else min(idx + 1, n)
+            w = w.parentWidget()
+        return n
+
     def _tile_at_position(self, position):
         """Return the ItemTile under the given position. Position is in scroll area viewport coordinates."""
         # customContextMenuRequested provides coordinates relative to the viewport
@@ -565,6 +727,10 @@ class Panel(QtWidgets.QFrame):
                 if is_writable:
                     remove_action = menu.addAction('Remove')
                     remove_action.triggered.connect(lambda checked=False, i=idx: self._remove_item_at(i))
+                if is_assets and getattr(self, 'can_reorder_assets', lambda: False)():
+                    menu.addSeparator()
+                    menu.addAction('Move Up').triggered.connect(lambda checked=False, i=idx: self._move_asset(i, -1))
+                    menu.addAction('Move Down').triggered.connect(lambda checked=False, i=idx: self._move_asset(i, 1))
                 if show_configure or is_writable:
                     menu.addSeparator()
 
@@ -576,6 +742,18 @@ class Panel(QtWidgets.QFrame):
         viewport = self._scroll_area.viewport()
         global_pos = viewport.mapToGlobal(position)
         menu.exec(global_pos)
+
+    def _move_asset(self, item_index: int, delta: int) -> None:
+        """Move the asset at item_index by delta (e.g. -1 for up, 1 for down); reorder and emit new order."""
+        n = len(self._items)
+        if n == 0 or item_index < 0 or item_index >= n:
+            return
+        new_idx = item_index + delta
+        if new_idx < 0 or new_idx >= n:
+            return
+        self._items[item_index], self._items[new_idx] = self._items[new_idx], self._items[item_index]
+        self._relayout_tiles()
+        self.asset_order_changed.emit([item.get('name', '') for item in self._items])
 
     def _remove_item_at(self, item_index):
         """Remove the item at the given index and refresh the tile layout."""
