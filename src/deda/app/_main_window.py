@@ -393,6 +393,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 panel_obj.item_created.connect(self._on_service_created)
                 panel_obj.item_updated.connect(self._on_service_updated)
                 panel_obj.item_removed.connect(self._on_service_removed)
+                panel_obj.item_activated.connect(self._on_service_activated)
             if panel in ('Apps', 'Services'):
                 panel_obj.asset_dropped_on_tile.connect(
                     self._on_asset_dropped_on_app if panel == 'Apps' else self._on_asset_dropped_on_service
@@ -1311,6 +1312,46 @@ class MainWindow(QtWidgets.QMainWindow):
                 log.error(f"Failed to remove app from project config: {err}")
         else:
             log.warning(f"App '{app_name}' not found in project config (may be from site/user layer)")
+
+    def _on_service_activated(self, item_data):
+        """Handle service tile activation (double-click)."""
+        service_name = item_data.get('name', '').strip()
+        service_name_lower = service_name.lower()
+        
+        log.debug(f'Service activated: "{service_name}"')
+        
+        # Check if there's a tool plugin for this service
+        from deda.core import PluginRegistry, Tool
+        
+        # Get all registered tools for debugging
+        all_tools = [p for p in PluginRegistry() if isinstance(p, Tool)]
+        log.debug(f'Available tools: {[t.name for t in all_tools]}')
+        
+        # Try to find tool by name (case-insensitive)
+        tool = None
+        for plugin in all_tools:
+            plugin_name = getattr(plugin, 'name', '').lower()
+            # Match by service name or common aliases
+            if plugin_name == service_name_lower or plugin_name == 'ollama':
+                tool = plugin
+                log.info(f'Found tool "{plugin.name}" for service "{service_name}"')
+                break
+        
+        if tool:
+            try:
+                # Show waiting cursor while launching
+                QtWidgets.QApplication.setOverrideCursor(QtGui.QCursor(QtCore.Qt.CursorShape.WaitCursor))
+                try:
+                    log.info(f'Launching tool "{tool.name}" for service "{service_name}"')
+                    tool.launch()
+                finally:
+                    # Restore cursor once tool window is shown
+                    QtWidgets.QApplication.restoreOverrideCursor()
+            except Exception as e:
+                QtWidgets.QApplication.restoreOverrideCursor()
+                log.error(f'Failed to launch tool for service {service_name}: {e}', exc_info=True)
+        else:
+            log.warning(f'No tool found for service "{service_name}". Available tools: {[p.name for p in all_tools]}')
 
     def _on_service_removed(self, item_data):
         """Handle the removal of a service and delete it from the project config."""

@@ -16,59 +16,57 @@
 #
 # ###################################################################################
 
+"""Import unittests for deda and dedaverse.
+
+These tests only import modules; they do not use the network or external services.
+Run with: python -m pytest tests/test_imports.py -v
+"""
+
 import unittest
 
 
-def test_imports():
-    # Top-level packages
-    import deda
-    import dedaverse
-
-    # deda top-level module
-    import deda.log
-
-    # deda.ai
-    import deda.ai
-    # _neural_network requires torch (optional); continue test so other modules get coverage
+def _import_deda_and_dedaverse() -> None:
+    """Top-level packages and deda.log."""
+    import deda  # noqa: F401
+    import dedaverse  # noqa: F401
+    import deda.log  # noqa: F401
+    import deda.ai  # noqa: F401
     try:
         import deda.ai._neural_network  # noqa: F401
     except ModuleNotFoundError:
         pass
+    import dedaverse.__main__  # noqa: F401
 
-    # deda.core
-    import deda.core
-    import deda.core._app_launcher
+
+def _import_deda_core() -> None:
+    """deda.core and subpackages (finder, launcher, types, ai, viewer)."""
+    import deda.core  # noqa: F401
+    import deda.core._app_launcher  # noqa: F401
     try:
         import deda.core._amazon_photos  # noqa: F401
     except ModuleNotFoundError:
-        pass  # requires marionette_driver (optional)
-    import deda.core._check_for_updates
-    import deda.core._config
+        pass
+    import deda.core._check_for_updates  # noqa: F401
+    import deda.core._config  # noqa: F401
     try:
         import deda.core._photos  # noqa: F401
     except ModuleNotFoundError:
-        pass  # requires exifread (optional)
-    import deda.core._plugin
-    import deda.core._preferences
-    import deda.core._types
-
-    # deda.core.finder
-    import deda.core.finder
-    import deda.core.finder._adobe
-    import deda.core.finder._houdini
-    import deda.core.finder._maya
-    import deda.core.finder._substance
-    import deda.core.finder._unreal
-
-    # deda.core.launcher
-    import deda.core.launcher
-    import deda.core.launcher._adobe
-    import deda.core.launcher._houdini
-    import deda.core.launcher._maya
-    import deda.core.launcher._substance
-
-    # deda.core.ai (optional: _model1, _usd_training require tensorflow)
-    import deda.core.ai
+        pass
+    import deda.core._plugin  # noqa: F401
+    import deda.core._preferences  # noqa: F401
+    import deda.core._types  # noqa: F401
+    import deda.core.finder  # noqa: F401
+    import deda.core.finder._adobe  # noqa: F401
+    import deda.core.finder._houdini  # noqa: F401
+    import deda.core.finder._maya  # noqa: F401
+    import deda.core.finder._substance  # noqa: F401
+    import deda.core.finder._unreal  # noqa: F401
+    import deda.core.launcher  # noqa: F401
+    import deda.core.launcher._adobe  # noqa: F401
+    import deda.core.launcher._houdini  # noqa: F401
+    import deda.core.launcher._maya  # noqa: F401
+    import deda.core.launcher._substance  # noqa: F401
+    import deda.core.ai  # noqa: F401
     try:
         import deda.core.ai._model1  # noqa: F401
     except ModuleNotFoundError:
@@ -77,81 +75,101 @@ def test_imports():
         import deda.core.ai._usd_training  # noqa: F401
     except ModuleNotFoundError:
         pass
-
-    # deda.core.types
-    import deda.core.types
-    import deda.core.types._asset_id
-    import deda.core.types._asset
-    import deda.core.types._collection
-    import deda.core.types._element
-    import deda.core.types._entity
-    import deda.core.types._project
-    import deda.core.types._sequence
-    import deda.core.types._shot
-
-    # deda.core.viewer (requires pxr.Usdviewq from USD; optional in headless/minimal envs)
+    import deda.core.types  # noqa: F401
+    import deda.core.types._asset_id  # noqa: F401
+    import deda.core.types._asset  # noqa: F401
+    import deda.core.types._collection  # noqa: F401
+    import deda.core.types._element  # noqa: F401
+    import deda.core.types._entity  # noqa: F401
+    import deda.core.types._project  # noqa: F401
+    import deda.core.types._sequence  # noqa: F401
+    import deda.core.types._shot  # noqa: F401
     try:
-        import deda.core.viewer
-        import deda.core.viewer.__main__
-        import deda.core.viewer._annotation
-        import deda.core.viewer._app
-        import deda.core.viewer._camera_reticle
-        import deda.core.viewer._playbar
-        import deda.core.viewer._reticle
-        import deda.core.viewer._slate
-        import deda.core.viewer._usd_viewer
-        import deda.core.viewer._window
+        import deda.core.viewer  # noqa: F401
+        import deda.core.viewer.__main__  # noqa: F401
+        import deda.core.viewer._annotation  # noqa: F401
+        import deda.core.viewer._app  # noqa: F401
+        import deda.core.viewer._camera_reticle  # noqa: F401
+        import deda.core.viewer._playbar  # noqa: F401
+        import deda.core.viewer._reticle  # noqa: F401
+        import deda.core.viewer._slate  # noqa: F401
+        import deda.core.viewer._usd_viewer  # noqa: F401
+        import deda.core.viewer._window  # noqa: F401
     except (ModuleNotFoundError, ImportError):
         pass
 
-    # deda.model
-    import deda.model
-    import deda.model._types
 
-    # deda.dcc
-    import deda.dcc
-    import deda.dcc._eventfilter
+def _import_deda_model_dcc() -> None:
+    """deda.model and deda.dcc."""
+    import deda.model  # noqa: F401
+    import deda.model._types  # noqa: F401
+    import deda.dcc  # noqa: F401
+    import deda.dcc._eventfilter  # noqa: F401
 
-    # deda.plugins
-    import deda.plugins.application_manager
-    import deda.plugins.autodesk_flow
-    import deda.plugins.godot
-    import deda.plugins.houdini
-    import deda.plugins.jira
-    import deda.plugins.maya
-    import deda.plugins.perforce
-    import deda.plugins.photoshop
-    import deda.plugins.plugin_manager
-    import deda.plugins.project_manager
-    import deda.plugins.substance
-    import deda.plugins.zbrush
 
-    # dedaverse
-    import dedaverse.__main__
+def _import_deda_plugins() -> None:
+    """deda.plugins (no network; optional plugins may be skipped)."""
+    import deda.plugins.application_manager  # noqa: F401
+    import deda.plugins.autodesk_flow  # noqa: F401
+    import deda.plugins.godot  # noqa: F401
+    import deda.plugins.houdini  # noqa: F401
+    import deda.plugins.jira  # noqa: F401
+    import deda.plugins.maya  # noqa: F401
+    import deda.plugins.perforce  # noqa: F401
+    import deda.plugins.photoshop  # noqa: F401
+    import deda.plugins.plugin_manager  # noqa: F401
+    import deda.plugins.project_manager  # noqa: F401
+    import deda.plugins.substance  # noqa: F401
+    import deda.plugins.zbrush  # noqa: F401
 
-    # deda.app (requires PySide6; CI uses libEGL + QT_QPA_PLATFORM=offscreen)
-    import deda.app
-    import deda.app.__main__
-    import deda.app._app
-    import deda.app._asset_browser
-    import deda.app._asset_info
-    import deda.app._buttons
-    import deda.app._dialogs
-    import deda.app._eventfilter
-    import deda.app._graphics_view
-    import deda.app._main_window
-    import deda.app._panel
-    import deda.app._preferences
-    import deda.app._project_settings
-    import deda.app._taskbar_icon
-    import deda.app.task
-    import deda.app.task._task
 
-    # Not importable (no package): deda.plugins.ollama
+def _import_deda_app() -> None:
+    """deda.app (PySide6; no network)."""
+    import deda.app  # noqa: F401
+    import deda.app.__main__  # noqa: F401
+    import deda.app._app  # noqa: F401
+    import deda.app._asset_browser  # noqa: F401
+    import deda.app._asset_info  # noqa: F401
+    import deda.app._buttons  # noqa: F401
+    import deda.app._dialogs  # noqa: F401
+    import deda.app._eventfilter  # noqa: F401
+    import deda.app._graphics_view  # noqa: F401
+    import deda.app._main_window  # noqa: F401
+    import deda.app._panel  # noqa: F401
+    import deda.app._preferences  # noqa: F401
+    import deda.app._project_settings  # noqa: F401
+    import deda.app._taskbar_icon  # noqa: F401
+    import deda.app.task  # noqa: F401
+    import deda.app.task._task  # noqa: F401
+
+
+def test_imports() -> None:
+    """Run all import checks (no network)."""
+    _import_deda_and_dedaverse()
+    _import_deda_core()
+    _import_deda_model_dcc()
+    _import_deda_plugins()
+    _import_deda_app()
 
 
 class TestImports(unittest.TestCase):
-    """Unittest wrapper so 'python -m unittest discover' runs the import test."""
+    """Import unittests: verify modules import without network or external services."""
 
-    def test_imports(self):
+    def test_import_deda_and_dedaverse(self) -> None:
+        _import_deda_and_dedaverse()
+
+    def test_import_deda_core(self) -> None:
+        _import_deda_core()
+
+    def test_import_deda_model_dcc(self) -> None:
+        _import_deda_model_dcc()
+
+    def test_import_deda_plugins(self) -> None:
+        _import_deda_plugins()
+
+    def test_import_deda_app(self) -> None:
+        _import_deda_app()
+
+    def test_imports_full(self) -> None:
+        """Full import pass (same as running all granular tests)."""
         test_imports()

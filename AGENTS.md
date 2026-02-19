@@ -283,18 +283,48 @@ PluginRegistry().register(MyAppPlugin())
 
 ### 10. Testing
 
+#### When to Run Tests
+- **Run pytest in the project venv whenever code changes are made.** After modifying source code, run the test suite to ensure nothing is broken.
+- Use the project’s virtual environment: activate it, then run `pytest` (or `uv run pytest` / `python -m pytest tests/`).
+- Optionally use pre-commit: with `pre-commit install`, pytest runs automatically on `git commit` (see [Pre-commit](#pre-commit) below).
+
+#### Running Tests
+```bash
+# From repo root, with venv activated (or uv run):
+python -m pytest tests/
+
+# With coverage report (aim for 100% on covered code):
+python -m pytest tests/ --cov=src/deda --cov-report=term-missing
+
+# Exclude tests that require network (default run should not hit network):
+python -m pytest tests/ -m "not network"
+```
+
+#### Import Unittests
+- **Import tests** live in `tests/test_imports.py`. They verify that every public and internal module can be imported without error.
+- When you add a new package or module under `src/deda`, add a corresponding import in `test_imports.py` (in the appropriate `test_import_*` method or in `test_imports()`).
+- Run at least the import tests after structural or dependency changes: `python -m pytest tests/test_imports.py -v`.
+
+#### No Network in Unit Tests
+- **Unit tests must not hit network services** (no HTTP, no sockets, no external APIs). Tests must run offline and deterministically.
+- Use **mocks or patches** for any code that would perform network I/O (e.g. `@patch('module.requests.get')`, `unittest.mock.Mock`).
+- Tests that require real network access must be marked with `@pytest.mark.network` and excluded from the default run: `pytest -m "not network"`.
+
+#### Coverage Goal
+- **Aim for 100% test coverage** for code you add or change, excluding lines that are explicitly excluded (e.g. `pragma: no cover`, or platform-specific branches that are hard to exercise in CI).
+- Coverage is reported in `htmlcov/` and via `--cov-report=term-missing`. Use it to find untested branches and add tests.
+
 #### Test Structure
-- Tests go in `tests/` directory
-- Use pytest-style tests
-- Test imports, configuration, and core functionality
-- UI tests are optional (can be complex)
+- Tests go in `tests/` directory.
+- Use pytest-style tests; unittest-style (`unittest.TestCase`) is also supported (e.g. `test_imports.py`).
+- Test imports, configuration, and core functionality; UI tests are optional (can be complex).
 
 #### PySide6 Availability in Tests
-- **PySide6 is always assumed to be available** in test files
-- **Do NOT** add try-except blocks to check for PySide6 availability
-- **Do NOT** use `@unittest.skipIf(not PYSIDE6_AVAILABLE, ...)` decorators
+- **PySide6 is always assumed to be available** in test files.
+- **Do NOT** add try-except blocks to check for PySide6 availability.
+- **Do NOT** use `@unittest.skipIf(not PYSIDE6_AVAILABLE, ...)` decorators.
 - Simply import PySide6 directly: `from PySide6 import QtWidgets`
-- If PySide6 is not available, the test should fail (this indicates a dependency issue that needs to be fixed)
+- If PySide6 is not available, the test should fail (this indicates a dependency issue that needs to be fixed).
 - Example:
 ```python
 import unittest
@@ -306,10 +336,13 @@ class TestMyWidget(unittest.TestCase):
         self.assertIsNotNone(widget)
 ```
 
-#### Running Tests
-```bash
-python -m pytest tests/
-```
+#### Pre-commit
+- To run pytest automatically on every commit, install pre-commit and the repo hook:
+  ```bash
+  pip install pre-commit
+  pre-commit install
+  ```
+- The hook runs `pytest tests/` (no network tests). See `.pre-commit-config.yaml` for the exact command.
 
 ### 11. Code Review Checklist
 
@@ -325,6 +358,7 @@ Before submitting code, ensure:
 - [ ] Resources properly managed (context managers)
 - [ ] Configuration changes are validated
 - [ ] Plugin registration follows patterns
+- [ ] **pytest passes** in the project venv (`python -m pytest tests/`); unit tests do not hit the network
 
 ### 12. Common Pitfalls to Avoid
 
@@ -482,8 +516,9 @@ When asked to modify or add code:
 5. **Follow patterns** - Match existing code style and architecture
 6. **Add type hints** - Always include type information
 7. **Handle errors** - Use specific exceptions and proper logging
-8. **Test imports** - Ensure new code can be imported
-9. **Update docs** - Add/update docstrings as needed
+8. **Test imports** - Ensure new code can be imported; add imports to `tests/test_imports.py` for new modules
+9. **Run pytest** - After making code changes, run pytest in the project venv: `python -m pytest tests/` (see [Testing](#10-testing)). Unit tests must not hit the network; use mocks for I/O
+10. **Update docs** - Add/update docstrings as needed
 
 ## 📝 Notes
 

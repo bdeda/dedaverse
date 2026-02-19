@@ -19,16 +19,17 @@
 
 from __future__ import annotations
 
-__all__ = ["AnnotationGlOverlay", "AnnotationStroke"]
+__all__ = ["AnnotationGlOverlay", "AnnotationStroke", "AnnotationText"]
 
 import logging
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
 try:
-    from PySide6 import QtGui
+    from PySide6 import QtCore, QtGui
     PYSIDE6_AVAILABLE = True
 except ImportError:
+    QtCore = None
     QtGui = None
     PYSIDE6_AVAILABLE = False
 
@@ -66,6 +67,55 @@ class AnnotationStroke:
         )
 
 
+@dataclass
+class AnnotationText:
+    """Container for a single text annotation."""
+
+    x: float = 0.0
+    y: float = 0.0
+    text: str = ""
+    color: _Color = (1.0, 1.0, 1.0, 0.9)
+    font_size: float = 14.0
+    font_family: Optional[str] = None
+    shadow_color: Optional[_Color] = (0.0, 0.0, 0.0, 0.7)
+    shadow_offset_px: Tuple[float, float] = (2.0, 2.0)
+
+    def to_dict(self) -> dict:
+        result = {
+            "x": self.x,
+            "y": self.y,
+            "text": self.text,
+            "color": list(self.color),
+            "font_size": self.font_size,
+            "font_family": self.font_family,
+        }
+        if self.shadow_color is not None:
+            result["shadow_color"] = list(self.shadow_color)
+            result["shadow_offset_px"] = list(self.shadow_offset_px)
+        return result
+
+    @staticmethod
+    def from_dict(payload: dict) -> "AnnotationText":
+        x = payload.get("x", 0.0)
+        y = payload.get("y", 0.0)
+        text = payload.get("text", "")
+        color = payload.get("color", (1.0, 1.0, 1.0, 0.9))
+        font_size = payload.get("font_size", 14.0)
+        font_family = payload.get("font_family", None)
+        shadow_color = payload.get("shadow_color", (0.0, 0.0, 0.0, 0.7))
+        shadow_offset_px = payload.get("shadow_offset_px", (2.0, 2.0))
+        return AnnotationText(
+            x=float(x),
+            y=float(y),
+            text=str(text),
+            color=_normalize_color(color) or (1.0, 1.0, 1.0, 0.9),
+            font_size=float(font_size),
+            font_family=str(font_family) if font_family else None,
+            shadow_color=_normalize_color(shadow_color) if shadow_color else None,
+            shadow_offset_px=(float(shadow_offset_px[0]), float(shadow_offset_px[1])) if isinstance(shadow_offset_px, (list, tuple)) and len(shadow_offset_px) >= 2 else (2.0, 2.0),
+        )
+
+
 class AnnotationGlOverlay:
     """OpenGL annotation layer rendered above the 3D viewport."""
 
@@ -75,12 +125,22 @@ class AnnotationGlOverlay:
         enabled: bool = True,
         color: Sequence[float] = (1.0, 0.9, 0.2, 0.9),
         line_width: float = 2.0,
+        text_color: Sequence[float] = (1.0, 1.0, 1.0, 0.9),
+        text_font_size: float = 14.0,
+        text_shadow_color: Optional[Sequence[float]] = None,
+        text_shadow_offset_px: Tuple[float, float] = (2.0, 2.0),
     ) -> None:
         self._enabled = bool(enabled)
         self._default_color = _normalize_color(color) or (1.0, 0.9, 0.2, 0.9)
         self._default_line_width = max(0.5, float(line_width))
+        self._default_text_color = _normalize_color(text_color) or (1.0, 1.0, 1.0, 0.9)
+        self._default_text_font_size = max(8.0, float(text_font_size))
+        self._default_text_shadow_color = _normalize_color(text_shadow_color) if text_shadow_color else None
+        self._default_text_shadow_offset_px = (float(text_shadow_offset_px[0]), float(text_shadow_offset_px[1]))
         self._strokes: List[AnnotationStroke] = []
+        self._texts: List[AnnotationText] = []
         self._active_stroke: Optional[AnnotationStroke] = None
+        self._selected_text_indices: List[int] = []  # For cut/paste operations
         self._dirty = False
 
     @property
@@ -112,15 +172,44 @@ class AnnotationGlOverlay:
             self._default_color = normalized
 
     @property
+    def default_text_color(self) -> _Color:
+        """Current default color for new text annotations (RGBA 0–1)."""
+        return self._default_text_color
+
+    @default_text_color.setter
+    def default_text_color(self, value: Sequence[float]) -> None:
+        normalized = _normalize_color(value)
+        if normalized is not None:
+            self._default_text_color = normalized
+
+    @property
+    def default_text_font_size(self) -> float:
+        """Current default font size for new text annotations."""
+        return self._default_text_font_size
+
+    @default_text_font_size.setter
+    def default_text_font_size(self, value: float) -> None:
+        self._default_text_font_size = max(8.0, float(value))
+
+    @property
     def strokes(self) -> List[AnnotationStroke]:
         return list(self._strokes)
 
     def set_strokes(self, strokes: Sequence[AnnotationStroke]) -> None:
         self._strokes = list(strokes)
 
+    @property
+    def texts(self) -> List[AnnotationText]:
+        return list(self._texts)
+
+    def set_texts(self, texts: Sequence[AnnotationText]) -> None:
+        self._texts = list(texts)
+
     def clear(self) -> None:
         self._strokes.clear()
+        self._texts.clear()
         self._active_stroke = None
+        self._selected_text_indices.clear()
 
     def _mark_dirty(self) -> None:
         """Mark overlay as modified by the user."""
@@ -184,13 +273,159 @@ class AnnotationGlOverlay:
         if len(stroke.points) > 1:
             self._strokes.append(stroke)
 
+    def add_text(
+        self,
+        x: float,
+        y: float,
+        text: str,
+        *,
+        color: Optional[Sequence[float]] = None,
+        font_size: Optional[float] = None,
+        font_family: Optional[str] = None,
+        shadow_color: Optional[Sequence[float]] = None,
+        shadow_offset_px: Optional[Tuple[float, float]] = None,
+    ) -> AnnotationText:
+        """Add a text annotation at the specified position."""
+        normalized_color = _normalize_color(color) if color is not None else None
+        normalized_shadow_color = _normalize_color(shadow_color) if shadow_color is not None else self._default_text_shadow_color
+        text_obj = AnnotationText(
+            x=float(x),
+            y=float(y),
+            text=str(text),
+            color=normalized_color or self._default_text_color,
+            font_size=float(font_size) if font_size is not None else self._default_text_font_size,
+            font_family=str(font_family) if font_family else None,
+            shadow_color=normalized_shadow_color,
+            shadow_offset_px=shadow_offset_px if shadow_offset_px is not None else self._default_text_shadow_offset_px,
+        )
+        self._texts.append(text_obj)
+        self._mark_dirty()
+        return text_obj
+
+    def remove_text(self, index: int) -> bool:
+        """Remove a text annotation by index. Returns True if removed."""
+        if 0 <= index < len(self._texts):
+            self._texts.pop(index)
+            self._mark_dirty()
+            return True
+        return False
+
+    def remove_texts(self, indices: Sequence[int]) -> int:
+        """Remove multiple text annotations by indices. Returns count removed."""
+        # Sort in reverse order to avoid index shifting issues
+        sorted_indices = sorted(set(indices), reverse=True)
+        removed = 0
+        for idx in sorted_indices:
+            if 0 <= idx < len(self._texts):
+                self._texts.pop(idx)
+                removed += 1
+        if removed > 0:
+            self._mark_dirty()
+        return removed
+
+    def get_text_at_position(self, x: float, y: float, tolerance: float = 5.0) -> Optional[int]:
+        """Find text annotation at or near the given position. Returns index or None.
+        
+        Args:
+            x: X coordinate in overlay coordinates (left origin)
+            y: Y coordinate in overlay coordinates (bottom origin)
+            tolerance: Pixel tolerance for hit detection
+        """
+        if not PYSIDE6_AVAILABLE or QtGui is None:
+            return None
+        
+        # Check texts in reverse order (most recently added first, so they're on top)
+        for i in range(len(self._texts) - 1, -1, -1):
+            text_obj = self._texts[i]
+            
+            # Create a temporary font to measure text
+            font = QtGui.QFont()
+            if text_obj.font_family:
+                font.setFamily(text_obj.font_family)
+            font.setPointSizeF(text_obj.font_size)
+            metrics = QtGui.QFontMetricsF(font)
+            
+            # Get text bounding box
+            lines = text_obj.text.splitlines() if text_obj.text else [""]
+            line_height = metrics.height()
+            max_width = max(metrics.horizontalAdvance(line) for line in lines) if lines else 0
+            total_height = line_height * len(lines)
+            
+            # Check if point is within text bounding box (with tolerance)
+            # x is already in overlay coordinates (left origin)
+            # y is in overlay coordinates (bottom origin), text_obj.y is baseline
+            # We need to check if the click is within the text bounds
+            text_left = text_obj.x - tolerance
+            text_right = text_obj.x + max_width + tolerance
+            # Baseline is at text_obj.y, text extends from (baseline - ascent) to (baseline + descent)
+            # For simplicity, check if y is within baseline ± (total_height/2 + tolerance)
+            text_bottom = text_obj.y - (total_height / 2) - tolerance
+            text_top = text_obj.y + (total_height / 2) + tolerance
+            
+            if text_left <= x <= text_right and text_bottom <= y <= text_top:
+                return i
+        
+        return None
+
+    def copy_selected_texts(self) -> List[AnnotationText]:
+        """Copy selected text annotations. Returns list of copied texts."""
+        return [self._texts[i] for i in self._selected_text_indices if 0 <= i < len(self._texts)]
+
+    def cut_selected_texts(self) -> List[AnnotationText]:
+        """Cut selected text annotations (remove and return them)."""
+        copied = self.copy_selected_texts()
+        if copied:
+            self.remove_texts(self._selected_text_indices)
+            self._selected_text_indices.clear()
+        return copied
+
+    def paste_texts(self, texts: Sequence[AnnotationText], offset_x: float = 10.0, offset_y: float = 10.0) -> None:
+        """Paste text annotations with an offset."""
+        for text in texts:
+            new_text = AnnotationText(
+                x=text.x + offset_x,
+                y=text.y + offset_y,
+                text=text.text,
+                color=text.color,
+                font_size=text.font_size,
+                font_family=text.font_family,
+            )
+            self._texts.append(new_text)
+        if texts:
+            self._mark_dirty()
+
+    def select_text(self, index: int) -> None:
+        """Select a text annotation by index."""
+        if 0 <= index < len(self._texts) and index not in self._selected_text_indices:
+            self._selected_text_indices.append(index)
+
+    def deselect_text(self, index: int) -> None:
+        """Deselect a text annotation by index."""
+        if index in self._selected_text_indices:
+            self._selected_text_indices.remove(index)
+
+    def clear_selection(self) -> None:
+        """Clear all text selections."""
+        self._selected_text_indices.clear()
+
+    @property
+    def selected_text_indices(self) -> List[int]:
+        """Get list of selected text indices."""
+        return list(self._selected_text_indices)
+
     def to_payload(self) -> dict:
-        return {"strokes": [stroke.to_dict() for stroke in self._strokes]}
+        return {
+            "strokes": [stroke.to_dict() for stroke in self._strokes],
+            "texts": [text.to_dict() for text in self._texts],
+        }
 
     def load_payload(self, payload: dict) -> None:
         strokes_data = payload.get("strokes", [])
+        texts_data = payload.get("texts", [])
         self._strokes = [AnnotationStroke.from_dict(item) for item in strokes_data]
+        self._texts = [AnnotationText.from_dict(item) for item in texts_data]
         self._active_stroke = None
+        self._selected_text_indices.clear()
         self._dirty = False
 
     def draw(
@@ -232,12 +467,89 @@ class AnnotationGlOverlay:
             _pop_ortho(gl, pushed)
         return True
 
+    def draw_texts(
+        self,
+        painter: "QtGui.QPainter",
+        rect: "QtCore.QRect",
+    ) -> bool:
+        """Draw text annotations using QPainter."""
+        if not self._enabled or not self._texts or not PYSIDE6_AVAILABLE:
+            return False
+        if rect.width() <= 0 or rect.height() <= 0:
+            return False
+        painter.save()
+        try:
+            painter.setRenderHint(QtGui.QPainter.RenderHint.TextAntialiasing, True)
+            viewport_height = rect.height()
+            for i, text_obj in enumerate(self._texts):
+                font = QtGui.QFont(painter.font())
+                if text_obj.font_family:
+                    font.setFamily(text_obj.font_family)
+                font.setPointSizeF(text_obj.font_size)
+                painter.setFont(font)
+                metrics = QtGui.QFontMetricsF(font)
+                # Handle multi-line text
+                lines = text_obj.text.splitlines() if text_obj.text else [""]
+                line_height = metrics.height()
+                # Convert y coordinate from bottom-origin (OpenGL) to top-origin (Qt)
+                # text_obj.y is stored in overlay coordinates (bottom origin, y=0 at bottom)
+                # We need to convert to Qt coordinates (top origin, y=0 at top) for rendering
+                # The stored y represents the baseline position in overlay coords
+                overlay_baseline_y = text_obj.y  # Baseline y in overlay coords (bottom origin)
+                qt_baseline_y = viewport_height - overlay_baseline_y  # Baseline y in Qt coords (top origin)
+                # Draw text without shadow
+                text_color = self._to_qcolor(text_obj.color)
+                
+                # Draw each line
+                # Start from the baseline of the first line
+                current_baseline = qt_baseline_y
+                for line in lines:
+                    baseline = current_baseline
+                    # Draw text
+                    painter.setPen(text_color)
+                    painter.drawText(QtCore.QPointF(text_obj.x, baseline), line)
+                    # Move to next line (baseline moves down by line_height)
+                    current_baseline += line_height
+                # Draw selection indicator if selected
+                if i in self._selected_text_indices:
+                    # Calculate bounding box for all lines
+                    total_height = line_height * len(lines)
+                    max_width = max(metrics.horizontalAdvance(line) for line in lines) if lines else 0
+                    # Top of text box is baseline - ascent
+                    text_top = qt_baseline_y - metrics.ascent()
+                    selection_rect = QtCore.QRectF(
+                        text_obj.x - 2,
+                        text_top - 2,
+                        max_width + 4,
+                        total_height + 4,
+                    )
+                    selection_color = QtGui.QColor(255, 255, 0, 128)  # Yellow highlight
+                    painter.setPen(selection_color)
+                    painter.setBrush(QtGui.QBrush(selection_color))
+                    painter.drawRect(selection_rect)
+            return True
+        except Exception as exc:
+            log.debug("Annotation text draw failed: %s", exc)
+            return False
+        finally:
+            painter.restore()
+
     def draw_from_stage_view(self, stage_view: object, *, gl: Optional[object] = None) -> bool:
+        """Draw strokes using OpenGL. Note: Text rendering should be done in paintEvent, not here."""
         width_attr = getattr(stage_view, "width", 0)
         height_attr = getattr(stage_view, "height", 0)
         width = width_attr() if callable(width_attr) else width_attr
         height = height_attr() if callable(height_attr) else height_attr
+        # Draw strokes using OpenGL
         return self.draw(float(width), float(height), gl=gl)
+
+    @staticmethod
+    def _to_qcolor(color: _Color) -> "QtGui.QColor":
+        """Convert color tuple to QColor."""
+        if not PYSIDE6_AVAILABLE or QtGui is None:
+            raise RuntimeError("QtGui is not available.")
+        r, g, b, a = color
+        return QtGui.QColor.fromRgbF(r, g, b, a)
 
 
 def _resolve_gl() -> Optional[object]:

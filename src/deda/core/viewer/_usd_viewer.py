@@ -20,6 +20,7 @@ __all__ = ['UsdViewWidget']
 
 import logging
 from pathlib import Path
+from typing import List
 
 try:
     import OpenGL
@@ -32,7 +33,7 @@ from pxr import Gf, Usd, Sdf, UsdLux
 from pxr.Usdviewq.stageView import StageView
 from pxr.Usdviewq.common import CameraMaskModes
 
-from ._annotation import AnnotationGlOverlay
+from ._annotation import AnnotationGlOverlay, AnnotationText
 from ._reticle import CameraReticleGlOverlay
 from ._slate import SlateTextGlOverlay
 
@@ -179,6 +180,39 @@ def _apply_viewport_gl_state():
         pass
 
 
+class _TextAnnotationOverlay(QtWidgets.QWidget):
+    """Overlay widget for rendering text annotations using proper Qt rendering."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+        self.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(QtCore.Qt.WA_NoSystemBackground, True)
+        self.setAttribute(QtCore.Qt.WA_OpaquePaintEvent, False)
+        self._annotation_overlay = None
+
+    def set_annotation_overlay(self, overlay):
+        """Set the annotation overlay to render."""
+        self._annotation_overlay = overlay
+
+    def paintEvent(self, event):
+        """Render text annotations."""
+        if not self._annotation_overlay or not self._annotation_overlay.enabled or not self._annotation_overlay.texts:
+            return
+        painter = QtGui.QPainter(self)
+        try:
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+            rect = self.rect()
+            self._annotation_overlay.draw_texts(painter, rect)
+        finally:
+            painter.end()
+
+    def update_geometry(self):
+        """Update geometry to match parent widget."""
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+            self.raise_()  # Ensure it's above the OpenGL viewport
+
+
 class _PrimInfoOverlay(QtWidgets.QFrame):
     """Semi-transparent floating panel showing prim path and prim spec identifiers.
     Shown as a top-level tool window so it is not overdrawn by the OpenGL view."""
@@ -257,9 +291,20 @@ class _StageView(StageView):
         )
         self._prim_info_overlay = _PrimInfoOverlay(parent=self)
         self._prim_info_overlay.setParent(self)
+        # Create text annotation overlay widget for proper Qt rendering
+        self._text_annotation_overlay = _TextAnnotationOverlay(parent=self)
+        self._text_annotation_overlay.setParent(self)
+        self._text_annotation_overlay.set_annotation_overlay(self._annotation_overlay)
+        self._text_annotation_overlay.update_geometry()
+        self._text_annotation_overlay.show()
         self.setMouseTracking(True)
         self._annotation_mode_enabled = False
         self._annotation_drawing = False
+        self._annotation_text_mode = False  # True when adding text instead of drawing strokes
+        self._annotation_text_dragging = False  # True when dragging selected text
+        self._text_drag_start_pos: Optional[QtCore.QPoint] = None  # Mouse position when drag started
+        self._text_drag_start_text_positions: List[Tuple[int, float, float]] = []  # [(index, x, y), ...] for selected texts
+        self._clipboard_texts: List[AnnotationText] = []  # For cut/paste operations
         # Accept focus so keyPressEvent (e.g. "a" for annotation) is received when viewport is clicked
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
         # Load pencil cursor for annotation mode
@@ -448,12 +493,14 @@ class _StageView(StageView):
             StageView.paintGL(self)
         else:
             super().paintGL()
+        # Draw strokes using OpenGL
         if self._annotation_overlay and self._annotation_overlay.enabled:
-            self._annotation_overlay.draw_from_stage_view(self)
+            self._annotation_overlay.draw(float(self.width()), float(self.height()))
         if self._reticle_overlay and self._reticle_overlay.enabled:
             self._reticle_overlay.draw_from_stage_view(self)
         if self._slate_overlay and self._slate_overlay.enabled:
             self._slate_overlay.draw_from_stage_view(self)
+        # Text annotations are rendered via _text_annotation_overlay widget in paintEvent
 
     def contextMenuEvent(self, event):
         """Show context menu at click point with variant switching for the picked prim."""
@@ -568,16 +615,70 @@ class _StageView(StageView):
             return False
 
     def mousePressEvent(self, event):
-        """In annotation mode, left-drag paints a stroke; otherwise delegate to base."""
+        """In annotation mode: click text to select/move; Shift+click to add text; otherwise draw stroke."""
         if (
             self._annotation_mode_enabled
             and event.button() == QtCore.Qt.MouseButton.LeftButton
             and self._annotation_overlay
         ):
             pos = event.position().toPoint() if hasattr(event.position(), 'toPoint') else event.pos()
+            modifiers = event.modifiers()
+            
+            # Shift+click: Always add new text annotation (highest priority)
+            if modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier:
+                self._annotation_overlay.enabled = True
+                self._show_text_input_dialog(pos)
+                event.accept()
+                self.update()
+                return
+            
+            # Check if clicking on existing text (for selection/moving)
+            overlay_x = float(pos.x())
+            overlay_y = self._flip_y(float(pos.y()))
+            text_idx = self._annotation_overlay.get_text_at_position(overlay_x, overlay_y)
+            
+            if text_idx is not None:
+                # Clicking on text - select it and prepare for dragging
+                # Ctrl+click: Toggle text selection (multi-select)
+                if modifiers & QtCore.Qt.KeyboardModifier.ControlModifier:
+                    if text_idx in self._annotation_overlay.selected_text_indices:
+                        self._annotation_overlay.deselect_text(text_idx)
+                    else:
+                        self._annotation_overlay.select_text(text_idx)
+                else:
+                    # Regular click: Select only this text (clear others)
+                    if text_idx not in self._annotation_overlay.selected_text_indices:
+                        self._annotation_overlay.clear_selection()
+                        self._annotation_overlay.select_text(text_idx)
+                
+                # Start dragging (even if already selected, allows repositioning)
+                self._annotation_text_dragging = True
+                self._text_drag_start_pos = pos
+                # Store initial positions of all selected texts
+                self._text_drag_start_text_positions = []
+                for idx in self._annotation_overlay.selected_text_indices:
+                    if 0 <= idx < len(self._annotation_overlay.texts):
+                        text_obj = self._annotation_overlay.texts[idx]
+                        self._text_drag_start_text_positions.append((idx, text_obj.x, text_obj.y))
+                event.accept()
+                self.update()
+                if self._text_annotation_overlay:
+                    self._text_annotation_overlay.update()
+                return
+            
+            # No text clicked - check if text is selected
+            # If text is selected, clicking elsewhere clears selection and starts drawing
+            # If no text selected, start drawing stroke
+            if self._annotation_overlay.selected_text_indices:
+                # Clear selection when clicking away from text
+                self._annotation_overlay.clear_selection()
+                if self._text_annotation_overlay:
+                    self._text_annotation_overlay.update()
+            
+            # Start drawing stroke
             self._annotation_overlay.enabled = True
             self._annotation_overlay.begin_stroke()
-            self._annotation_overlay.add_point(float(pos.x()), self._flip_y(pos.y()))
+            self._annotation_overlay.add_point(overlay_x, overlay_y)
             self._annotation_drawing = True
             event.accept()
             self.update()
@@ -585,7 +686,30 @@ class _StageView(StageView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        """When Ctrl is held, pick prim under cursor; when annotation drawing, add stroke points."""
+        """When Ctrl is held, pick prim under cursor; when annotation drawing, add stroke points; when dragging text, move it."""
+        # Handle text dragging
+        if self._annotation_text_dragging and self._annotation_overlay and self._text_drag_start_pos is not None:
+            pos = event.position().toPoint() if hasattr(event.position(), 'toPoint') else event.pos()
+            # Calculate drag offset in overlay coordinates
+            dx_qt = float(pos.x() - self._text_drag_start_pos.x())
+            dy_qt = float(pos.y() - self._text_drag_start_pos.y())
+            # Convert dy to overlay coordinates (flip y)
+            dy_overlay = -dy_qt  # In overlay coords, up is positive
+            
+            # Update positions of all selected texts
+            for idx, start_x, start_y in self._text_drag_start_text_positions:
+                if 0 <= idx < len(self._annotation_overlay.texts):
+                    text_obj = self._annotation_overlay.texts[idx]
+                    text_obj.x = start_x + dx_qt
+                    text_obj.y = start_y + dy_overlay
+            self._annotation_overlay._mark_dirty()
+            event.accept()
+            self.update()
+            if self._text_annotation_overlay:
+                self._text_annotation_overlay.update()
+            return
+        
+        # Handle stroke drawing
         if self._annotation_drawing and self._annotation_overlay:
             pos = event.position().toPoint() if hasattr(event.position(), 'toPoint') else event.pos()
             self._annotation_overlay.add_point(float(pos.x()), self._flip_y(pos.y()))
@@ -600,17 +724,25 @@ class _StageView(StageView):
             self._prim_info_overlay.hide()
 
     def mouseReleaseEvent(self, event):
-        """End annotation stroke on left release when in annotation mode."""
-        if (
-            event.button() == QtCore.Qt.MouseButton.LeftButton
-            and self._annotation_drawing
-            and self._annotation_overlay
-        ):
-            self._annotation_overlay.end_stroke()
-            self._annotation_drawing = False
-            event.accept()
-            self.update()
-            return
+        """End annotation stroke or text dragging on left release when in annotation mode."""
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            # End text dragging
+            if self._annotation_text_dragging:
+                self._annotation_text_dragging = False
+                self._text_drag_start_pos = None
+                self._text_drag_start_text_positions = []
+                event.accept()
+                self.update()
+                if self._text_annotation_overlay:
+                    self._text_annotation_overlay.update()
+                return
+            # End stroke drawing
+            if self._annotation_drawing and self._annotation_overlay:
+                self._annotation_overlay.end_stroke()
+                self._annotation_drawing = False
+                event.accept()
+                self.update()
+                return
         super().mouseReleaseEvent(event)
 
     def _flip_y(self, y: float) -> float:
@@ -618,9 +750,73 @@ class _StageView(StageView):
         h = self.size().height()
         return float(h - 1 - y) if h else y
 
+    def _show_text_input_dialog(self, pos: QtCore.QPoint) -> None:
+        """Show a dialog to input text for annotation at the given position."""
+        if not self._annotation_overlay:
+            return
+        
+        # Create a simple input dialog
+        text, ok = QtWidgets.QInputDialog.getMultiLineText(
+            self,
+            "Add Text Annotation",
+            "Enter text:",
+            ""
+        )
+        
+        if ok and text.strip():
+            # Convert position to overlay coordinates
+            # pos.y() is in Qt coordinates (top origin), we need overlay coords (bottom origin)
+            # Store as baseline position: flip the y coordinate
+            qt_y = float(pos.y())  # Qt coordinate (top origin)
+            overlay_baseline_y = self._flip_y(qt_y)  # Overlay coordinate (bottom origin, baseline)
+            overlay_x = float(pos.x())
+            
+            # Add text annotation
+            # The y coordinate stored is the baseline position in overlay coordinates
+            self._annotation_overlay.add_text(
+                overlay_x,
+                overlay_baseline_y,
+                text,
+                color=self._annotation_overlay.default_text_color,
+                font_size=self._annotation_overlay.default_text_font_size,
+                shadow_color=None,  # No shadow
+                shadow_offset_px=None,
+            )
+            # Update both the main widget and the text overlay widget
+            self.update()
+            if self._text_annotation_overlay:
+                self._text_annotation_overlay.update_geometry()
+                self._text_annotation_overlay.update()
+
     def keyPressEvent(self, event):
-        """Toggle annotation mode with 'a'; show prim info overlay when Ctrl is pressed."""
-        if event.key() == QtCore.Qt.Key.Key_A and not event.modifiers():
+        """Toggle annotation mode with 'a'; handle cut/paste; show prim info overlay when Ctrl is pressed."""
+        modifiers = event.modifiers()
+        key = event.key()
+        
+        # Cut/Copy/Paste for text annotations (Ctrl+X, Ctrl+C, Ctrl+V)
+        if modifiers & QtCore.Qt.KeyboardModifier.ControlModifier:
+            if key == QtCore.Qt.Key.Key_X:  # Cut
+                if self._annotation_mode_enabled and self._annotation_overlay:
+                    self._clipboard_texts = self._annotation_overlay.cut_selected_texts()
+                    if self._clipboard_texts:
+                        event.accept()
+                        self.update()
+                        return
+            elif key == QtCore.Qt.Key.Key_C:  # Copy
+                if self._annotation_mode_enabled and self._annotation_overlay:
+                    self._clipboard_texts = self._annotation_overlay.copy_selected_texts()
+                    if self._clipboard_texts:
+                        event.accept()
+                        return
+            elif key == QtCore.Qt.Key.Key_V:  # Paste
+                if self._annotation_mode_enabled and self._annotation_overlay and self._clipboard_texts:
+                    self._annotation_overlay.paste_texts(self._clipboard_texts)
+                    event.accept()
+                    self.update()
+                    return
+        
+        # Toggle annotation mode with 'a'
+        if key == QtCore.Qt.Key.Key_A and not modifiers:
             self._annotation_mode_enabled = not self._annotation_mode_enabled
             self._update_annotation_cursor()
             if self._annotation_mode_enabled and self._annotation_overlay:
@@ -631,7 +827,9 @@ class _StageView(StageView):
             event.accept()
             self.update()
             return
-        if event.key() == QtCore.Qt.Key.Key_Control:
+        
+        # Ctrl key: show prim info
+        if key == QtCore.Qt.Key.Key_Control:
             pos = self.mapFromGlobal(QtGui.QCursor.pos())
             if self.rect().contains(pos):
                 self._try_show_prim_info_at(pos)
@@ -648,6 +846,12 @@ class _StageView(StageView):
         pos = self.mapFromGlobal(QtGui.QCursor.pos())
         if self.rect().contains(pos):
             self._try_show_prim_info_at(pos)
+
+    def resizeEvent(self, event):
+        """Update text annotation overlay geometry when viewport is resized."""
+        super().resizeEvent(event)
+        if self._text_annotation_overlay:
+            self._text_annotation_overlay.update_geometry()
 
     def leaveEvent(self, event):
         """Hide prim info overlay when mouse leaves the view."""

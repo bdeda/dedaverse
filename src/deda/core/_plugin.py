@@ -51,19 +51,24 @@ def initialize_plugins():
     paths.insert(0, str(standard_plugin_path))
            
     for loader, module_name, is_pkg in pkgutil.walk_packages(paths):
-        if f'dedaverse.plugins.{module_name}' in sys.modules:
-            log.warning('Plugin named "{}" is already loaded! Skipoping...'.format(module_name))
+        # Handle both deda.plugins.* and dedaverse.plugins.* module names
+        dedaverse_name = f'dedaverse.plugins.{module_name}'
+        deda_name = f'deda.plugins.{module_name}'
+        if dedaverse_name in sys.modules or deda_name in sys.modules:
+            log.warning('Plugin named "{}" is already loaded! Skipping...'.format(module_name))
             continue
-        log.debug('Loading {}'.format(module_name))
+        log.debug('Loading plugin module: {}'.format(module_name))
         try:
             spec = loader.find_spec(module_name, loader.path)
             if spec is None or spec.loader is None:
                 log.warning(f'Could not find spec or loader for plugin module: {module_name}')
                 continue
             module = spec.loader.load_module(module_name)
-            sys.modules[f'dedaverse.plugins.{module_name}'] = module
+            # Register under both names for compatibility
+            sys.modules[dedaverse_name] = module
+            sys.modules[deda_name] = module
             # The loading of the module should have registered the plugin with the deda.core.PluginRegistry
-            log.debug(module)
+            log.debug(f'Loaded plugin module: {module_name}')
         except (ImportError, ModuleNotFoundError, AttributeError) as err:
             log.error(f'Failed to import plugin module {module_name}: {err}')
             log.exception(err)
