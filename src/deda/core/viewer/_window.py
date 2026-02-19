@@ -249,6 +249,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._annotation_layer_action.triggered.connect(self._on_annotation_layer_toggled)
         annotation_color_action = view_menu.addAction('Annotation &Color...')
         annotation_color_action.triggered.connect(self._on_annotation_color)
+        annotation_text_color_action = view_menu.addAction('Annotation &Text Color...')
+        annotation_text_color_action.triggered.connect(self._on_annotation_text_color)
         if hasattr(self._viewer, 'annotation_overlay_enabled_changed'):
             self._viewer.annotation_overlay_enabled_changed.connect(self._on_annotation_overlay_enabled_changed)
         self._load_notes_menu = view_menu.addMenu('Load &Notes')
@@ -335,6 +337,21 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if color.isValid():
             overlay.default_color = (
+                color.redF(), color.greenF(), color.blueF(), color.alphaF()
+            )
+
+    def _on_annotation_text_color(self):
+        """Open color chooser for annotation text color."""
+        overlay = self._viewer.annotation_overlay
+        r, g, b, a = overlay.default_text_color
+        initial = QtGui.QColor(
+            int(r * 255), int(g * 255), int(b * 255), int(a * 255)
+        )
+        color = QtWidgets.QColorDialog.getColor(
+            initial, self, "Annotation Text Color"
+        )
+        if color.isValid():
+            overlay.default_text_color = (
                 color.redF(), color.greenF(), color.blueF(), color.alphaF()
             )
             self._viewer.update_view(resetCam=False, forceComputeBBox=False)

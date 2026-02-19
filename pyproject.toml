@@ -23,6 +23,7 @@ readme = "README.md"
 
 [project.optional-dependencies]
 dev = [
+  "pre-commit>=3.0",
   "pytest>=8.0",
   "pytest-cov>=4.0",
 ]
@@ -41,6 +42,7 @@ python_functions = ["test_*"]
 addopts = [
     "-v",
     "--strict-markers",
+    "-m", "not network",
     "--tb=short",
     "--cov=src/deda",
     "--cov-report=term-missing",
@@ -51,6 +53,7 @@ addopts = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "network: marks tests that require network access (deselect with '-m \"not network\"' for offline unit runs)",
 ]
 
 [tool.coverage.run]
