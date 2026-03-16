@@ -1,0 +1,16 @@
+# Run bandit (security) and pytest in the project venv on commit. Radon runs in CI only.
+# Install: pip install pre-commit && pre-commit install
+# Tests run without network ( -m "not network" ). See AGENTS.md § Testing.
+repos:
+  - repo: local
+    hooks:
+      - id: bandit
+        name: bandit (security)
+        entry: python -m bandit -r src/deda -c pyproject.toml -f screen -q
+        language: system
+        pass_filenames: false
+      - id: pytest
+        name: pytest
+        entry: python -m pytest tests/ -m "not network" --tb=short -q
+        language: system
+        pass_filenames: false

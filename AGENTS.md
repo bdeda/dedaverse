@@ -22,6 +22,8 @@ Dedaverse is a Python-based asset management system for visual media projects (f
 
 ## 📋 Core Principles
 
+**Defined strategies for agents:** (1) **Code integrity** — preserve existing behavior; never relax or remove tests to make a change pass; fix implementation to satisfy tests. (2) **Test patterns** — use the project’s test layout, naming, fixtures, and mocks (see [Testing](#10-testing)). (3) **Testability** — write testable code and add tests for new or touched code; run the test suite after changes.
+
 ### 1. Follow Existing Patterns
 - **Study the codebase first** - Understand existing patterns before making changes
 - **Match the style** - Follow existing naming conventions, file structure, and code organization
@@ -104,6 +106,13 @@ def _internal_helper():
 #### Imports
 - **Prefer imports at the top of the module** - Put `import` and `from ... import` statements at the top of the file whenever possible (after the module docstring, before `__all__` or code). Group in order: standard library, third-party, first-party/local.
 - **Deferred imports** - Use imports inside functions or methods only when necessary to avoid circular imports or to defer loading a heavy/optional dependency until it is used.
+
+#### Code Integrity and Agent Boundaries
+- **Preserve behavior** - Do not change existing behavior unless the task explicitly asks for it. When fixing bugs, fix the implementation to match the intended (or documented) behavior; do not change tests or docstrings to match broken behavior.
+- **Tests are the contract** - Do not relax, skip, or remove tests to make a change “pass”. Do not add `# pragma: no cover` or narrow test scope without a documented reason (e.g. platform-specific code).
+- **Fix failing tests properly** - If your change causes test failures, fix the implementation so that existing test expectations remain valid, or update the tests only when the intended behavior has deliberately changed (and document why).
+- **Safe to do without permission** - Reading files, running tests, running linters/type checks, and applying style fixes that match this document are expected. Prefer these to validate changes.
+- **Prefer human approval for** - Adding or removing dependencies, changing CI/config that affects the whole repo, broad refactors, or deleting non-obsolete code. When in doubt, make the minimal change and note follow-ups.
 
 ### 3. Project Structure
 
@@ -300,6 +309,14 @@ python -m pytest tests/ --cov=src/deda --cov-report=term-missing
 python -m pytest tests/ -m "not network"
 ```
 
+#### Security (bandit) and complexity (radon)
+- **Bandit** runs in CI and pre-commit to scan `src/deda` for common security issues. Config: `[tool.bandit]` in `pyproject.toml` (excludes, skips). CI fails on high-severity findings; fix the code or add `# nosec <id>` with a brief justification where the risk is accepted.
+- **Radon** runs in CI to report cyclomatic complexity (`radon cc`). Blocks with grade C or worse are reported; the step is informational (does not fail the job).
+- **Local runs:**
+  - Security: `bandit -r src/deda -c pyproject.toml -f screen`
+  - Complexity: `radon cc src/deda -n C -a -s --total-average`
+- CI produces coverage (pytest-cov), bandit JSON, and radon JSON; coverage and bandit/radon reports are uploaded as artifacts.
+
 #### Import Unittests
 - **Import tests** live in `tests/test_imports.py`. They verify that every public and internal module can be imported without error.
 - When you add a new package or module under `src/deda`, add a corresponding import in `test_imports.py` (in the appropriate `test_import_*` method or in `test_imports()`).
@@ -318,6 +335,18 @@ python -m pytest tests/ -m "not network"
 - Tests go in `tests/` directory.
 - Use pytest-style tests; unittest-style (`unittest.TestCase`) is also supported (e.g. `test_imports.py`).
 - Test imports, configuration, and core functionality; UI tests are optional (can be complex).
+
+#### Test Patterns
+- **Naming** — Prefer one test file per module: `tests/test_<module>.py`. Use classes to group related cases: `class TestFeatureName:`. Name test methods so that behavior and scenario are clear: `test_<behavior>_<scenario>` (e.g. `test_load_project_returns_none_when_missing`).
+- **Fixtures** — Use `tmp_path` for any file or directory creation so tests are isolated and leave no artifacts. Use `@pytest.fixture` for shared setup (e.g. config, temp dirs). Prefer dependency injection in code so fixtures can supply fakes.
+- **Mocking** — Unit tests must not call the network or external services. Use `unittest.mock.patch` (e.g. `@patch('module.requests.get')`) or `unittest.mock.Mock` for I/O, APIs, and optional dependencies. Patch at the use site (e.g. `patch('deda.core._config.requests.get')`), not at the definition.
+- **Test data** — Keep test data minimal and next to the test or in `tests/` (e.g. `tests/data/`). Avoid hardcoded paths; use `tmp_path` or `Path(__file__).parent`.
+- **Determinism** — Tests must be deterministic. No reliance on order of execution, system time (unless explicitly testing time behavior), or external state. Mark and exclude network-dependent tests with `@pytest.mark.network` and run default suite with `-m "not network"`.
+
+#### Design for Testability
+- **Write testable code** — Prefer pure functions and small, single-purpose functions. Prefer dependency injection over global state or module-level singletons where practical so that tests can inject mocks or fakes.
+- **New code must be testable** — When adding a new module or public API, add or extend tests in the same change. Cover the main success path and at least one failure or edge case. Rely on import tests (`test_imports.py`) for structural changes.
+- **Public API surface** — Ensure the public API (e.g. `deda.core`, plugin interfaces) is importable and key branches are covered by tests. Use `--cov=src/deda --cov-report=term-missing` to find gaps.
 
 #### PySide6 Availability in Tests
 - **PySide6 is always assumed to be available** in test files.
@@ -359,6 +388,8 @@ Before submitting code, ensure:
 - [ ] Configuration changes are validated
 - [ ] Plugin registration follows patterns
 - [ ] **pytest passes** in the project venv (`python -m pytest tests/`); unit tests do not hit the network
+- [ ] **Code integrity** — Tests were not relaxed, skipped, or removed to make a change pass; failing tests were fixed by correcting the implementation (or by updating tests only when intended behavior changed)
+- [ ] **Testability** — New or touched code has tests (or is covered by existing tests); new modules are listed in `tests/test_imports.py` where appropriate
 
 ### 12. Common Pitfalls to Avoid
 
@@ -381,6 +412,10 @@ def __hash__(self):
 
 # Missing parameter
 dcc_env = self.setup_env()  # Missing env parameter
+
+# Weakening tests to make code "pass"
+assert result is None  # was: assert result == expected  # Wrong if behavior should stay the same!
+@pytest.mark.skip("flaky")  # Prefer fixing the test or the code
 ```
 
 #### ✅ Do This Instead:
@@ -403,6 +438,9 @@ def __hash__(self):
 
 # Correct parameter
 dcc_env = self.setup_env(dcc_env)
+
+# Fix implementation to satisfy tests; only change test when intended behavior changes
+assert result == expected  # Keep assertion; fix the code under test if it regressed
 ```
 
 ### 13. Platform Compatibility
@@ -477,6 +515,29 @@ def load_project(self, proj_name: str) -> ProjectConfig | None:
 
 ### 17. Quick Reference
 
+#### Validation Commands
+Run these from the repo root with the project venv activated (or `uv run`). Use them to validate changes before considering a task complete.
+```bash
+# Run full test suite (no network tests)
+python -m pytest tests/ -m "not network"
+
+# Run tests with coverage (find untested code)
+python -m pytest tests/ -m "not network" --cov=src/deda --cov-report=term-missing
+
+# Run only import tests (after adding/removing modules)
+python -m pytest tests/test_imports.py -v
+
+# Run a single test file or test
+python -m pytest tests/test_imports.py -v
+python -m pytest tests/test_imports.py::TestImports::test_import_deda_core -v
+
+# Security scan (bandit)
+bandit -r src/deda -c pyproject.toml -f screen
+
+# Complexity report (radon; grade C and worse)
+radon cc src/deda -n C -a -s --total-average
+```
+
 #### Common Imports
 ```python
 import logging
@@ -516,9 +577,11 @@ When asked to modify or add code:
 5. **Follow patterns** - Match existing code style and architecture
 6. **Add type hints** - Always include type information
 7. **Handle errors** - Use specific exceptions and proper logging
-8. **Test imports** - Ensure new code can be imported; add imports to `tests/test_imports.py` for new modules
-9. **Run pytest** - After making code changes, run pytest in the project venv: `python -m pytest tests/` (see [Testing](#10-testing)). Unit tests must not hit the network; use mocks for I/O
-10. **Update docs** - Add/update docstrings as needed
+8. **Preserve code integrity** - Do not relax or remove tests to make a change pass; fix the implementation to satisfy existing tests (see [Code Integrity and Agent Boundaries](#code-integrity-and-agent-boundaries))
+9. **Test imports** - Ensure new code can be imported; add imports to `tests/test_imports.py` for new modules
+10. **Run pytest** - After making code changes, run pytest in the project venv: `python -m pytest tests/ -m "not network"` (see [Testing](#10-testing)). Unit tests must not hit the network; use mocks for I/O
+11. **Add tests for new code** - New modules or public behavior should have tests in the same change; use [Test Patterns](#test-patterns) and [Design for Testability](#design-for-testability)
+12. **Update docs** - Add/update docstrings as needed
 
 ## 📝 Notes
 

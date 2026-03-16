@@ -1331,8 +1331,8 @@ class MainWindow(QtWidgets.QMainWindow):
         tool = None
         for plugin in all_tools:
             plugin_name = getattr(plugin, 'name', '').lower()
-            # Match by service name or common aliases
-            if plugin_name == service_name_lower or plugin_name == 'ollama':
+            # Match by service name exactly (case-insensitive)
+            if plugin_name == service_name_lower:
                 tool = plugin
                 log.info(f'Found tool "{plugin.name}" for service "{service_name}"')
                 break

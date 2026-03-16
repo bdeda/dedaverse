@@ -23,9 +23,11 @@ readme = "README.md"
 
 [project.optional-dependencies]
 dev = [
+  "bandit[toml]>=1.7",
   "pre-commit>=3.0",
   "pytest>=8.0",
   "pytest-cov>=4.0",
+  "radon>=6.0",
 ]
 
 [project.scripts]
@@ -81,3 +83,16 @@ precision = 2
 
 [tool.coverage.html]
 directory = "htmlcov"
+
+[tool.bandit]
+exclude_dirs = ["tests", ".*", "venv", ".venv"]
+skips = ["B101", "B110"]  # B101 assert_used (tests); B110 try_except_pass (treat separately)
+targets = ["src/deda"]
+
+[tool.radon.complexity]
+min = "C"
+max_line_length = 120
+exclude = ["tests/*", ".*", "*/venv/*", "*/.venv/*"]
+no_assert = true
+show_closures = false
+total_average = true

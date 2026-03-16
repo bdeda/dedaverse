@@ -120,12 +120,42 @@ class AddItemDialog(QtWidgets.QDialog):
         grid.addWidget(lbl, 1, 2)
         self._types_cb = QtWidgets.QComboBox()
         items = []
+        self._plugin_services = {}  # Store plugin service info by type name
         if type_name == 'Asset':
             items = _types.all_default_asset_types()
         elif type_name == 'App':
             items = ['Command', 'Python']
         elif type_name == 'Service':
-            items = ['REST']  # Services are REST-based
+            # Add predefined services from plugins
+            items = ['REST']  # Default REST service type
+            try:
+                from deda.core import PluginRegistry, Service
+                registry = PluginRegistry()
+                # Get all Service plugins using iter_plugins method
+                for plugin in registry.iter_plugins(Service):
+                    # Create a display name for the plugin service
+                    display_name = f"Plugin: {plugin.name.title()}"
+                    items.append(display_name)
+                    # Get URL - try multiple methods
+                    url = ''
+                    if hasattr(plugin, 'url') and plugin.url:
+                        url = plugin.url
+                    elif hasattr(plugin, 'get_base_url'):
+                        try:
+                            url = plugin.get_base_url()
+                        except:
+                            pass
+                    # Store plugin info for later use
+                    self._plugin_services[display_name] = {
+                        'plugin': plugin,
+                        'name': plugin.name,
+                        'url': url,
+                        'description': plugin.description or '',
+                    }
+            except Exception as e:
+                import logging
+                log = logging.getLogger(__name__)
+                log.debug(f'Could not load plugin services: {e}')
         elif type_name == 'Task':
             items = ['Work', 'Review', 'Notify']        
         self._types_cb.addItems(items)
@@ -156,10 +186,21 @@ class AddItemDialog(QtWidgets.QDialog):
         elif type_name == 'Service':
             grid.addWidget(self._types_cb, 1, 3)
             
+            # Description label (for plugin services)
+            self._desc_label = QtWidgets.QLabel()
+            self._desc_label.setWordWrap(True)
+            self._desc_label.setVisible(False)
+            grid.addWidget(self._desc_label, 2, 2, 1, 2)
+            
             lbl = QtWidgets.QLabel('URL:')
-            grid.addWidget(lbl, 2, 2)
+            grid.addWidget(lbl, 3, 2)
             self._url_le = QtWidgets.QLineEdit()
-            grid.addWidget(self._url_le, 2, 3, -1, 1)
+            grid.addWidget(self._url_le, 3, 3, -1, 1)
+            
+            # Connect type change to update fields for plugin services
+            self._types_cb.currentTextChanged.connect(self._on_service_type_changed)
+            # Initial update
+            self._on_service_type_changed(self._types_cb.currentText())
         else:
             grid.addWidget(self._types_cb, 1, 3, -1, 1)            
         
@@ -180,6 +221,35 @@ class AddItemDialog(QtWidgets.QDialog):
         self._settings.setValue(f'AddItemDialog/{self._type_name}/lastType', text)
         if self._type_name == 'Asset':
             self._update_dialog_icon()
+    
+    def _on_service_type_changed(self, text: str) -> None:
+        """Handle service type change to pre-fill plugin service information."""
+        if self._type_name != 'Service':
+            return
+        
+        # Check if this is a plugin service
+        if text in self._plugin_services:
+            plugin_info = self._plugin_services[text]
+            # Pre-fill name (only if empty or if user hasn't manually changed it)
+            current_name = self._name_le.text().strip()
+            if not current_name or current_name == 'Untitled':
+                self._name_le.setText(plugin_info['name'])
+            # Pre-fill URL
+            self._url_le.setText(plugin_info['url'])
+            # Show description
+            if plugin_info['description']:
+                self._desc_label.setText(f"<i>{plugin_info['description']}</i>")
+                self._desc_label.setVisible(True)
+            else:
+                self._desc_label.setVisible(False)
+        else:
+            # Regular REST service - clear URL and hide description
+            if text == 'REST':
+                # Only clear URL if it was from a plugin service
+                current_url = self._url_le.text()
+                if any(ps['url'] == current_url for ps in self._plugin_services.values()):
+                    self._url_le.clear()
+                self._desc_label.setVisible(False)
 
     def _update_dialog_icon(self) -> None:
         """Set the icon label from the current type default (Asset) or question mark."""
@@ -212,6 +282,14 @@ class AddItemDialog(QtWidgets.QDialog):
         elif self._type_name == 'Service':
             item['url'] = self._url_le.text().strip()
             item['params'] = []  # Parameters can be added later via configure dialog
+            # Store plugin service info if this is a plugin service
+            service_type = self._types_cb.currentText()
+            if service_type in self._plugin_services:
+                plugin_info = self._plugin_services[service_type]
+                item['plugin_service'] = plugin_info['name']  # Store the plugin name
+                # Use plugin description if available
+                if plugin_info['description']:
+                    item['description'] = plugin_info['description']
         # Store the icon path if a custom icon was selected
         if self._selected_icon_path:
             item['icon'] = self._selected_icon_path
