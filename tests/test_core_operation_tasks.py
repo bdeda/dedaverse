@@ -43,12 +43,91 @@ class TestTask(unittest.TestCase):
         self.assertIsNone(t.template)
         self.assertEqual(t.metadata, {})
 
-    def test_is_ready_to_run_stub_returns_true(self):
+    def test_default_status_is_open(self):
         try:
-            from deda.core.operation._tasks import Task, is_ready_to_run
+            from deda.core.operation._tasks import Task, TaskStatus
         except (ImportError, ModuleNotFoundError) as e:
             self.skipTest(f"Optional dependencies not available: {e}")
-        self.assertTrue(is_ready_to_run(Task(id='t1', title='x', body='y')))
+        self.assertIs(Task(id='t1', title='x', body='y').status, TaskStatus.OPEN)
+
+
+class TestTaskStatus(unittest.TestCase):
+    """Test cases for TaskStatus parsing and values."""
+
+    def test_canonical_values(self):
+        try:
+            from deda.core.operation._tasks import TaskStatus
+        except (ImportError, ModuleNotFoundError) as e:
+            self.skipTest(f"Optional dependencies not available: {e}")
+        self.assertEqual(TaskStatus.OPEN.value, 'Open')
+        self.assertEqual(TaskStatus.IN_PROGRESS.value, 'In-Progress')
+        self.assertEqual(TaskStatus.BLOCKED.value, 'Blocked')
+        self.assertEqual(TaskStatus.READY_FOR_REVIEW.value, 'Ready-for-Review')
+        self.assertEqual(TaskStatus.CLOSED.value, 'Closed')
+        self.assertEqual(TaskStatus.RESOLVED.value, 'Resolved')
+
+    def test_parse_canonical(self):
+        try:
+            from deda.core.operation._tasks import TaskStatus
+        except (ImportError, ModuleNotFoundError) as e:
+            self.skipTest(f"Optional dependencies not available: {e}")
+        self.assertIs(TaskStatus.parse('Open'), TaskStatus.OPEN)
+        self.assertIs(TaskStatus.parse('In-Progress'), TaskStatus.IN_PROGRESS)
+        self.assertIs(TaskStatus.parse('Ready-for-Review'), TaskStatus.READY_FOR_REVIEW)
+
+    def test_parse_is_case_and_separator_insensitive(self):
+        try:
+            from deda.core.operation._tasks import TaskStatus
+        except (ImportError, ModuleNotFoundError) as e:
+            self.skipTest(f"Optional dependencies not available: {e}")
+        self.assertIs(TaskStatus.parse('open'), TaskStatus.OPEN)
+        self.assertIs(TaskStatus.parse('in progress'), TaskStatus.IN_PROGRESS)
+        self.assertIs(TaskStatus.parse('IN_PROGRESS'), TaskStatus.IN_PROGRESS)
+        self.assertIs(TaskStatus.parse('ready for review'), TaskStatus.READY_FOR_REVIEW)
+        self.assertIs(TaskStatus.parse('ready_for_review'), TaskStatus.READY_FOR_REVIEW)
+
+    def test_parse_empty_defaults_to_open(self):
+        try:
+            from deda.core.operation._tasks import TaskStatus
+        except (ImportError, ModuleNotFoundError) as e:
+            self.skipTest(f"Optional dependencies not available: {e}")
+        self.assertIs(TaskStatus.parse(None), TaskStatus.OPEN)
+        self.assertIs(TaskStatus.parse(''), TaskStatus.OPEN)
+        self.assertIs(TaskStatus.parse('   '), TaskStatus.OPEN)
+
+    def test_parse_unknown_falls_back_to_open(self):
+        try:
+            from deda.core.operation._tasks import TaskStatus
+        except (ImportError, ModuleNotFoundError) as e:
+            self.skipTest(f"Optional dependencies not available: {e}")
+        self.assertIs(TaskStatus.parse('WontFix'), TaskStatus.OPEN)
+
+
+class TestIsReadyToRun(unittest.TestCase):
+    """Test cases for the status-gated readiness check."""
+
+    def test_open_is_runnable(self):
+        try:
+            from deda.core.operation._tasks import Task, TaskStatus, is_ready_to_run
+        except (ImportError, ModuleNotFoundError) as e:
+            self.skipTest(f"Optional dependencies not available: {e}")
+        t = Task(id='t1', title='x', body='y', status=TaskStatus.OPEN)
+        self.assertTrue(is_ready_to_run(t))
+
+    def test_non_open_statuses_are_skipped(self):
+        try:
+            from deda.core.operation._tasks import Task, TaskStatus, is_ready_to_run
+        except (ImportError, ModuleNotFoundError) as e:
+            self.skipTest(f"Optional dependencies not available: {e}")
+        for status in (
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.BLOCKED,
+            TaskStatus.READY_FOR_REVIEW,
+            TaskStatus.CLOSED,
+            TaskStatus.RESOLVED,
+        ):
+            t = Task(id='t1', title='x', body='y', status=status)
+            self.assertFalse(is_ready_to_run(t), f'{status} should not be runnable')
 
 
 class TestDiscoverTasks(unittest.TestCase):
@@ -148,6 +227,47 @@ class TestDiscoverTasks(unittest.TestCase):
             self.assertEqual(len(attachments), 2)
             names = sorted(Path(p).name for p in attachments)
             self.assertEqual(names, ['ref.png', 'spec.md'])
+
+    def test_status_is_read_from_front_matter(self):
+        try:
+            from deda.core.operation._tasks import TaskStatus, discover_tasks
+        except (ImportError, ModuleNotFoundError) as e:
+            self.skipTest(f"Optional dependencies not available: {e}")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            cases = {
+                'task1': 'Open',
+                'task2': 'In-Progress',
+                'task3': 'blocked',            # lowercase
+                'task4': 'ready for review',   # spaces
+                'task5': 'Resolved',
+            }
+            for dir_name, raw in cases.items():
+                (tmp_path / dir_name).mkdir()
+                (tmp_path / dir_name / 'task.md').write_text(
+                    f'---\nstatus: {raw}\n---\n\nbody\n', encoding='utf-8'
+                )
+            tasks = {t.id: t for t in discover_tasks(tmp_path)}
+            self.assertIs(tasks['task1'].status, TaskStatus.OPEN)
+            self.assertIs(tasks['task2'].status, TaskStatus.IN_PROGRESS)
+            self.assertIs(tasks['task3'].status, TaskStatus.BLOCKED)
+            self.assertIs(tasks['task4'].status, TaskStatus.READY_FOR_REVIEW)
+            self.assertIs(tasks['task5'].status, TaskStatus.RESOLVED)
+
+    def test_missing_status_defaults_to_open(self):
+        try:
+            from deda.core.operation._tasks import TaskStatus, discover_tasks
+        except (ImportError, ModuleNotFoundError) as e:
+            self.skipTest(f"Optional dependencies not available: {e}")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / 'task1').mkdir()
+            (tmp_path / 'task1' / 'task.md').write_text(
+                'no front-matter here\n', encoding='utf-8'
+            )
+            tasks = discover_tasks(tmp_path)
+            self.assertEqual(len(tasks), 1)
+            self.assertIs(tasks[0].status, TaskStatus.OPEN)
 
     def test_skips_non_task_dirs_and_missing_task_md(self):
         try:

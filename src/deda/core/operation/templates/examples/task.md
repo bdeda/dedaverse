@@ -1,6 +1,7 @@
 ---
 title: Short imperative title (overrides the first H1 below)
 template: default
+status: Open
 priority: normal
 ---
 
@@ -28,9 +29,13 @@ filename in the body if the prompt should read them.
   `# H1` line, then to the directory name.
 - `template` — name of the prompt template under `templates/` (without
   `.md`). Optional; defaults to `default`.
+- `status` — one of `Open`, `In-Progress`, `Blocked`, `Ready-for-Review`,
+  `Closed`, `Resolved`. Case- and separator-insensitive (`open`, `ready
+  for review`, `ready_for_review` all parse). Defaults to `Open`. Only
+  `Open` tasks are dispatched; edit the file to change state.
 - Any other `key: value` pairs are preserved on `Task.metadata` for
   readiness policies (priority, due date, dependencies, etc.) — schema
-  is intentionally open while `is_ready_to_run` is still a stub.
+  is intentionally open while the policy layer is still a stub.
 
 ## Usage
 

@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 # ###################################################################################
-"""Task discovery and readiness checks.
+"""Task discovery, status, and readiness checks.
 
 Tasks live under :data:`deda.core.operation.TASKS_DIR` — one subdirectory
 per task, named ``task<N>`` (e.g. ``task1``, ``task2``). Each directory
@@ -24,24 +24,67 @@ followed by the task body in Markdown. Any sibling files (supporting
 docs, reference images) are exposed via ``Task.metadata['attachments']``
 as absolute path strings.
 
-TODO: :func:`is_ready_to_run` is still a stub — scheduling / dependency /
-budget policy is TBD.
+Status lifecycle
+----------------
+Every task has a :class:`TaskStatus`. Only ``Open`` tasks are dispatched;
+everything else is skipped by :func:`is_ready_to_run`:
+
+- ``Open`` — new, runnable.
+- ``In-Progress`` — currently being worked on; runner should not redispatch.
+- ``Blocked`` — waiting on a human or on another task to finish.
+- ``Ready-for-Review`` — work is done; a human must verify before continuing.
+- ``Closed`` / ``Resolved`` — terminal; no further action.
+
+Status mutation is currently human-managed — edit ``status:`` in the
+front-matter. Auto-writeback from the runner (``Open`` → ``In-Progress``
+on dispatch, etc.) is a follow-up.
 """
 
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 
 from . import _config
 
-__all__ = ['Task', 'discover_tasks', 'is_ready_to_run']
+__all__ = ['Task', 'TaskStatus', 'discover_tasks', 'is_ready_to_run']
 
 
 log = logging.getLogger(__name__)
 
 _TASK_DIR_RE = re.compile(r'^task(\d+)$')
+
+
+class TaskStatus(str, Enum):
+    """Lifecycle state of a task. String values are the canonical form
+    written to ``task.md`` front-matter."""
+
+    OPEN = 'Open'
+    IN_PROGRESS = 'In-Progress'
+    BLOCKED = 'Blocked'
+    READY_FOR_REVIEW = 'Ready-for-Review'
+    CLOSED = 'Closed'
+    RESOLVED = 'Resolved'
+
+    @classmethod
+    def parse(cls, raw: str | None) -> 'TaskStatus':
+        """Parse a string from front-matter into a status.
+
+        Case- and separator-insensitive — ``open``, ``In Progress``,
+        ``ready_for_review`` all resolve. Unknown values log a warning
+        and fall back to :attr:`OPEN` so a malformed task is still
+        visible (as runnable) rather than silently ignored.
+        """
+        if raw is None or not raw.strip():
+            return cls.OPEN
+        normalized = re.sub(r'[\s_-]+', '', raw.strip()).lower()
+        for member in cls:
+            if re.sub(r'[\s_-]+', '', member.value).lower() == normalized:
+                return member
+        log.warning('operation: unknown task status %r — defaulting to Open', raw)
+        return cls.OPEN
 
 
 @dataclass
@@ -55,6 +98,7 @@ class Task:
         body: Markdown body that follows the front-matter; appended to the
             prompt template.
         template: Template name (see :mod:`_prompts`). ``None`` → default.
+        status: Lifecycle state. Defaults to :attr:`TaskStatus.OPEN`.
         metadata: Remaining front-matter keys plus ``attachments`` — a
             list of absolute path strings for non-``task.md`` sibling files.
     """
@@ -63,6 +107,7 @@ class Task:
     title: str
     body: str
     template: str | None = None
+    status: TaskStatus = TaskStatus.OPEN
     metadata: dict[str, object] = field(default_factory=dict)
 
 
@@ -117,6 +162,7 @@ def _load_task(task_dir: Path) -> Task | None:
     meta, body = _parse_front_matter(text)
     title = meta.pop('title', None) or _first_h1(body) or task_dir.name
     template = meta.pop('template', None) or None
+    status = TaskStatus.parse(meta.pop('status', None))
 
     attachments = sorted(
         str(p) for p in task_dir.iterdir() if p.is_file() and p.name != 'task.md'
@@ -129,6 +175,7 @@ def _load_task(task_dir: Path) -> Task | None:
         title=title,
         body=body,
         template=template,
+        status=status,
         metadata=metadata,
     )
 
@@ -165,9 +212,12 @@ def discover_tasks(tasks_dir: Path | None = None) -> list[Task]:
 def is_ready_to_run(task: Task, now: datetime | None = None) -> bool:
     """Return True when ``task`` should be dispatched on this tick.
 
-    TODO: Real policy (schedule / deps / budget / quiet hours). The default
-    implementation simply accepts every discovered task so the loop shape
-    can be tested end-to-end.
+    Gate: only :attr:`TaskStatus.OPEN` tasks are runnable. All other
+    states (``In-Progress``, ``Blocked``, ``Ready-for-Review``,
+    ``Closed``, ``Resolved``) are skipped and left for humans or a later
+    policy layer to advance.
+
+    TODO: Extend with schedule / dependency / budget / quiet-hours checks.
     """
-    del task, now  # reserved for the real scheduling policy
-    return True
+    del now  # reserved for the real scheduling policy
+    return task.status is TaskStatus.OPEN

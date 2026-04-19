@@ -32,7 +32,7 @@ from ._config import HOST, PORT, TASKS_DIR, TEMPLATES_DIR, TICK_INTERVAL_SEC
 from ._prompts import compose_prompt, load_template
 from ._runner import CopilotRunner, RunnerResult
 from ._server import OperationServer, start_server
-from ._tasks import Task, discover_tasks, is_ready_to_run
+from ._tasks import Task, TaskStatus, discover_tasks, is_ready_to_run
 
 __all__ = [
     'HOST',
@@ -44,6 +44,7 @@ __all__ = [
     'OperationServer',
     'RunnerResult',
     'Task',
+    'TaskStatus',
     'compose_prompt',
     'discover_tasks',
     'is_ready_to_run',
