@@ -137,7 +137,7 @@ jobs:
             url: ${{ steps.deployment.outputs.page_url }}
         steps:
             - name: Download coverage artifacts
-              uses: actions/download-artifact@v7
+              uses: actions/download-artifact@v8
               with:
                   pattern: coverage-report-*
                   merge-multiple: true
