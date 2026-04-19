@@ -59,6 +59,16 @@ class TestOperationConfig(unittest.TestCase):
             self.skipTest(f"Optional dependencies not available: {e}")
         self.assertTrue((_config.TEMPLATES_DIR / 'default.md').is_file())
 
+    def test_tasks_dir_is_under_user_home(self):
+        try:
+            from deda.core.operation import _config
+        except (ImportError, ModuleNotFoundError) as e:
+            self.skipTest(f"Optional dependencies not available: {e}")
+        from pathlib import Path
+        self.assertEqual(
+            _config.TASKS_DIR, Path.home() / '.dedaverse' / 'operation' / 'tasks'
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

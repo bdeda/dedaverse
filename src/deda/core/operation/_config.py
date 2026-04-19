@@ -25,7 +25,7 @@ overridden from tests or an embedding host simply by setting
 
 from pathlib import Path
 
-__all__ = ['HOST', 'PORT', 'TEMPLATES_DIR', 'TICK_INTERVAL_SEC']
+__all__ = ['HOST', 'PORT', 'TASKS_DIR', 'TEMPLATES_DIR', 'TICK_INTERVAL_SEC']
 
 
 TICK_INTERVAL_SEC: int = 5 * 60
@@ -39,3 +39,9 @@ PORT: int = 8765
 
 TEMPLATES_DIR: Path = Path(__file__).parent / 'templates'
 """Directory holding prompt template files. Ships with ``default.md``."""
+
+TASKS_DIR: Path = Path.home() / '.dedaverse' / 'operation' / 'tasks'
+"""Root of the task drop-box. Each subdir ``task<N>`` holds a ``task.md``
+(skill.md-style YAML front-matter + markdown body) plus any sibling
+attachments (docs, images). The directory is created lazily on first write
+by the task author — discovery tolerates a missing directory."""
