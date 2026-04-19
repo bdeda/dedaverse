@@ -22,6 +22,10 @@ maintainers = [
 readme = "README.md"
 
 [project.optional-dependencies]
+imagegen = [
+  "google-genai>=1.0",          # Imagen 3 / Gemini image generation (recommended)
+  # "google-generativeai>=0.8", # Alternative: older Gemini SDK (fallback)
+]
 dev = [
   "bandit[toml]>=1.7",
   "pre-commit>=4.6.0",
