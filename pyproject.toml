@@ -2,7 +2,7 @@
 name = "dedaverse"
 dynamic = ["version"]
 dependencies = [
-  "usd-core>=26.3",
+  "usd-core>=26.5",
   "PySide6>=6.11.0",
   "p4python>=2025.2.2863679",
   "coloredlogs",
