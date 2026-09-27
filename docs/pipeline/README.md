@@ -21,6 +21,7 @@ make it visible to everyone, and verify every downstream step against it.**
 | 7 | [Roles and Art Skills](07_ROLES_AND_SKILLS.md) | The disciplines required at each step, the skills each needs, and a pipeline-step × skill matrix. |
 | 8 | [Project Roles](08_PROJECT_ROLES.md) | High-level role definitions for a team with a human Director/Cinematographer and agent roles orchestrated by a Producer agent; review gates; how roles map to skills. |
 | 9 | [Cost Tracking](09_COST_TRACKING.md) | The project cost ledger: what counts as cost, how each cost is recorded when it is incurred, rates, Jira mirroring, and how the Producer answers "what has this asset cost?" |
+| 10 | [Tooling and Process Gaps](10_TOOLING_GAPS.md) | Review of the pipeline against the current codebase: what agents and the Director need to fetch inputs, produce deliverables, submit, and review each step; proposed tools and roadmap. |
 
 ## Pipeline at a glance
 
