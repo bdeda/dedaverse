@@ -20,6 +20,7 @@ make it visible to everyone, and verify every downstream step against it.**
 | 6 | [VFX, Lighting and Audio](06_VFX_LIGHTING_AUDIO.md) | Simulation and effects (offline and in-engine), shot lighting, dialogue, ambience and music. |
 | 7 | [Roles and Art Skills](07_ROLES_AND_SKILLS.md) | The disciplines required at each step, the skills each needs, and a pipeline-step × skill matrix. |
 | 8 | [Project Roles](08_PROJECT_ROLES.md) | High-level role definitions for a team with a human Director/Cinematographer and agent roles orchestrated by a Producer agent; review gates; how roles map to skills. |
+| 9 | [Cost Tracking](09_COST_TRACKING.md) | The project cost ledger: what counts as cost, how each cost is recorded when it is incurred, rates, Jira mirroring, and how the Producer answers "what has this asset cost?" |
 
 ## Pipeline at a glance
 
@@ -69,4 +70,5 @@ Dedaverse organizes a project as a hierarchy of collections and assets (see
 - DCC launcher plugins (Maya, Houdini, ZBrush, Substance, Photoshop, Blender, Godot, etc.) open the right
   application for each step.
 - Tracking time per element (e.g. "the animation elements of character X") gives producers the per-phase cost
-  data described in the [Project Brief](../PROJECT_BRIEF.md).
+  data described in the [Project Brief](../PROJECT_BRIEF.md). The cost ledger that records it is defined in
+  [Cost Tracking](09_COST_TRACKING.md).

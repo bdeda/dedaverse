@@ -12,6 +12,7 @@ Read first:
 - [Shared conventions](../README.md#shared-conventions-all-role-skills)
 - [docs/pipeline/08_PROJECT_ROLES.md](../../../docs/pipeline/08_PROJECT_ROLES.md) — roles and review gates
 - [docs/pipeline/README.md](../../../docs/pipeline/README.md) — pipeline overview
+- [docs/pipeline/09_COST_TRACKING.md](../../../docs/pipeline/09_COST_TRACKING.md) — cost ledger, rates, and cost reports
 
 ## Boundaries
 
@@ -73,6 +74,7 @@ Approved inputs: <paths and versions>
 Director notes to address: <list, or "none">
 Deliverables: <what, where>
 Review gate: <gate name from the table below, or "internal">
+Cost ledger: .dedaverse/cost-ledger/tasks/<ID>.jsonl (asset_id <asset ID>, element <element>)
 Due / priority: <...>
 ```
 
@@ -82,7 +84,7 @@ storyboards). Do not start refinement work that depends on an unapproved gate.
 ### 4. Track
 
 - Keep every task's status current using the shared states.
-- Track time per asset and element so cost can be reported (e.g. "animation elements of the Hero").
+- Keep the cost ledger complete and accurate (see [Cost tracking](#7-cost-tracking) below).
 - Watch for blockers. Resolve dependency blockers yourself by re-ordering or re-assigning. Escalate creative
   blockers to the Director.
 
@@ -119,6 +121,42 @@ When the Director changes an approved decision:
 2. Report the impact (work to redo, schedule, cost) to the Director and confirm before re-opening tasks.
 3. Re-open the affected tasks with the new target.
 
+### 7. Cost tracking
+
+You own the project ledger in `{project_root}/.dedaverse/cost-ledger/` as defined in
+[09 Cost Tracking](../../../docs/pipeline/09_COST_TRACKING.md). Follow that document exactly; in summary:
+
+1. **Rates.** Keep `rates.json` current. Take model and compute rates only from the provider's published pricing
+   or the actual contract, and record the source and date checked. The Director sets the currency and the
+   Director's hourly rate. Never guess a rate: record the quantity unpriced and ask the Director.
+2. **Every task has a ledger file.** Include the ledger path, asset ID, and element in every task brief. At every
+   submission, check that the agent recorded `agent_usage` (and `compute` for jobs it ran) since its last
+   submission. Send the submission back if not.
+3. **Record Director time.** After each review session, record `director_time` from the session's start and end
+   timestamps, split across the assets reviewed by the time spent on each. Include the hours in the review
+   summary so the Director can confirm or correct them.
+4. **Record external spend** from each invoice with its reference number, and have the Director confirm it.
+5. **Record your own usage.** Usage for work on a specific asset goes to that asset's task; general orchestration
+   goes to the project collection with element `production`.
+6. **Mirror to Jira** when the Jira plugin is configured, and reconcile Jira against the ledger at every status
+   report. Report differences; do not pick one silently.
+7. **Fix mistakes with correction records.** Never edit or delete a ledger record.
+
+### 8. Answering "what has this cost?"
+
+When the Director asks what an asset, shot, element, role, or sequence has cost:
+
+1. Resolve the entity's asset ID. Ask the Director only if the name is ambiguous.
+2. Before answering, ask agents with in-progress tasks on it to record any unrecorded usage.
+3. Build the report from ledger records only, following
+   [09 §9.7](../../../docs/pipeline/09_COST_TRACKING.md#97-answering-the-directors-cost-question): net out
+   corrections; total by category, element, and role; separate measured, estimated, and unpriced amounts; show
+   rework; list the caveats.
+4. Every figure must be reproducible from the ledger. Never fill a gap with an estimate you make at report
+   time. Report the gap as a caveat instead.
+5. If the Director wants a quick answer, give the total, the measured/estimated split, and the caveats line,
+   and offer the full breakdown.
+
 ## Communicating with the Director
 
 Keep messages short, specific, and decision-oriented.
@@ -144,6 +182,7 @@ Approved since last report: <list>
 Awaiting your review: <list, oldest first>
 In progress: <counts by role, notable items>
 Blocked: <item — reason — what is needed>
+Cost since last report: <total, by category; unpriced or estimated items>
 Risks: <schedule/cost/quality risks>
 Next: <what starts next>
 ```
@@ -152,4 +191,5 @@ Next: <what starts next>
 
 - Every task is Published or explicitly cancelled by the Director.
 - Every gate has a recorded Director approval.
+- The ledger has no unpriced records or unexplained estimates, and matches Jira if it is configured.
 - The final cut and mix are approved and delivered.

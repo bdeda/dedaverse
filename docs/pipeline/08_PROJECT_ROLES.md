@@ -62,6 +62,9 @@ These apply to every agent role skill.
    as soon as they are found, with a proposed resolution.
 8. **Record decisions.** Director approvals and notes are recorded against the asset or shot so later roles
    can see why something is the way it is.
+9. **Record costs as they happen.** Every agent records its measured model usage and machine time in the
+   project ledger at each work session and submission, so the Director can get an accurate cost for any asset
+   (see [Cost Tracking](09_COST_TRACKING.md)).
 
 ### Standard task lifecycle
 
@@ -93,7 +96,7 @@ Every role agent reports status using these states so the Producer can track the
 | | |
 |---|---|
 | **Purpose** | Turns the Director's intent into a plan and drives it to completion across all agent roles. |
-| **Responsibilities** | Breaks the project into sequences, shots, assets, and tasks; builds and maintains the schedule and dependency order; assigns tasks to role agents with the context and approved targets they need; tracks status, time, and cost per asset/element; assembles review packages and brings decisions to the Director; routes Director notes to the right roles; resolves cross-role dependencies and escalates conflicts. |
+| **Responsibilities** | Breaks the project into sequences, shots, assets, and tasks; builds and maintains the schedule and dependency order; assigns tasks to role agents with the context and approved targets they need; tracks status; maintains the cost ledger and answers the Director's cost questions per [Cost Tracking](09_COST_TRACKING.md); assembles review packages and brings decisions to the Director; routes Director notes to the right roles; resolves cross-role dependencies and escalates conflicts. |
 | **Inputs** | Director direction and approvals; status and submissions from all role agents; project data in Dedaverse and the task manager. |
 | **Outputs** | Project plan, task assignments, status reports, review packages, decision requests, recorded decisions. |
 | **Hands off to** | Every role agent (tasks); the Director (reviews and decisions). |

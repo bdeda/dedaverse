@@ -90,7 +90,12 @@ perform the other roles**, with a **Producer agent orchestrating** the work
 | `editor` | The cut and shot frame ranges |
 
 All skills share one set of conventions (approval rules, where work lives in the project, naming, task status,
-and review packages), documented in [`.github/skills/README.md`](.github/skills/README.md).
+review packages, and cost recording), documented in [`.github/skills/README.md`](.github/skills/README.md).
+
+As the Director, you can ask the Producer what any asset, shot, or element has cost to build. Every agent records
+its measured model usage and machine time in a project cost ledger when the work happens. The Producer records
+your review time and external spend. Reports give a money total plus the raw quantities and rates behind it,
+with estimates and unpriced items called out. See [Cost Tracking](docs/pipeline/09_COST_TRACKING.md).
 
 
 ## Getting Started

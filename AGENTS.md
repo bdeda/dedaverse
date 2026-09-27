@@ -548,8 +548,11 @@ When operating in a production role:
 - **The Director/Cinematographer is human** and has no skill. Never make or assume a creative decision; propose
   options and escalate through the Producer.
 - **Load the role's skill and the shared conventions** in [.github/skills/README.md](.github/skills/README.md)
-  (approval rules, content folder layout, naming and versioning, task states, review packages, blocker reports).
+  (approval rules, content folder layout, naming and versioning, task states, review packages, cost recording, blocker reports).
 - **Only change the elements your role owns**, and never overwrite approved versions.
+- **Record costs when they are incurred**: measured model usage and machine time go in the task's ledger file,
+  following [docs/pipeline/09_COST_TRACKING.md](docs/pipeline/09_COST_TRACKING.md). The Producer uses the ledger to
+  answer the Director's cost questions.
 - **Follow the process docs** in [docs/pipeline/](docs/pipeline/README.md) that each skill references.
 - When adding or changing a role skill, keep `.github/skills/README.md`,
   [docs/pipeline/08_PROJECT_ROLES.md](docs/pipeline/08_PROJECT_ROLES.md), the README, and this section consistent.

@@ -117,13 +117,34 @@ Every submission for review contains:
 2. **Target** — the approved reference being matched (concept, board, pose target, color key, previz, ...).
 3. **Side-by-side** — the current work next to the target from the same angle, framing, lighting, or timing.
 4. **Change note** — what changed since the previous version and which notes it addresses.
+   Confirm that cost records for this work are in the task ledger (§6).
 5. **Options** (when a decision is needed) — 2–4 clearly labeled, distinct options with trade-offs and a
    recommendation.
 6. **Open issues** — known problems, risks, and anything blocked.
 
 Save the package to the entity's `review/` folder and send it to the Producer.
 
-### 6. Blocker report
+### 6. Cost recording
+
+Every cost is recorded when it is incurred, in the project ledger defined in
+[docs/pipeline/09_COST_TRACKING.md](../../docs/pipeline/09_COST_TRACKING.md). The Director relies on it to learn
+what each asset cost to build.
+
+- **Only work on a task.** Every task brief names your ledger file: `.dedaverse/cost-ledger/tasks/<task_id>.jsonl`.
+  Only you write to it.
+- **Record your model usage** (`agent_usage`) at the end of every work session and at every submission. Use the
+  token counts the model runtime reports; do not estimate. If the runtime reports no usage, record an estimate
+  with `measured: false`, `source: "estimate"`, and the method in `note`, and tell the Producer.
+- **Record machine time** (`compute`) from the job log for every render, simulation, bake, or solve you run,
+  including failed jobs.
+- **Tag rework**: set `rework: true` with a `rework_reason` (`director-change`, `review-notes`, or `defect`)
+  when you are redoing submitted work.
+- **Never edit or delete a record.** Fix a mistake by appending a correction record.
+- Director time and external spend are recorded by the Producer.
+
+A submission without up-to-date cost records is incomplete and will be returned.
+
+### 7. Blocker report
 
 ```
 Blocker: <one line>
