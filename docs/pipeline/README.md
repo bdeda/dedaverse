@@ -19,6 +19,7 @@ make it visible to everyone, and verify every downstream step against it.**
 | 5 | [Story, Editorial, Previz and Layout](05_STORY_EDITORIAL_PREVIZ_LAYOUT.md) | Storyboards, the editorial cut, previsualization, and shot layout for linear media. |
 | 6 | [VFX, Lighting and Audio](06_VFX_LIGHTING_AUDIO.md) | Simulation and effects (offline and in-engine), shot lighting, dialogue, ambience and music. |
 | 7 | [Roles and Art Skills](07_ROLES_AND_SKILLS.md) | The disciplines required at each step, the skills each needs, and a pipeline-step × skill matrix. |
+| 8 | [Project Roles](08_PROJECT_ROLES.md) | High-level role definitions for a team with a human Director/Cinematographer and agent roles orchestrated by a Producer agent; review gates; how roles map to skills. |
 
 ## Pipeline at a glance
 
