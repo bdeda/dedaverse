@@ -4,8 +4,8 @@ This document defines the roles on a Dedaverse production team where **one human
 Director/Cinematographer** and **AI agents perform every other role**. The **Producer** agent orchestrates the
 agents and is the Director's single point of contact for planning and status.
 
-Each role below is intended to map to a **skill** — a set of instructions defining how an agent operates in
-that role. This document is the high-level contract those skills are written against: purpose, responsibilities,
+Each agent role below maps to a **skill** in [`.github/skills/`](../../.github/skills/README.md) — a set of
+instructions defining how an agent operates in that role. This document is the high-level contract those skills are written against: purpose, responsibilities,
 inputs, outputs, hand-offs, and boundaries. Detailed craft guidance for each discipline lives in documents 1–7
 of this guide and in [Roles and Art Skills](07_ROLES_AND_SKILLS.md).
 
@@ -256,7 +256,7 @@ The Producer brings work to the Director at these gates. Work does not move past
 
 ## 8.5 From role to skill
 
-Each role will be implemented as a skill. A role skill should define at least:
+Each role is implemented as a skill in [`.github/skills/`](../../.github/skills/README.md), which also defines the conventions shared by all role skills. A role skill defines at least:
 
 - **Mission** — the role's purpose from §8.3.
 - **Required inputs** — what must exist and be approved before work starts, and what to do if it is missing.

@@ -470,6 +470,8 @@ def load_project(self, proj_name: str) -> ProjectConfig | None:
 ### 16. References
 
 - **[docs/ASSET_METADATA_DESIGN.md](docs/ASSET_METADATA_DESIGN.md)** - Directory structure and USD metadata file layout for `.dedaverse` and asset content folders; keep agentic and manual code changes aligned with this design
+- **[docs/pipeline/](docs/pipeline/README.md)** - Production pipeline guide (visual development through editorial) and [Project Roles](docs/pipeline/08_PROJECT_ROLES.md) for the human Director + agent team
+- **[.github/skills/](.github/skills/README.md)** - Production role skills for agents (see [Production Role Skills](#-production-role-skills))
 - **BRANCHING_STRATEGY.md** - Git branching workflow; use this when creating branches and PRs
 - **IMPROVEMENTS.md** - List of known issues and improvements
 - **README.md** - Project overview and getting started
@@ -519,6 +521,38 @@ When asked to modify or add code:
 8. **Test imports** - Ensure new code can be imported; add imports to `tests/test_imports.py` for new modules
 9. **Run pytest** - After making code changes, run pytest in the project venv: `python -m pytest tests/` (see [Testing](#10-testing)). Unit tests must not hit the network; use mocks for I/O
 10. **Update docs** - Add/update docstrings as needed
+
+## 🎬 Production Role Skills
+
+Besides writing code for Dedaverse, agents can work *on a production* managed by Dedaverse by taking on a
+production role. Each role is defined by a skill in `.github/skills/<skill-name>/SKILL.md`:
+
+| Skill | Role |
+|-------|------|
+| `producer` | Orchestrator: plans, assigns tasks to role agents, tracks status and cost, brings reviews and decisions to the Director |
+| `narrative-designer` | Story, script, characters, dialogue |
+| `concept-artist` | Designs, art bibles, Visual Bible, color script, pose targets |
+| `storyboard-artist` | Storyboards and shot list |
+| `previz-artist` | Previz and layout |
+| `modeller` | Geometry, UVs, turnarounds |
+| `surfacing-lookdev-artist` | Textures, materials, shaders, material library |
+| `rigger` | Skeletons, skinning, controls, deformation tests |
+| `animator` | Body and facial animation, mocap integration |
+| `vfx-artist` | Effects and effects library |
+| `lighting-artist` | Shot lighting, compositing, final color |
+| `audio-artist` | Dialogue, ambience, effects, music, mix |
+| `editor` | The cut and shot frame ranges |
+
+When operating in a production role:
+
+- **The Director/Cinematographer is human** and has no skill. Never make or assume a creative decision; propose
+  options and escalate through the Producer.
+- **Load the role's skill and the shared conventions** in [.github/skills/README.md](.github/skills/README.md)
+  (approval rules, content folder layout, naming and versioning, task states, review packages, blocker reports).
+- **Only change the elements your role owns**, and never overwrite approved versions.
+- **Follow the process docs** in [docs/pipeline/](docs/pipeline/README.md) that each skill references.
+- When adding or changing a role skill, keep `.github/skills/README.md`,
+  [docs/pipeline/08_PROJECT_ROLES.md](docs/pipeline/08_PROJECT_ROLES.md), the README, and this section consistent.
 
 ## 📝 Notes
 
