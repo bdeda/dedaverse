@@ -102,7 +102,16 @@ Implementation: `Project.asset_directory_for_prim_path(prim_path)` returns `root
 
 So: **metadata path under `.dedaverse`** and **content path under project root** both follow the same logical hierarchy (prim path); metadata uses `.dedaverse` and per-entity USDA files, while content uses plain directories under the project root.
 
-## 4. References in Code
+## 4. Production Cost Ledger
+
+The production cost ledger lives in `{project_root}/.dedaverse/cost-ledger/` (rates, per-task records, Director time,
+external spend). It is append-only JSON Lines, is currently written by agents following a documented process, and
+has no code API yet. Its layout and record format are defined in
+[pipeline/09_COST_TRACKING.md](pipeline/09_COST_TRACKING.md). The directory name contains a hyphen, which is not valid in a USD prim name, so it can never collide
+with a collection's `children_metadata_dir`. Code that scans or writes `.dedaverse` must leave the
+`cost-ledger/` directory alone.
+
+## 5. References in Code
 
 - **Project**: `src/deda/core/types/_project.py` — `metadata_dir`, `metadata_path`, `user_settings_path`, `children_metadata_dir`, `asset_directory_for_prim_path`, `stage` (root + session layer), `save_session_layer()`, stage creation.
 - **Collection / Asset**: `src/deda/core/types/_asset.py`, `_collection.py` — `metadata_path`, `children_metadata_dir`, `rootdir` (content), `add_asset` / `add_collection`, `remove_child`, `_create_entity_usda`, sublayer add/remove.

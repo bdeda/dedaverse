@@ -11,6 +11,7 @@ the assets you are creating.
 - [Art](#focus-on-art-not-on-tech)
 - [Production](#production-concerns)
 - [Tech](#the-tech)
+- [Production Pipeline and Agent Roles](#production-pipeline-and-agent-roles)
 - [Getting Started](#getting-started)
 
 
@@ -59,6 +60,42 @@ The Plugin Manager can be configured to find plugins developed by internal tech 
 ### Icons
 
 Generic plugin icon from Vecteezy.com
+
+
+## Production Pipeline and Agent Roles
+
+The [production pipeline guide](docs/pipeline/README.md) describes how a team builds a film or game with 2D and 3D
+art: visual development and art bibles, asset construction, rigging, animation, storyboards and previz, VFX,
+lighting, audio, and editorial, plus the art skills each step needs.
+
+Dedaverse productions can be run by a mixed team where **a human is the Director/Cinematographer** and **AI agents
+perform the other roles**, with a **Producer agent orchestrating** the work
+(see [Project Roles](docs/pipeline/08_PROJECT_ROLES.md)). Each agent role is defined by a skill in
+[`.github/skills/`](.github/skills/README.md):
+
+| Skill | Role |
+|-------|------|
+| `producer` | Plans, assigns, tracks, and brings reviews and decisions to the Director |
+| `narrative-designer` | Story, script, characters, dialogue |
+| `concept-artist` | Designs, art bibles, Visual Bible, color script, pose targets |
+| `storyboard-artist` | Storyboards and shot list |
+| `previz-artist` | Previz and layout |
+| `modeller` | Geometry, UVs, turnarounds |
+| `surfacing-lookdev-artist` | Textures, materials, shaders, material library |
+| `rigger` | Skeletons, skinning, controls, deformation tests |
+| `animator` | Body and facial animation, mocap integration |
+| `vfx-artist` | Effects and effects library |
+| `lighting-artist` | Shot lighting, compositing, final color |
+| `audio-artist` | Dialogue, ambience, effects, music, mix |
+| `editor` | The cut and shot frame ranges |
+
+All skills share one set of conventions (approval rules, where work lives in the project, naming, task status,
+review packages, and cost recording), documented in [`.github/skills/README.md`](.github/skills/README.md).
+
+As the Director, you can ask the Producer what any asset, shot, or element has cost to build. Every agent records
+its measured model usage and machine time in a project cost ledger when the work happens. The Producer records
+your review time and external spend. Reports give a money total plus the raw quantities and rates behind it,
+with estimates and unpriced items called out. See [Cost Tracking](docs/pipeline/09_COST_TRACKING.md).
 
 
 ## Getting Started
