@@ -20,6 +20,12 @@
 Finds the Maya install and launches it with the dedaverse environment. Set the
 MAYA_2027_LOCATION env var to override the default Autodesk install location.
 
+Maya runs the maya-usd that Autodesk ships (USD 25.11) unless DEDAVERSE_MAYAUSD_DIR names the
+install directory of a maya-usd built from source, such as the bdeda/maya-usd fork on USD 26.08
+(it holds mayaUSD.mod; see that repository's doc/build_with_usd_26.md). Its modules then go
+first on MAYA_MODULE_PATH and bring their own USD, so Autodesk's USD is not added to the
+environment. DEDACAM_BUILD_DIR must then point at a dedacam Maya build made against that USD.
+
 """
 import os
 import logging
@@ -41,6 +47,9 @@ _DEPS_DIR = Path.home() / '.dedaverse' / 'maya' / 'site-packages'
 _USD_ROOT = Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'Autodesk' / 'MayaUSD' / f'Maya{MAYA_VERSION}'
 # Dedacam's staged Maya module (dedacam.mod); override the build dir with DEDACAM_BUILD_DIR.
 _DEDACAM_BUILD_DIR = Path(os.environ.get('DEDACAM_BUILD_DIR', r'F:\git\bdeda\camera\build'))
+# Opt in to a maya-usd built from source (the bdeda/maya-usd fork, on a newer USD than Maya ships):
+# the directory of its install, which holds mayaUSD.mod.
+ENV_MAYAUSD_DIR = 'DEDAVERSE_MAYAUSD_DIR'
 _DEFAULT_LOCATION = Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'Autodesk' / f'Maya{MAYA_VERSION}'
 
 
@@ -102,19 +111,31 @@ class Maya(deda.core.Application):
         env['PYTHONPATH'] = _strip_usd(env.get('PYTHONPATH', ''))
         env.pop('USD_ROOT', None)
         env.pop('PXR_PLUGINPATH_NAME', None)
+        modules = []
+        custom_mayausd = os.environ.get(ENV_MAYAUSD_DIR)
+        if custom_mayausd and not (Path(custom_mayausd) / 'mayaUSD.mod').is_file():
+            log.warning(f'{ENV_MAYAUSD_DIR}={custom_mayausd} has no mayaUSD.mod; using the maya-usd that Maya ships.')
+            custom_mayausd = None
+        if custom_mayausd:
+            # First, so its modules win over Autodesk's of the same name. It brings its own USD
+            # (and Python modules) through its module file.
+            modules.append(custom_mayausd)
         dedacam_module = _DEDACAM_BUILD_DIR / 'maya'
         if (dedacam_module / 'dedacam.mod').is_file():
-            env['MAYA_MODULE_PATH'] = os.pathsep.join(
-                [str(dedacam_module)] + ([env['MAYA_MODULE_PATH']] if env.get('MAYA_MODULE_PATH') else []))
+            modules.append(str(dedacam_module))
         else:
             log.warning(f'Dedacam Maya module not found in {dedacam_module}; dedacam will not be available in Maya.')
+        if modules:
+            env['MAYA_MODULE_PATH'] = os.pathsep.join(
+                modules + ([env['MAYA_MODULE_PATH']] if env.get('MAYA_MODULE_PATH') else []))
         pythonpath = [str(Path(deda.__file__).resolve().parent.parent), str(Path(__file__).parent / 'startup')]
         if _DEPS_DIR.is_dir():
             pythonpath.append(str(_DEPS_DIR))
         else:
             log.warning(f'Maya dependencies not found at {_DEPS_DIR}; importing deda in Maya may fail.')
         # Maya only puts pxr on the path once the MayaUSD plugin loads; deda.core needs it at import.
-        usd_dirs = sorted(_USD_ROOT.glob('*/mayausd/USD')) if _USD_ROOT.is_dir() else []
+        # A custom maya-usd supplies its own USD, so do not add Autodesk's.
+        usd_dirs = sorted(_USD_ROOT.glob('*/mayausd/USD')) if _USD_ROOT.is_dir() and not custom_mayausd else []
         if usd_dirs:
             usd = usd_dirs[-1]
             pythonpath.append(str(usd / 'lib' / 'python'))

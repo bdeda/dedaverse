@@ -34,5 +34,8 @@ def _build_deda_menu():
         traceback.print_exc()
 
 
-# The Qt main window and menu bar do not exist yet while userSetup runs.
-cmds.evalDeferred(_build_deda_menu, lowestPriority=True)
+# The Qt main window and menu bar do not exist yet while userSetup runs, so build the menu once
+# Maya is idle. Batch and standalone Maya (maya -batch, mayapy, Render) have no UI at all, and
+# deferring there blocks maya.standalone.initialize, so leave them alone.
+if not cmds.about(batch=True):
+    cmds.evalDeferred(_build_deda_menu, lowestPriority=True)
