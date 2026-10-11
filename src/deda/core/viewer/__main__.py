@@ -72,10 +72,11 @@ def _make_splash_pixmap() -> QtGui.QPixmap:
 @click.command()
 @click.argument('usd_path', required=False, type=click.Path(exists=False))
 def viewer(usd_path):
-    """Run the Dedaverse viewer, optionally opening a USD file.
+    """Run the Dedaverse viewer, optionally opening a file.
 
-    USD_PATH is an optional path to a USD file (.usd, .usda, .usdc, .usdz)
-    to open when the viewer starts.
+    USD_PATH is an optional path to open when the viewer starts: a USD file
+    (.usd, .usda, .usdc, .usdz), or a 2D image, image sequence (any one frame, or a
+    pattern such as shot.####.exr) or video.
     """
     deda.log.initialize(loglevel=logging.INFO)
     app = Application()
@@ -92,7 +93,7 @@ def viewer(usd_path):
     splash.finish(w)
     if usd_path:
         path_str = str(Path(usd_path).resolve())
-        QtCore.QTimer.singleShot(0, lambda: w._open_stage_file(path_str))
+        QtCore.QTimer.singleShot(0, lambda: w._open_path(path_str))
     return app.exec()
 
 

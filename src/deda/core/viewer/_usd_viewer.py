@@ -902,6 +902,11 @@ class UsdViewWidget(QtWidgets.QWidget):
         self.viewSettings._cameraMaskMode = CameraMaskModes.FULL
 
     @property
+    def stage_view(self):
+        """The usdview StageView that renders the stage."""
+        return self._view
+
+    @property
     def viewSettings(self):
         return self._view._dataModel.viewSettings
 

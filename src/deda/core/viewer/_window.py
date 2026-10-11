@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote
 
-from pxr import Usd, UsdUtils
+from pxr import Usd, UsdGeom, UsdUtils
 
 from PySide6 import QtWidgets, QtCore, QtGui
 
@@ -37,6 +37,9 @@ from deda.core.types import Element, Project
 from ._usd_viewer import UsdViewWidget
 
 from . import _annotation
+from . import _dedacam
+from . import _media
+from . import _media_view
 from . import _playbar
 from . import _reticle
 from . import _slate
@@ -182,7 +185,14 @@ class MainWindow(QtWidgets.QMainWindow):
         w.setLayout(vbox)
         
         self._viewer = UsdViewWidget(stage=None, parent=self)
-        vbox.addWidget(self._viewer, 1)
+        self._media_view = _media_view.MediaViewWidget(parent=self)
+        self._media_view.errorOccurred.connect(lambda message: self.statusBar().showMessage(message, 10000))
+        # Page 0 is the 3D (USD) viewport, page 1 the 2D media viewport.
+        self._stack = QtWidgets.QStackedWidget(self)
+        self._stack.addWidget(self._viewer)
+        self._stack.addWidget(self._media_view)
+        vbox.addWidget(self._stack, 1)
+        self._mode = '3d'
 
         self._loading_overlay = LoadingOverlay(parent=self._viewer)
         self._loading_overlay.raise_()
@@ -200,6 +210,9 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self._play_timer = QtCore.QTimer(self)
         self._play_timer.timeout.connect(self._on_play_tick)
+
+        self._dedacam = _dedacam.DedacamController(self._viewer.stage_view)
+        self.setAcceptDrops(True)
         
         self._build_menu_bar()
         self._restore_view_settings()
@@ -258,6 +271,215 @@ class MainWindow(QtWidgets.QMainWindow):
         view_menu.addSeparator()
         self._build_aspect_ratio_submenu(view_menu)
         self._build_environment_texture_submenu(view_menu)
+        view_menu.addSeparator()
+        self._build_camera_menu(view_menu)
+        self._build_media_menu(view_menu)
+        self._build_dedacam_menu(view_menu)
+        self._update_mode_actions()
+
+    # -- 2D media and dedacam ------------------------------------------------------------
+
+    def _build_camera_menu(self, view_menu):
+        """The Camera submenu: the free camera, or one of the stage's cameras."""
+        self._camera_menu = view_menu.addMenu('Cam&era')
+        self._camera_menu.aboutToShow.connect(self._populate_camera_menu)
+
+    def _stage_camera_paths(self):
+        """Paths of the cameras on the open stage."""
+        stage = self._viewer.stage
+        return [prim.GetPath() for prim in stage.Traverse() if prim.IsA(UsdGeom.Camera)] if stage else []
+
+    def _populate_camera_menu(self):
+        """List the stage's cameras each time the menu opens, since the stage changes."""
+        self._camera_menu.clear()
+        group = QtGui.QActionGroup(self._camera_menu)
+        group.setExclusive(True)
+        current = self._viewer.viewSettings.cameraPrim
+        current_path = current.GetPath() if current else None
+        free = self._camera_menu.addAction('Free Camera')
+        free.setCheckable(True)
+        free.setChecked(current_path is None)
+        free.triggered.connect(lambda: self._on_camera_selected(None))
+        group.addAction(free)
+        for camera_path in self._stage_camera_paths():
+            action = self._camera_menu.addAction(str(camera_path))
+            action.setCheckable(True)
+            action.setChecked(camera_path == current_path)
+            action.triggered.connect((lambda p: lambda: self._on_camera_selected(p))(camera_path))
+            group.addAction(action)
+
+    def _on_camera_selected(self, camera_path):
+        """Look through a stage camera, or back through the free camera when ``camera_path`` is None."""
+        stage = self._viewer.stage
+        self._viewer.viewSettings.cameraPrim = stage.GetPrimAtPath(camera_path) if camera_path else None
+        self._viewer.update_view(resetCam=False, forceComputeBBox=False)
+
+    def _build_media_menu(self, view_menu):
+        """Menu items for the 2D viewport: channels, exposure, size and the info overlay."""
+        self._media_actions = []
+        channels_menu = view_menu.addMenu('2D &Channels')
+        group = QtGui.QActionGroup(self)
+        group.setExclusive(True)
+        labels = {'rgba': 'RGBA', 'rgb': 'RGB (no alpha)', 'r': 'Red', 'g': 'Green', 'b': 'Blue', 'a': 'Alpha'}
+        self._channel_actions = {}
+        for index, channel in enumerate(_media.CHANNEL_MODES, start=1):
+            action = channels_menu.addAction(labels[channel])
+            action.setCheckable(True)
+            action.setChecked(channel == 'rgba')
+            action.setShortcut(QtGui.QKeySequence(f'Ctrl+{index}'))
+            action.triggered.connect((lambda c: lambda: self._on_channel_selected(c))(channel))
+            group.addAction(action)
+            self._channel_actions[channel] = action
+        self._media_actions.append(channels_menu.menuAction())
+        for text, shortcut, stops in (('Exposure &Up', 'Ctrl+Up', 1.0), ('Exposure &Down', 'Ctrl+Down', -1.0)):
+            action = view_menu.addAction(text)
+            action.setShortcut(QtGui.QKeySequence(shortcut))
+            action.triggered.connect((lambda s: lambda: self._on_exposure_step(s))(stops))
+            self._media_actions.append(action)
+        reset_action = view_menu.addAction('Reset &Exposure')
+        reset_action.setShortcut(QtGui.QKeySequence('Ctrl+0'))
+        reset_action.triggered.connect(lambda: self._on_exposure_step(None))
+        self._media_actions.append(reset_action)
+        actual_action = view_menu.addAction('&Actual Size (100%)')
+        actual_action.setShortcut(QtGui.QKeySequence('Ctrl+Shift+1'))
+        actual_action.triggered.connect(self._media_view.actual_size)
+        self._media_actions.append(actual_action)
+        info_action = view_menu.addAction('Show Media &Info')
+        info_action.setCheckable(True)
+        info_action.setChecked(True)
+        info_action.triggered.connect(self._media_view.set_show_hud)
+        self._media_actions.append(info_action)
+
+    def _build_dedacam_menu(self, view_menu):
+        """The Dedacam submenu: view modes and quality tiers for the 3D viewport."""
+        menu = view_menu.addMenu('&Dedacam')
+        if not _dedacam.DedacamController.is_available():
+            menu.setToolTipsVisible(True)
+            menu.setToolTip(f'Set {_dedacam.ENV_BUILD_DIR} to a dedacam usdview build to enable this.')
+        mode_group = QtGui.QActionGroup(self)
+        mode_group.setExclusive(True)
+        self._dedacam_mode_actions = {}
+        for mode in _dedacam.MODES:
+            action = menu.addAction(_dedacam.MODE_LABELS[mode])
+            action.setCheckable(True)
+            action.setChecked(mode == 'off')
+            action.triggered.connect((lambda m: lambda: self._on_dedacam_mode_selected(m))(mode))
+            mode_group.addAction(action)
+            self._dedacam_mode_actions[mode] = action
+        menu.addSeparator()
+        quality_group = QtGui.QActionGroup(self)
+        quality_group.setExclusive(True)
+        self._dedacam_quality_actions = {}
+        for tier in _dedacam.QUALITY_TIERS:
+            action = menu.addAction(f'Quality: {tier}')
+            action.setCheckable(True)
+            action.setChecked(tier == self._dedacam.quality)
+            action.triggered.connect((lambda t: lambda: self._on_dedacam_quality_selected(t))(tier))
+            quality_group.addAction(action)
+            self._dedacam_quality_actions[tier] = action
+        self._dedacam_menu = menu
+
+    @property
+    def mode(self) -> str:
+        """``'3d'`` while a USD stage is shown, ``'2d'`` for an image, sequence or video."""
+        return self._mode
+
+    def _set_mode(self, mode):
+        """Switch between the 3D and 2D viewports."""
+        self._stop_playback()
+        self._mode = mode
+        self._stack.setCurrentWidget(self._viewer if mode == '3d' else self._media_view)
+        self._playbar.setVisible(mode == '3d' or (
+            self._media_view.source is not None and self._media_view.source.frame_count > 1))
+        self._update_mode_actions()
+
+    def _update_mode_actions(self):
+        """Enable the menu items that belong to the current viewport."""
+        is_3d = self._mode == '3d'
+        for action in (self._dome_light_action, self._mask_opaque_action, self._show_hud_action,
+                       self._show_bboxes_action, self._slate_layer_action, self._annotation_layer_action):
+            action.setEnabled(is_3d)
+        self._dedacam_menu.menuAction().setEnabled(is_3d)
+        self._camera_menu.menuAction().setEnabled(is_3d)
+        for action in self._media_actions:
+            action.setEnabled(not is_3d)
+
+    def _open_path(self, file_path):
+        """Open a USD stage, image, image sequence or video, by its extension."""
+        if _media.is_media_file(file_path):
+            self._open_media_file(file_path)
+        else:
+            self._open_stage_file(file_path)
+
+    def _open_media_file(self, file_path):
+        """Show an image, image sequence (from any one of its files) or video in the 2D viewport."""
+        self._stop_playback()
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            source = _media.open_media(file_path)
+            self._media_view.set_source(source)
+        except _media.MediaError as err:
+            QtWidgets.QMessageBox.warning(self, 'Open Failed', str(err))
+            return
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        self._playbar.blockSignals(True)
+        self._playbar.setFrameRange(source.first_frame, source.last_frame)
+        self._playbar.setFrame(source.first_frame)
+        self._playbar.blockSignals(False)
+        self._set_mode('2d')
+        self.setWindowTitle(f'Dedaverse - {source.name}')
+        self._add_to_recent_files(file_path)
+
+    def _on_channel_selected(self, channel):
+        self._media_view.set_channel(channel)
+
+    def _on_exposure_step(self, stops):
+        """Change the 2D exposure by ``stops``, or reset it when ``stops`` is None."""
+        self._media_view.set_exposure(0.0 if stops is None else self._media_view.exposure + stops)
+
+    def _on_dedacam_mode_selected(self, mode):
+        try:
+            self._dedacam.set_mode(mode)
+        except _dedacam.DedacamUnavailable as err:
+            QtWidgets.QMessageBox.warning(self, 'Dedacam is not available', str(err))
+            self._dedacam_mode_actions['off'].setChecked(True)
+            return
+        if mode != 'off' and self._viewer.viewSettings.cameraPrim is None:
+            self.statusBar().showMessage(
+                'Dedacam is using the free camera, which has no lens or focus settings, so nothing is '
+                'out of focus. Pick a stage camera in View > Camera.', 12000)
+        self._viewer.update_view(resetCam=False, forceComputeBBox=False)
+
+    def _on_dedacam_quality_selected(self, tier):
+        self._dedacam.set_quality(tier)
+        if self._dedacam.mode != 'off':
+            self._viewer.update_view(resetCam=False, forceComputeBBox=False)
+
+    def _stop_playback(self):
+        """Stop the playback timer and any streaming video."""
+        self._play_timer.stop()
+        source = self._media_view.source
+        if source is not None and source.kind == 'video':
+            source.pause()
+
+    def _on_video_frame(self, image, frame):
+        """A streamed video frame arrived: show it and move the playbar without re-seeking."""
+        self._playbar.blockSignals(True)
+        self._playbar.setFrame(frame)
+        self._playbar.blockSignals(False)
+        self._media_view.show_decoded(image, frame)
+        if frame >= self._media_view.source.last_frame:
+            self._stop_playback()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        if paths:
+            self._open_path(paths[0])
 
     def eventFilter(self, obj, event):
         """Keep loading overlay sized to the viewer when the viewer is resized."""
@@ -556,7 +778,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._save_recent_files()
             self._update_recent_files_menu()
             return
-        self._open_stage_file(str(path))
+        self._open_path(str(path))
 
     def _open_stage_file(self, file_path):
         """Load a USD stage from file_path and update the viewer. Used by Open and Recent Files."""
@@ -565,7 +787,7 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             stage = Usd.Stage.Open(file_path)
             if stage:
-                self._play_timer.stop()
+                self._set_mode('3d')
                 self._viewer.stage = stage
                 # Resolve entity for title (project name) and content rootdir
                 self._opened_entity = Project.from_path(file_path)
@@ -616,15 +838,18 @@ class MainWindow(QtWidgets.QMainWindow):
         return Path(self._opened_entity.rootdir)
 
     def _on_open_file(self):
-        """Open a file dialog and load the selected USD stage."""
+        """Open a file dialog and load the selected USD stage, image, sequence or video."""
+        usd = '*.usd *.usda *.usdc *.usdz'
+        media = ' '.join(f'*{ext}' for ext in sorted(_media.MEDIA_EXTENSIONS))
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
-            'Open USD File',
+            'Open',
             '',
-            'USD Files (*.usd *.usda *.usdc *.usdz);;All Files (*)'
+            f'All Supported ({usd} {media});;USD Files ({usd});;'
+            f'Images and Video ({media});;All Files (*)'
         )
         if file_path:
-            self._open_stage_file(file_path)
+            self._open_path(file_path)
 
     def _on_save_annotations_to_notes(self):
         """Save annotation strokes and a viewport snapshot to notes/ under the asset root.
@@ -825,8 +1050,11 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QApplication.processEvents()
 
     def _on_playbar_frame_changed(self, frame):
-        """Sync the stage view to the playbar's current frame."""
-        self._viewer.set_current_frame(frame)
+        """Sync the viewport to the playbar's current frame."""
+        if self._mode == '2d':
+            self._media_view.set_frame(frame)
+        else:
+            self._viewer.set_current_frame(frame)
 
     def _get_stage_fps(self):
         """Return the stage's frames per second, or _DEFAULT_FPS if not set."""
@@ -837,15 +1065,26 @@ class MainWindow(QtWidgets.QMainWindow):
         return _DEFAULT_FPS if not fps or fps <= 0 else fps
 
     def _on_play_clicked(self):
-        """Start playback at the stage's FPS."""
-        self._play_timer.stop()
+        """Start playback at the stage's FPS, or the media's."""
+        self._stop_playback()
+        if self._mode == '2d':
+            source = self._media_view.source
+            if source is None or source.frame_count < 2:
+                return
+            if source.kind == 'video':
+                if self._playbar.frame() >= source.last_frame:
+                    self._media_view.set_frame(source.first_frame)
+                source.play(self._on_video_frame)
+            else:
+                self._play_timer.start(max(1, int(1000.0 / source.fps)))
+            return
         fps = self._get_stage_fps()
         interval_ms = max(1, int(1000.0 / fps))
         self._play_timer.start(interval_ms)
 
     def _on_stop_clicked(self):
         """Stop playback."""
-        self._play_timer.stop()
+        self._stop_playback()
 
     def _on_play_tick(self):
         """Advance playbar by one frame; loop to first frame when reaching the end."""
@@ -857,8 +1096,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._playbar.setFrame(current + 1)
 
     def _on_frame_all(self):
-        """Frame the view to fit all geometry."""
-        self._viewer.update_view(resetCam=True, forceComputeBBox=True)
+        """Frame the view to fit all geometry, or fit the image in the 2D viewport."""
+        if self._mode == '2d':
+            self._media_view.fit()
+        else:
+            self._viewer.update_view(resetCam=True, forceComputeBBox=True)
 
     def _on_dome_light_toggled(self):
         """Enable or disable the stage view dome light based on menu check state."""
@@ -885,6 +1127,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def closeEvent(self, event):
         self._save_view_settings()
+        self._stop_playback()
+        self._media_view.set_source(None)
         self._viewer.closeEvent(event)
         super().closeEvent(event)
         

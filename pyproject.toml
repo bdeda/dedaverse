@@ -23,6 +23,9 @@ maintainers = [
 readme = "README.md"
 
 [project.optional-dependencies]
+media = [
+  "OpenEXR>=3.3",  # EXR images and sequences in the viewer (deda.core.viewer._media)
+]
 dev = [
   "pre-commit>=4.6.0",
   "pytest>=9.1.0",
