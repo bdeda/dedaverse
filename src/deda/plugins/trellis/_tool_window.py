@@ -99,10 +99,12 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
         if service and hasattr(service, 'get_base_url'):
             base_url = service.get_base_url()
         
+        self._client_error = None
         try:
             self._api_client = TrellisApiClient(base_url=base_url)
-        except ImportError:
-            log.error('requests package not available for Trellis API client')
+        except ImportError as err:
+            self._client_error = str(err)
+            log.error(f'Trellis API client not available: {err}')
         
         self.setWindowTitle('Trellis - 3D Model Generation from Images')
         self.setMinimumSize(800, 600)
@@ -123,6 +125,14 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
         # Connection status bar
         self._status_bar = QtWidgets.QStatusBar()
         self.setStatusBar(self._status_bar)
+        self._start_server_btn = QtWidgets.QPushButton('Start TRELLIS.2 Server')
+        self._start_server_btn.clicked.connect(self._on_start_server_clicked)
+        self._start_server_btn.setVisible(False)
+        self._status_bar.addPermanentWidget(self._start_server_btn)
+        # While the server loads its model (minutes), poll until it answers.
+        self._server_poll_timer = QtCore.QTimer(self)
+        self._server_poll_timer.setInterval(3000)
+        self._server_poll_timer.timeout.connect(self._update_connection_status)
         self._update_connection_status()
         
         # Create main content
@@ -199,11 +209,18 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
         seed_layout.addWidget(self._randomize_seed_check)
         seed_layout.addStretch()
         settings_layout.addRow('Seed:', seed_layout)
+
+        self._resolution_combo = QtWidgets.QComboBox()
+        self._resolution_combo.addItems(['512', '1024', '1536'])
+        self._resolution_combo.setCurrentText('512')
+        self._resolution_combo.setToolTip(
+            'Output resolution. TRELLIS.2 asks for a 24 GB GPU; on smaller cards stay at 512.')
+        settings_layout.addRow('Resolution:', self._resolution_combo)
         
         # Stage 1: Sparse Structure
         settings_layout.addRow(QtWidgets.QLabel('<b>Stage 1: Sparse Structure Generation</b>'))
         self._ss_guidance_spin = QtWidgets.QDoubleSpinBox()
-        self._ss_guidance_spin.setRange(0.0, 10.0)
+        self._ss_guidance_spin.setRange(1.0, 10.0)
         self._ss_guidance_spin.setValue(7.5)
         self._ss_guidance_spin.setSingleStep(0.1)
         settings_layout.addRow('Guidance Strength:', self._ss_guidance_spin)
@@ -213,18 +230,31 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
         self._ss_steps_spin.setValue(12)
         settings_layout.addRow('Sampling Steps:', self._ss_steps_spin)
         
-        # Stage 2: Structured Latent
-        settings_layout.addRow(QtWidgets.QLabel('<b>Stage 2: Structured Latent Generation</b>'))
-        self._slat_guidance_spin = QtWidgets.QDoubleSpinBox()
-        self._slat_guidance_spin.setRange(0.0, 10.0)
-        self._slat_guidance_spin.setValue(3.0)
-        self._slat_guidance_spin.setSingleStep(0.1)
-        settings_layout.addRow('Guidance Strength:', self._slat_guidance_spin)
-        
-        self._slat_steps_spin = QtWidgets.QSpinBox()
-        self._slat_steps_spin.setRange(1, 50)
-        self._slat_steps_spin.setValue(12)
-        settings_layout.addRow('Sampling Steps:', self._slat_steps_spin)
+        # Stage 2: Shape
+        settings_layout.addRow(QtWidgets.QLabel('<b>Stage 2: Shape Generation</b>'))
+        self._shape_guidance_spin = QtWidgets.QDoubleSpinBox()
+        self._shape_guidance_spin.setRange(1.0, 10.0)
+        self._shape_guidance_spin.setValue(7.5)
+        self._shape_guidance_spin.setSingleStep(0.1)
+        settings_layout.addRow('Guidance Strength:', self._shape_guidance_spin)
+
+        self._shape_steps_spin = QtWidgets.QSpinBox()
+        self._shape_steps_spin.setRange(1, 50)
+        self._shape_steps_spin.setValue(12)
+        settings_layout.addRow('Sampling Steps:', self._shape_steps_spin)
+
+        # Stage 3: Material
+        settings_layout.addRow(QtWidgets.QLabel('<b>Stage 3: Material Generation</b>'))
+        self._tex_guidance_spin = QtWidgets.QDoubleSpinBox()
+        self._tex_guidance_spin.setRange(1.0, 10.0)
+        self._tex_guidance_spin.setValue(1.0)
+        self._tex_guidance_spin.setSingleStep(0.1)
+        settings_layout.addRow('Guidance Strength:', self._tex_guidance_spin)
+
+        self._tex_steps_spin = QtWidgets.QSpinBox()
+        self._tex_steps_spin.setRange(1, 50)
+        self._tex_steps_spin.setValue(12)
+        settings_layout.addRow('Sampling Steps:', self._tex_steps_spin)
         
         parent_layout.addWidget(settings_group)
         
@@ -267,16 +297,16 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
         
         # GLB extraction settings
         glb_settings_layout = QtWidgets.QFormLayout()
-        self._mesh_simplify_spin = QtWidgets.QDoubleSpinBox()
-        self._mesh_simplify_spin.setRange(0.9, 0.98)
-        self._mesh_simplify_spin.setValue(0.95)
-        self._mesh_simplify_spin.setSingleStep(0.01)
-        glb_settings_layout.addRow('Mesh Simplify:', self._mesh_simplify_spin)
-        
+        self._decimation_spin = QtWidgets.QSpinBox()
+        self._decimation_spin.setRange(100000, 1000000)
+        self._decimation_spin.setValue(500000)
+        self._decimation_spin.setSingleStep(50000)
+        glb_settings_layout.addRow('Target Face Count:', self._decimation_spin)
+
         self._texture_size_spin = QtWidgets.QSpinBox()
-        self._texture_size_spin.setRange(512, 2048)
-        self._texture_size_spin.setValue(1024)
-        self._texture_size_spin.setSingleStep(512)
+        self._texture_size_spin.setRange(1024, 4096)
+        self._texture_size_spin.setValue(2048)
+        self._texture_size_spin.setSingleStep(1024)
         glb_settings_layout.addRow('Texture Size:', self._texture_size_spin)
         output_layout.addLayout(glb_settings_layout)
         
@@ -292,10 +322,6 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
         self._extract_usd_btn.clicked.connect(self._on_extract_usd_clicked)
         extract_btn_layout.addWidget(self._extract_usd_btn)
         
-        self._extract_gaussian_btn = QtWidgets.QPushButton('Extract Gaussian (PLY)')
-        self._extract_gaussian_btn.setEnabled(False)
-        self._extract_gaussian_btn.clicked.connect(self._on_extract_gaussian_clicked)
-        extract_btn_layout.addWidget(self._extract_gaussian_btn)
         output_layout.addLayout(extract_btn_layout)
         
         # Status display
@@ -341,16 +367,55 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
 
     def _update_connection_status(self):
         """Update the connection status bar."""
+        can_start = bool(self._service and hasattr(self._service, 'can_start_server')
+                         and self._service.can_start_server())
         if self._api_client:
             if self._api_client.check_connection():
+                self._server_poll_timer.stop()
+                self._start_server_btn.setVisible(False)
                 self._status_bar.showMessage('Connected to Trellis', 5000)
                 self._status_bar.setStyleSheet('color: green;')
+            elif self._server_poll_timer.isActive():
+                if self._service.server_running():
+                    self._status_bar.showMessage('Starting TRELLIS.2 server (loading the model takes a while)...', 0)
+                    self._status_bar.setStyleSheet('color: orange;')
+                else:
+                    self._server_poll_timer.stop()
+                    self._start_server_btn.setVisible(can_start)
+                    self._status_bar.showMessage(
+                        'The TRELLIS.2 server exited. See the server log: ' + str(self._service.log_path()), 0)
+                    self._status_bar.setStyleSheet('color: red;')
             else:
-                self._status_bar.showMessage('Not connected to Trellis. Make sure Trellis server is running.', 0)
+                self._start_server_btn.setVisible(can_start)
+                hint = ' Use "Start TRELLIS.2 Server".' if can_start else ' Make sure the Trellis server is running.'
+                self._status_bar.showMessage('Not connected to Trellis.' + hint, 0)
                 self._status_bar.setStyleSheet('color: red;')
         else:
-            self._status_bar.showMessage('Trellis API client not available', 0)
+            self._status_bar.showMessage(self._client_error or 'Trellis API client not available', 0)
             self._status_bar.setStyleSheet('color: red;')
+
+    def _on_start_server_clicked(self):
+        """Start the local TRELLIS.2 server, after checking its Python environment."""
+        from . import _trellis2
+        install = _trellis2.find_install()
+        self._start_server_btn.setEnabled(False)
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            ok, message = _trellis2.probe(install)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+            self._start_server_btn.setEnabled(True)
+        if not ok:
+            QtWidgets.QMessageBox.warning(self, 'TRELLIS.2 is not ready', message)
+            return
+        self._status_text.append(message)
+        try:
+            self._service.start_server()
+        except (OSError, FileNotFoundError) as err:
+            QtWidgets.QMessageBox.critical(self, 'Could not start the server', str(err))
+            return
+        self._server_poll_timer.start()
+        self._update_connection_status()
 
     def _on_generate_clicked(self):
         """Handle generate button click."""
@@ -376,7 +441,6 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
         # Disable buttons during generation
         self._extract_glb_btn.setEnabled(False)
         self._extract_usd_btn.setEnabled(False)
-        self._extract_gaussian_btn.setEnabled(False)
         self._progress_bar.setVisible(True)
         self._progress_bar.setRange(0, 0)  # Indeterminate
         self._status_text.clear()
@@ -424,10 +488,13 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
             image_path,
             seed=seed,
             randomize_seed=self._randomize_seed_check.isChecked(),
+            resolution=self._resolution_combo.currentText(),
             ss_guidance_strength=self._ss_guidance_spin.value(),
             ss_sampling_steps=self._ss_steps_spin.value(),
-            slat_guidance_strength=self._slat_guidance_spin.value(),
-            slat_sampling_steps=self._slat_steps_spin.value(),
+            shape_guidance_strength=self._shape_guidance_spin.value(),
+            shape_sampling_steps=self._shape_steps_spin.value(),
+            tex_guidance_strength=self._tex_guidance_spin.value(),
+            tex_sampling_steps=self._tex_steps_spin.value(),
         )
         
         thread = QThread()
@@ -463,8 +530,7 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
             if self._generated_state:
                 self._extract_glb_btn.setEnabled(True)
                 self._extract_usd_btn.setEnabled(True)
-                self._extract_gaussian_btn.setEnabled(True)
-                self._status_text.append('3D model generated! You can now extract GLB, USD, or Gaussian files.')
+                self._status_text.append('3D model generated! You can now extract a GLB or USD file.')
             else:
                 self._status_text.append('Warning: No state data returned from generation.')
         else:
@@ -488,7 +554,7 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
         try:
             glb_data = self._api_client.extract_glb(
                 self._generated_state,
-                mesh_simplify=self._mesh_simplify_spin.value(),
+                decimation_target=self._decimation_spin.value(),
                 texture_size=self._texture_size_spin.value(),
             )
             
@@ -530,7 +596,7 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
         try:
             usd_data = self._api_client.extract_usd(
                 self._generated_state,
-                mesh_simplify=self._mesh_simplify_spin.value(),
+                decimation_target=self._decimation_spin.value(),
                 texture_size=self._texture_size_spin.value(),
             )
             
@@ -558,44 +624,6 @@ class TrellisToolWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, 'Extraction Failed', str(e))
         finally:
             self._extract_usd_btn.setEnabled(True)
-
-    def _on_extract_gaussian_clicked(self):
-        """Handle extract Gaussian button click."""
-        if not self._generated_state:
-            QtWidgets.QMessageBox.warning(self, 'No Model', 'Please generate a 3D model first.')
-            return
-        
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self,
-            'Save PLY File',
-            '',
-            'PLY Files (*.ply)'
-        )
-        
-        if not path:
-            return
-        
-        self._status_text.append('Extracting Gaussian (PLY) file...')
-        self._extract_gaussian_btn.setEnabled(False)
-        
-        try:
-            ply_data = self._api_client.extract_gaussian(self._generated_state)
-            
-            if ply_data:
-                path_obj = Path(path)
-                path_obj.parent.mkdir(parents=True, exist_ok=True)
-                with open(path_obj, 'wb') as f:
-                    f.write(ply_data)
-                self._status_text.append(f'PLY file saved to: {path}')
-                QtWidgets.QMessageBox.information(self, 'Success', f'PLY file saved to:\n{path}')
-            else:
-                self._status_text.append('Warning: No PLY data returned.')
-        except Exception as e:
-            log.error(f'Failed to extract Gaussian: {e}', exc_info=True)
-            self._status_text.append(f'Error extracting PLY: {str(e)}')
-            QtWidgets.QMessageBox.critical(self, 'Extraction Failed', str(e))
-        finally:
-            self._extract_gaussian_btn.setEnabled(True)
 
     def showEvent(self, event):
         """Handle window show event to restore cursor."""

@@ -22,6 +22,9 @@ maintainers = [
 readme = "README.md"
 
 [project.optional-dependencies]
+trellis = [
+  "gradio_client>=1.0",  # talks to the TRELLIS.2 Gradio server
+]
 imagegen = [
   "google-genai>=1.0",          # Imagen 3 / Gemini image generation (recommended)
   # "google-generativeai>=0.8", # Alternative: older Gemini SDK (fallback)

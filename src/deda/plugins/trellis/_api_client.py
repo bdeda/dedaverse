@@ -15,375 +15,222 @@
 # limitations under the License.
 #
 # ###################################################################################
-"""Trellis API client for interacting with Trellis server (Gradio)."""
-import base64
-import json
-import logging
-import mimetypes
-from pathlib import Path
-from typing import Dict, List, Optional, Union
+"""Client for a TRELLIS.2 Gradio server (the ``app.py`` that ships with TRELLIS.2).
 
-try:
-    import requests
-    REQUESTS_AVAILABLE = True
-except ImportError:
-    REQUESTS_AVAILABLE = False
+TRELLIS.2 keeps the generated model in a ``gr.State`` on the server, tied to the Gradio
+*session*. ``image_to_3d`` and ``extract_glb`` therefore only work when both calls are made
+through the same ``gradio_client.Client`` instance, which is what this class holds on to.
+Needs the optional ``trellis`` extra (``gradio_client``).
+"""
+import logging
+import random
+from pathlib import Path
+from typing import Callable
 
 log = logging.getLogger(__name__)
 
+MAX_SEED = 2**31 - 1
+RESOLUTIONS = ('512', '1024', '1536')
+
+
+def _handle_file(path: str):
+    """Wrap a local file path so ``gradio_client`` uploads it."""
+    from gradio_client import handle_file  # pylint: disable=import-outside-toplevel
+    return handle_file(path)
+
+
+def _gradio_client_factory(url: str):
+    """Create a ``gradio_client.Client`` for ``url``."""
+    try:
+        from gradio_client import Client
+    except ImportError as err:
+        raise ImportError('gradio_client is required for the Trellis client. '
+                          'Install it with: pip install -e ".[trellis]"') from err
+    return Client(url, verbose=False)
+
 
 class TrellisApiClient:
-    """Client for interacting with Trellis API (Gradio)."""
+    """Client for a TRELLIS.2 Gradio server."""
 
-    def __init__(self, base_url: str = 'http://127.0.0.1:7860'):
-        """Initialize the Trellis API client.
-        
+    def __init__(self, base_url: str = 'http://127.0.0.1:7860',
+                 client_factory: Callable[[str], object] | None = None):
+        """Initialize the client. No connection is made until it is first used.
+
         Args:
-            base_url: Base URL for Trellis server (default: http://127.0.0.1:7860)
+            base_url: URL of the TRELLIS.2 server.
+            client_factory: Builds the underlying Gradio client from a URL. Defaults to
+                ``gradio_client.Client``; tests pass a fake.
+
+        Raises:
+            ImportError: If ``gradio_client`` is needed but not installed.
         """
-        if not REQUESTS_AVAILABLE:
-            raise ImportError('requests package is required for Trellis API client')
         self.base_url = base_url.rstrip('/')
-        self._session = requests.Session()
-        self._session.timeout = 300  # Longer timeout for 3D generation
+        self._client_factory = client_factory or _gradio_client_factory
+        if client_factory is None:
+            try:
+                import gradio_client  # noqa: F401  # pylint: disable=import-outside-toplevel,unused-import
+            except ImportError as err:
+                raise ImportError('gradio_client is required for the Trellis client. '
+                                  'Install it with: pip install -e ".[trellis]"') from err
+        self._client = None
 
     def check_connection(self) -> bool:
-        """Check if Trellis server is accessible.
-        
-        Returns:
-            True if connection successful, False otherwise
-        """
+        """Return True if the TRELLIS.2 server is reachable."""
+        import requests  # pylint: disable=import-outside-toplevel
         try:
-            response = self._session.get(f'{self.base_url}/', timeout=2)
-            return response.status_code == 200
-        except Exception:
+            return requests.get(f'{self.base_url}/', timeout=2).status_code == 200
+        except requests.RequestException:
             return False
 
-    def get_api_info(self) -> Optional[Dict]:
-        """Get API information from Gradio.
-        
-        Returns:
-            API info dict or None if unavailable
+    def _session(self):
+        """Return the Gradio client for the current session, connecting on first use."""
+        if self._client is None:
+            self._client = self._client_factory(self.base_url)
+        return self._client
+
+    def reset_session(self) -> None:
+        """Drop the session. The model held by the server for it is lost."""
+        self._client = None
+
+    def _find_endpoint(self, client, name: str) -> str | None:
+        """Return the API name of the endpoint whose function is ``name``, or None.
+
+        Gradio disambiguates duplicate function names with a numeric suffix
+        (``/preprocess_image_1``), so the exact name is looked up instead of assumed.
         """
-        try:
-            log.debug(f'Attempting to get API info from {self.base_url}/api/')
-            response = self._session.get(f'{self.base_url}/api/', timeout=10)
-            response.raise_for_status()
-            api_info = response.json()
-            log.debug(f'Successfully retrieved API info: {list(api_info.keys()) if isinstance(api_info, dict) else "non-dict"}')
-            return api_info
-        except requests.exceptions.Timeout:
-            log.error(f'Timeout connecting to Trellis API at {self.base_url}/api/')
-            return None
-        except requests.exceptions.ConnectionError as e:
-            log.error(f'Connection error to Trellis API at {self.base_url}/api/: {e}')
-            return None
-        except requests.exceptions.HTTPError as e:
-            log.error(f'HTTP error getting API info: {e} (status: {e.response.status_code if hasattr(e, "response") else "unknown"})')
-            return None
-        except Exception as e:
-            log.error(f'Failed to get API info: {e}', exc_info=True)
-            return None
+        named = client.view_api(return_format='dict', print_info=False).get('named_endpoints', {})
+        for api_name in named:
+            stripped = api_name.lstrip('/')
+            if stripped == name or (stripped.startswith(name + '_') and stripped[len(name) + 1:].isdigit()):
+                return api_name
+        return None
 
     def generate_3d_from_image(
         self,
-        image_path: Union[str, Path],
-        seed: Optional[int] = None,
+        image_path: str | Path,
+        seed: int | None = None,
         randomize_seed: bool = True,
+        resolution: str = '1024',
         ss_guidance_strength: float = 7.5,
+        ss_guidance_rescale: float = 0.7,
         ss_sampling_steps: int = 12,
-        slat_guidance_strength: float = 3.0,
-        slat_sampling_steps: int = 12,
-        is_multiimage: bool = False,
-        multiimages: Optional[List[Union[str, Path]]] = None,
-        multiimage_algo: str = "stochastic",
-    ) -> Dict:
-        """Generate a 3D model from an image using Trellis.
-        
+        ss_rescale_t: float = 5.0,
+        shape_guidance_strength: float = 7.5,
+        shape_guidance_rescale: float = 0.5,
+        shape_sampling_steps: int = 12,
+        shape_rescale_t: float = 3.0,
+        tex_guidance_strength: float = 1.0,
+        tex_guidance_rescale: float = 0.0,
+        tex_sampling_steps: int = 12,
+        tex_rescale_t: float = 3.0,
+        preprocess: bool = True,
+    ) -> dict:
+        """Generate a textured 3D model from an image on the TRELLIS.2 server.
+
+        The model stays on the server for this client's session; call :meth:`extract_glb`
+        on the same instance to get it out.
+
         Args:
-            image_path: Path to input image file
-            seed: Random seed (if None and randomize_seed=False, uses 0)
-            randomize_seed: Whether to randomize the seed
-            ss_guidance_strength: Guidance strength for sparse structure generation (0.0-10.0)
-            ss_sampling_steps: Number of sampling steps for sparse structure (1-50)
-            slat_guidance_strength: Guidance strength for structured latent generation (0.0-10.0)
-            slat_sampling_steps: Number of sampling steps for structured latent (1-50)
-            is_multiimage: Whether to use multi-image mode
-            multiimages: List of image paths for multi-image mode
-            multiimage_algo: Algorithm for multi-image generation ("stochastic" or "multidiffusion")
-        
+            image_path: Path to the input image.
+            seed: Seed to use. Ignored (a random one is used) when ``randomize_seed`` is set.
+            randomize_seed: Pick a random seed.
+            resolution: One of ``RESOLUTIONS``. Higher needs more GPU memory.
+            ss_*: Stage 1 (sparse structure) sampler settings.
+            shape_*: Stage 2 (shape) sampler settings.
+            tex_*: Stage 3 (material) sampler settings.
+            preprocess: Run the server's image preprocessing (background removal and crop),
+                which the web UI does on upload, before generating.
+
         Returns:
-            Dict containing state and video_path
+            dict: ``state`` (the settings used, truthy once a model exists on the server),
+            ``seed`` and ``preview_html`` (the server's preview markup).
+
+        Raises:
+            FileNotFoundError: If ``image_path`` does not exist.
+            ValueError: If ``resolution`` is not supported.
         """
         image_path = Path(image_path)
-        if not image_path.exists():
+        if not image_path.is_file():
             raise FileNotFoundError(f'Image not found: {image_path}')
+        if resolution not in RESOLUTIONS:
+            raise ValueError(f'Unsupported resolution {resolution!r}; expected one of {RESOLUTIONS}')
+        if randomize_seed or seed is None:
+            seed = random.randint(0, MAX_SEED)
 
-        # Read image file
-        with open(image_path, 'rb') as f:
-            image_data = f.read()
-        
-        # For Gradio API, we need to send the image file directly, not base64
-        # Gradio expects file uploads in a specific format
-        # First, get the API info to find the correct endpoint
-        api_info = self.get_api_info()
-        
-        # Find the image_to_3d endpoint
-        endpoint_name = None
-        if api_info:
-            # Try to find endpoint in named_endpoints
-            named_endpoints = api_info.get('named_endpoints', {})
-            if isinstance(named_endpoints, dict):
-                for endpoint_key, endpoint_value in named_endpoints.items():
-                    if 'image_to_3d' in endpoint_key.lower() or 'image_to_3d' in str(endpoint_value).lower():
-                        endpoint_name = endpoint_key
-                        log.info(f'Found endpoint in API info: {endpoint_name}')
-                        break
-            
-            # Also check if there's a direct endpoint list
-            if not endpoint_name and 'endpoints' in api_info:
-                for endpoint in api_info.get('endpoints', []):
-                    if isinstance(endpoint, dict) and 'name' in endpoint:
-                        if 'image_to_3d' in endpoint['name'].lower():
-                            endpoint_name = endpoint.get('path', '/api/image_to_3d')
-                            log.info(f'Found endpoint in endpoints list: {endpoint_name}')
-                            break
-        
-        if not endpoint_name:
-            # Try common Gradio endpoint naming patterns
-            endpoint_name = '/api/image_to_3d'
-            log.info(f'Using default endpoint: {endpoint_name}')
-        
-        # If we couldn't get API info, log a warning but continue with default endpoint
-        if not api_info:
-            log.warning('Could not get API info from Trellis server, using default endpoint. '
-                       'This may fail if the endpoint structure is different.')
-        
-        # Gradio/FastAPI expects JSON with base64-encoded images
-        # Detect image MIME type
-        image_mime_type, _ = mimetypes.guess_type(str(image_path))
-        if not image_mime_type or not image_mime_type.startswith('image/'):
-            # Default to PNG if we can't detect it
-            image_mime_type = 'image/png'
-            log.warning(f'Could not detect image MIME type for {image_path}, defaulting to image/png')
-        
-        # Convert image to base64
-        image_base64 = base64.b64encode(image_data).decode('utf-8')
-        image_data_uri = f"data:{image_mime_type};base64,{image_base64}"
-        
-        # Prepare multi-images if needed
-        multiimage_list = []
-        if is_multiimage and multiimages:
-            for img_path in multiimages:
-                img_path = Path(img_path)
-                if not img_path.exists():
-                    log.warning(f'Multi-image file not found: {img_path}')
-                    continue
-                with open(img_path, 'rb') as f:
-                    img_data = f.read()
-                img_mime_type, _ = mimetypes.guess_type(str(img_path))
-                if not img_mime_type or not img_mime_type.startswith('image/'):
-                    img_mime_type = 'image/png'
-                img_base64 = base64.b64encode(img_data).decode('utf-8')
-                multiimage_list.append(f"data:{img_mime_type};base64,{img_base64}")
-        
-        # Prepare JSON payload for Gradio API
-        # Gradio expects data as a list matching the function signature
-        payload = {
-            "data": [
-                image_data_uri,  # image
-                multiimage_list,  # multiimages
-                is_multiimage,
-                seed if seed is not None else 0,
-                ss_guidance_strength,
-                ss_sampling_steps,
-                slat_guidance_strength,
-                slat_sampling_steps,
-                multiimage_algo,
-            ]
-        }
-        
-        # Try the request with proper error handling
-        try:
-            log.info(f'Calling Trellis API endpoint: {self.base_url}{endpoint_name}')
-            log.debug(f'Payload structure: data array with {len(payload["data"])} elements')
-            log.debug(f'Payload types: {[type(x).__name__ for x in payload["data"]]}')
-            log.debug(f'Image data URI length: {len(image_data_uri)} characters')
-            
-            # Call Gradio API endpoint with JSON payload
-            response = self._session.post(
-                f'{self.base_url}{endpoint_name}',
-                json=payload,
-                headers={'Content-Type': 'application/json'},
-                timeout=600  # 3D generation can take a long time
-            )
-            
-            # Log response details before raising for status
-            log.debug(f'Response status: {response.status_code}')
-            log.debug(f'Response headers: {dict(response.headers)}')
-            
-            if response.status_code != 200:
-                # Try to get error details
-                try:
-                    error_detail = response.json()
-                    log.error(f'Server error response (JSON): {json.dumps(error_detail, indent=2)}')
-                except:
-                    error_text = response.text[:2000] if hasattr(response, 'text') else 'No error text available'
-                    log.error(f'Server error text: {error_text}')
-            
-            response.raise_for_status()
-            result = response.json()
-            
-            log.debug(f'API response keys: {list(result.keys()) if isinstance(result, dict) else "non-dict"}')
-            
-            # Gradio returns data in a specific format
-            if 'data' in result:
-                return {
-                    'state': result['data'][0] if len(result['data']) > 0 else None,
-                    'video_path': result['data'][1] if len(result['data']) > 1 else None,
-                }
-            return result
-        except requests.exceptions.HTTPError as e:
-            error_msg = f'HTTP {e.response.status_code} error generating 3D model: {e}'
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    log.error(f'{error_msg}\nError response (JSON): {json.dumps(error_detail, indent=2)}')
-                    # Include error detail in the exception message
-                    if isinstance(error_detail, dict):
-                        if 'detail' in error_detail:
-                            detail = error_detail['detail']
-                            if isinstance(detail, str):
-                                error_msg = f'{error_msg}\nServer details: {detail}'
-                            elif isinstance(detail, list) and len(detail) > 0:
-                                # Pydantic validation errors
-                                first_error = detail[0]
-                                if isinstance(first_error, dict):
-                                    error_msg = f'{error_msg}\nValidation error: {first_error.get("msg", "Unknown")} at {first_error.get("loc", [])}'
-                        elif 'error' in error_detail:
-                            error_msg = f'{error_msg}\nServer error: {error_detail["error"]}'
-                except Exception as json_err:
-                    error_text = e.response.text[:2000] if hasattr(e.response, 'text') else 'No error text available'
-                    log.error(f'{error_msg}\nError response text: {error_text}\n(JSON parse error: {json_err})')
-                    error_msg = f'{error_msg}\nServer response: {error_text[:500]}'
+        client = self._session()
+        image = _handle_file(str(image_path))
+        if preprocess:
+            endpoint = self._find_endpoint(client, 'preprocess_image')
+            if endpoint:
+                processed = client.predict(image, api_name=endpoint)
+                image = _handle_file(processed['path'] if isinstance(processed, dict) else processed)
             else:
-                log.error(error_msg)
-            raise RuntimeError(error_msg) from e
-        except Exception as e:
-            log.error(f'Failed to generate 3D model: {e}', exc_info=True)
-            raise
+                log.warning('Trellis server has no preprocess_image endpoint; using the image as is.')
+
+        log.info(f'Generating 3D model from {image_path.name} (seed={seed}, resolution={resolution})')
+        result = client.predict(
+            image, seed, resolution,
+            ss_guidance_strength, ss_guidance_rescale, ss_sampling_steps, ss_rescale_t,
+            shape_guidance_strength, shape_guidance_rescale, shape_sampling_steps, shape_rescale_t,
+            tex_guidance_strength, tex_guidance_rescale, tex_sampling_steps, tex_rescale_t,
+            api_name='/image_to_3d',
+        )
+        # The state output is kept server-side, so only the HTML preview comes back.
+        preview_html = result[-1] if isinstance(result, (list, tuple)) else result
+        return {
+            'state': {'seed': seed, 'resolution': resolution},
+            'seed': seed,
+            'preview_html': preview_html,
+        }
 
     def extract_glb(
         self,
-        state: Dict,
-        mesh_simplify: float = 0.95,
-        texture_size: int = 1024,
+        state: dict | None = None,
+        decimation_target: int = 500000,
+        texture_size: int = 2048,
     ) -> bytes:
-        """Extract a GLB file from the generated 3D model state.
-        
-        Args:
-            state: State dict from generate_3d_from_image
-            mesh_simplify: Mesh simplification factor (0.9-0.98)
-            texture_size: Texture resolution (512-2048)
-        
-        Returns:
-            GLB file bytes
-        """
-        payload = {
-            "data": [
-                state,  # state
-                mesh_simplify,  # mesh_simplify
-                texture_size,  # texture_size
-            ]
-        }
-        
-        try:
-            response = self._session.post(
-                f'{self.base_url}/api/extract_glb',
-                json=payload,
-                timeout=300
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            # Gradio returns file path or data
-            if 'data' in result and len(result['data']) > 0:
-                glb_path = result['data'][0]
-                # Download the GLB file
-                if glb_path.startswith('http'):
-                    glb_response = self._session.get(glb_path)
-                    glb_response.raise_for_status()
-                    return glb_response.content
-                else:
-                    # If it's a local path, we'd need to access it differently
-                    # For now, return the path info
-                    log.warning(f'GLB file path returned: {glb_path}')
-                    return None
-            return None
-        except Exception as e:
-            log.error(f'Failed to extract GLB: {e}', exc_info=True)
-            raise
+        """Extract a GLB of the model generated earlier in this client's session.
 
-    def extract_gaussian(self, state: Dict) -> bytes:
-        """Extract a Gaussian (PLY) file from the generated 3D model state.
-        
         Args:
-            state: State dict from generate_3d_from_image
-        
+            state: The ``state`` from :meth:`generate_3d_from_image`. Only checked for
+                presence: the real state lives on the server, in this client's session.
+            decimation_target: Target face count (100000-1000000).
+            texture_size: Texture resolution (1024-4096).
+
         Returns:
-            PLY file bytes
+            bytes: The GLB file contents.
+
+        Raises:
+            RuntimeError: If no model has been generated with this client.
         """
-        payload = {
-            "data": [state]
-        }
-        
-        try:
-            response = self._session.post(
-                f'{self.base_url}/api/extract_gaussian',
-                json=payload,
-                timeout=300
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            if 'data' in result and len(result['data']) > 0:
-                ply_path = result['data'][0]
-                if ply_path.startswith('http'):
-                    ply_response = self._session.get(ply_path)
-                    ply_response.raise_for_status()
-                    return ply_response.content
-                else:
-                    log.warning(f'PLY file path returned: {ply_path}')
-                    return None
-            return None
-        except Exception as e:
-            log.error(f'Failed to extract Gaussian: {e}', exc_info=True)
-            raise
+        if self._client is None or not state:
+            raise RuntimeError('No generated model in this session: call generate_3d_from_image first.')
+        log.info(f'Extracting GLB (decimation_target={decimation_target}, texture_size={texture_size})')
+        result = self._client.predict(decimation_target, texture_size, api_name='/extract_glb')
+        glb_path = result[0] if isinstance(result, (list, tuple)) else result
+        return Path(glb_path).read_bytes()
 
     def extract_usd(
         self,
-        state: Dict,
-        mesh_simplify: float = 0.95,
-        texture_size: int = 1024,
+        state: dict | None = None,
+        decimation_target: int = 500000,
+        texture_size: int = 2048,
     ) -> bytes:
-        """Extract a USD file from the generated 3D model state.
-        
-        This method first extracts a GLB file, then converts it to USD format.
-        
+        """Extract a USD file of the generated model.
+
+        This extracts a GLB, then converts it to USD.
+
         Args:
-            state: State dict from generate_3d_from_image
-            mesh_simplify: Mesh simplification factor (0.9-0.98)
-            texture_size: Texture resolution (512-2048)
-        
+            state: The ``state`` from :meth:`generate_3d_from_image`.
+            decimation_target: Target face count (100000-1000000).
+            texture_size: Texture resolution (1024-4096).
+
         Returns:
-            USD file bytes
+            bytes: The USD file contents.
         """
-        # First extract GLB
-        glb_data = self.extract_glb(state, mesh_simplify, texture_size)
+        glb_data = self.extract_glb(state, decimation_target, texture_size)
         if not glb_data:
             raise ValueError('Failed to extract GLB file for USD conversion')
-        
-        # Convert GLB to USD
         return self._glb_to_usd(glb_data)
 
     def _glb_to_usd(self, glb_data: bytes) -> bytes:

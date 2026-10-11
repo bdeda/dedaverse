@@ -18,13 +18,19 @@
 """
 Trellis service plugin for generating 3D textured models from images.
 
-Trellis is an AI model for generating 3D textured models from images.
-This plugin communicates with a Trellis server (typically running via Gradio).
+This plugin talks to a TRELLIS.2 Gradio server (the ``app.py`` that ships with TRELLIS.2).
+It can also start that server from a local TRELLIS.2 install; see ``_trellis2`` for the
+``DEDAVERSE_TRELLIS2_*`` environment variables that locate the install and its Python
+environment. The client needs the optional ``trellis`` extra (``pip install -e ".[trellis]"``).
 """
+import atexit
 import logging
 from pathlib import Path
+from urllib.parse import urlparse
 
 from deda.core import PluginRegistry, Service, Tool
+
+from . import _trellis2
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +46,41 @@ class TrellisService(Service):
         )
         self._base_url = 'http://127.0.0.1:7860'
         self._api_client = None
+        self._server = None
+
+    def can_start_server(self) -> bool:
+        """True if a local TRELLIS.2 install is available to start a server from."""
+        return _trellis2.find_install() is not None
+
+    def server_running(self) -> bool:
+        """True while a server started by :meth:`start_server` is alive."""
+        return self._server is not None and self._server.running
+
+    def log_path(self) -> Path:
+        """Where the server we start writes its output."""
+        return _trellis2.LOG_PATH
+
+    def start_server(self) -> None:
+        """Start the TRELLIS.2 server from the local install, without waiting for it to load.
+
+        Raises:
+            FileNotFoundError: If no TRELLIS.2 install is found.
+            OSError: If the shell that runs it (``wsl`` or ``bash``) cannot be started.
+        """
+        install = _trellis2.find_install()
+        if install is None:
+            raise FileNotFoundError(
+                f'TRELLIS.2 install not found. Set {_trellis2.ENV_DIR} to the folder that contains app.py.')
+        port = urlparse(self._base_url).port or _trellis2.DEFAULT_PORT
+        if self._server is None:
+            self._server = _trellis2.Trellis2Server(install, port=port)
+            atexit.register(self.stop_server)
+        self._server.start()
+
+    def stop_server(self) -> None:
+        """Stop the server this service started, if any."""
+        if self._server is not None:
+            self._server.stop()
 
     def load(self):
         """Initialize the Trellis service."""
