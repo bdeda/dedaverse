@@ -20,7 +20,7 @@
 Dedacam's usdview plugin hooks any usdview ``StageView`` without patching it, so the viewer
 reuses it. The plugin is built from the dedacam repository
 (``-DDEDACAM_BUILD_USDVIEW=ON``) against the same USD the viewer runs on. Set
-``DEDACAM_BUILD_DIR`` to that build directory, the one that holds ``usdview/`` and ``python/``.
+``DEDACAM_USDVIEW_BUILD_DIR`` to that build directory, the one that holds ``usdview/`` and ``python/``.
 """
 import importlib
 import logging
@@ -30,7 +30,7 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-ENV_BUILD_DIR = 'DEDACAM_BUILD_DIR'
+ENV_BUILD_DIR = 'DEDACAM_USDVIEW_BUILD_DIR'
 
 #: View modes in menu order. ``off`` shows the normal viewport.
 MODES = ('off', 'dof', 'zones', 'depth')
@@ -46,7 +46,7 @@ def find_build_dir(path: str | Path | None = None) -> Path | None:
     """Return the dedacam usdview build directory, or None if there is not a valid one.
 
     Args:
-        path: Directory to check. Defaults to ``DEDACAM_BUILD_DIR``.
+        path: Directory to check. Defaults to ``DEDACAM_USDVIEW_BUILD_DIR``.
     """
     value = path or os.environ.get(ENV_BUILD_DIR)
     if not value:

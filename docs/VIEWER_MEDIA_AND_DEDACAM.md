@@ -28,7 +28,7 @@ viewer's `StageView`.
 
 1. Build the plugin from the dedacam repository against the **same USD the viewer runs on**:
    `-DDEDACAM_BUILD_USDVIEW=ON -DDEDACAM_USD_ROOT=<usd install>` (see its `hosts/usdview/README.md`).
-2. Set `DEDACAM_BUILD_DIR` to that build directory (the one that contains `usdview/` and `python/`).
+2. Set `DEDACAM_USDVIEW_BUILD_DIR` to that build directory (the one that contains `usdview/` and `python/`).
 3. Look through a stage camera with View > Camera. The free camera has no lens or focus settings,
    so nothing is out of focus. Lens, T-stop and focus distance come from the camera prim (and
    `dedacam:` attributes on it).
