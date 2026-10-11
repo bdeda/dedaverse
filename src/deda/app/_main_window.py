@@ -1452,6 +1452,16 @@ def get_main_menu():
     
     """
     window = get_top_window()
+    if window.objectName() == 'MayaWindow':
+        # In Maya the dedaverse menu is the "Deda" menu in the main menu bar.
+        menu_bar = window.findChild(QtWidgets.QMenuBar)
+        menu = menu_bar.findChild(QtWidgets.QMenu, 'DedaverseMenu')
+        if menu:
+            return menu
+        menu = menu_bar.addMenu('Deda')
+        menu.setObjectName('DedaverseMenu')
+        menu.setTearOffEnabled(True)
+        return menu
     for child in window.children():
         if not isinstance(child, QtWidgets.QMenu):
             continue
