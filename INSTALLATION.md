@@ -100,6 +100,7 @@ This gives you OpenUSD with imaging and usdview in a dedicated directory. You wi
 **Tested with OpenUSD 26.08 on Windows (Python 3.13).** The settings that mattered:
 
 - Build from a `v26.08` checkout with the defaults (imaging, usdview and MaterialX are on): `python build_scripts\build_usd.py --build-shared --usd-imaging --usdview --materialx --build-variant release <install dir>`. Leaving out imaging (`--no-imaging`) gives a build with no `pxr.Usdviewq`, and the viewer will not start.
+- Add `--onetbb` if the same USD will also be used with Maya 2027, Dedacam or maya-usd: Maya ships oneTBB (`tbb12.dll`), and a USD built with the default TBB 2020 cannot be mixed with it (`tbb::split` is ambiguous, `tbb::task` is missing). The viewer itself runs on either.
 - Run `build_usd.py` with a Python that has **PySide6, PyOpenGL, Jinja2 and NumPy** installed, and with that environment's `Scripts` folder on `PATH` (the build looks for `pyside6-uic`).
 - Build in a shell with no other USD build on `PATH`/`PYTHONPATH`, and from a Visual Studio developer prompt.
 - USD 26.x installs its Python modules in `Lib\site-packages` (25.x used `lib\python`). `bin\dedaverse.bat` handles both.
