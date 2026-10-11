@@ -108,7 +108,7 @@ class Maya(deda.core.Application):
                 [str(dedacam_module)] + ([env['MAYA_MODULE_PATH']] if env.get('MAYA_MODULE_PATH') else []))
         else:
             log.warning(f'Dedacam Maya module not found in {dedacam_module}; dedacam will not be available in Maya.')
-        pythonpath = [str(Path(deda.__file__).resolve().parent.parent)]
+        pythonpath = [str(Path(deda.__file__).resolve().parent.parent), str(Path(__file__).parent / 'startup')]
         if _DEPS_DIR.is_dir():
             pythonpath.append(str(_DEPS_DIR))
         else:
