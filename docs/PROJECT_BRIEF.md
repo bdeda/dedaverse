@@ -27,7 +27,7 @@ Dedaverse is an **asset management system for visual media projects** (films, ga
 
 ## Technology
 
-- **Language / runtime** — Python 3.12+.
+- **Language / runtime** — Python 3.13+.
 - **UI** — PySide6 (Qt for Python).
 - **Asset metadata** — USD Core (usd-core); USDA files and composition for hierarchy and user overrides (e.g. sort order in `user_settings.usda` session layer).
 - **Integrations** — p4python (Perforce), requests, dataclasses_json; Click CLI; optional dependencies for plugins (e.g. Jira, DCC finders/launchers).

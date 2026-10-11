@@ -1,13 +1,13 @@
 # Dedaverse Installation Guide
 
-This guide walks you through installing Python 3.12, OpenUSD (with usdview), and Dedaverse so you can run the application and optionally the built-in USD viewer.
+This guide walks you through installing Python 3.13, OpenUSD (with usdview), and Dedaverse so you can run the application and optionally the built-in USD viewer.
 
 ---
 
 ## Table of contents
 
 1. [Prerequisites](#1-prerequisites)
-2. [Install Python 3.12](#2-install-python-312)
+2. [Install Python 3.13](#2-install-python-313)
 3. [Install OpenUSD with usdview (optional but recommended)](#3-install-openusd-with-usdview-optional-but-recommended)
 4. [Install Dedaverse](#4-install-dedaverse)
 5. [First-time configuration](#5-first-time-configuration)
@@ -23,13 +23,13 @@ This guide walks you through installing Python 3.12, OpenUSD (with usdview), and
 
 ---
 
-## 2. Install Python 3.12
+## 2. Install Python 3.13
 
-Dedaverse requires **Python 3.12 or newer** (3.13 is supported).
+Dedaverse requires **Python 3.13 or newer**.
 
 ### Windows
 
-1. Open [python.org/downloads](https://www.python.org/downloads/) and download **Python 3.12** (or 3.13) for Windows.
+1. Open [python.org/downloads](https://www.python.org/downloads/) and download **Python 3.13** for Windows.
 2. Run the installer.
 3. **Important:** On the first screen, check **“Add python.exe to PATH”**, then click **“Install Now”** (or choose a custom install and ensure “Add Python to PATH” is selected).
 4. Close and reopen any Command Prompt or PowerShell window.
@@ -37,33 +37,33 @@ Dedaverse requires **Python 3.12 or newer** (3.13 is supported).
    ```bat
    py --list
    ```
-   You should see 3.12 (or 3.13) listed. Then:
+   You should see 3.13 listed. Then:
    ```bat
-   py -3.12 -c "print('OK')"
+   py -3.13 -c "print('OK')"
    ```
 
 ### macOS
 
-1. Install Python 3.12 via [python.org](https://www.python.org/downloads/) or Homebrew:
+1. Install Python 3.13 via [python.org](https://www.python.org/downloads/) or Homebrew:
    ```bash
-   brew install python@3.12
+   brew install python@3.13
    ```
-2. Ensure `python3.12` and `pip` are on your PATH (Homebrew usually adds this).
+2. Ensure `python3.13` and `pip` are on your PATH (Homebrew usually adds this).
 3. Verify:
    ```bash
-   python3.12 --version
+   python3.13 --version
    ```
 
 ### Linux (e.g. Ubuntu)
 
-1. Install Python 3.12 and venv:
+1. Install Python 3.13 and venv:
    ```bash
    sudo apt-get update
-   sudo apt-get install -y python3.12 python3.12-venv python3.12-dev
+   sudo apt-get install -y python3.13 python3.13-venv python3.13-dev
    ```
 2. Verify:
    ```bash
-   python3.12 --version
+   python3.13 --version
    ```
 
 ---
@@ -100,6 +100,8 @@ This gives you OpenUSD with imaging and usdview in a dedicated directory. You wi
 3. **Use the built OpenUSD’s Python for Dedaverse**
    - The install directory will contain a `bin` (or `Scripts` on Windows) and `lib/python` (or similar). You can create a virtual environment that uses this Python, or activate the environment that the build provides (if any), and then install Dedaverse there (see [Section 4](#4-install-dedaverse)).
 
+**Match the build to Dedaverse's Python.** A USD build only loads in the Python version it was compiled for (a Python 3.12 build fails under 3.13 with "Module use of python312.dll conflicts with this version of Python"), so build against Python 3.13. Also build with imaging (the default); a build without it has no `pxr.Usdviewq` and the viewer will not start. If your global `USD_ROOT` points at a build for a different Python, set `DEDAVERSE_USD_ROOT` to the matching one. `bin/dedaverse.bat` prefers it, and finds the Python modules in either `lib\python` or `Lib\site-packages`.
+
 ### Option B: Use PyPI usd-core only (no viewer / no usdview)
 
 If you do **not** need the built-in viewer or usdview:
@@ -117,7 +119,7 @@ Use a **virtual environment** so Dedaverse and its dependencies are isolated.
 1. Create a folder and venv (use a path without spaces if possible):
    ```bat
    mkdir D:\dedaverse_app
-   py -3.12 -m venv D:\dedaverse_app\.venv
+   py -3.13 -m venv D:\dedaverse_app\.venv
    ```
 
 2. Activate the venv:
@@ -146,7 +148,7 @@ Use a **virtual environment** so Dedaverse and its dependencies are isolated.
 1. Create a folder and venv:
    ```bash
    mkdir -p ~/dedaverse_app
-   python3.12 -m venv ~/dedaverse_app/.venv
+   python3.13 -m venv ~/dedaverse_app/.venv
    ```
 
 2. Activate the venv:
@@ -207,7 +209,7 @@ Use a **virtual environment** so Dedaverse and its dependencies are isolated.
 
 | Issue | What to try |
 |-------|-------------|
-| `py` or `python3.12` not found | Reinstall Python and enable “Add to PATH”. Restart the terminal. On Linux, install `python3.12` and `python3.12-venv`. |
+| `py` or `python3.13` not found | Reinstall Python and enable “Add to PATH”. Restart the terminal. On Linux, install `python3.13` and `python3.13-venv`. |
 | `No module named 'deda'` or `dedaverse` | Activate the same venv you used for `pip install`, or reinstall: `pip install -e .` from the Dedaverse repo. |
 | Viewer does not open or “No module named 'Usdviewq'” | The built-in viewer needs OpenUSD built with imaging and Usdviewq (see [Section 3](#3-install-openusd-with-usdview-optional-but-recommended)). Using only `usd-core` from PyPI is not enough for the viewer. |
 | usdview not found | Install or build OpenUSD with usdview (Option A), then run `usdview` from that OpenUSD environment. |
