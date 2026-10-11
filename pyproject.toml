@@ -27,6 +27,15 @@ dev = [
   "pytest>=9.1.0",
   "pytest-cov>=7.1.0",
 ]
+upscale = [
+  "torch>=2.2",
+  "spandrel>=0.3.4",
+  "huggingface_hub>=0.20",
+]
+raw_formats = [
+  "pillow-heif>=0.13",
+  "rawpy>=0.19",
+]
 
 [project.scripts]
 dedaverse = "dedaverse.__main__:dedaverse"
