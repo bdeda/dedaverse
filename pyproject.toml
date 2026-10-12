@@ -22,10 +22,19 @@ maintainers = [
 readme = "README.md"
 
 [project.optional-dependencies]
+trellis = [
+  "gradio_client>=1.0",  # talks to the TRELLIS.2 Gradio server
+]
+imagegen = [
+  "google-genai>=1.0",          # Imagen 3 / Gemini image generation (recommended)
+  # "google-generativeai>=0.8", # Alternative: older Gemini SDK (fallback)
+]
 dev = [
+  "bandit[toml]>=1.7",
   "pre-commit>=4.6.0",
   "pytest>=9.1.0",
   "pytest-cov>=7.1.0",
+  "radon>=6.0",
 ]
 upscale = [
   "torch>=2.2",
@@ -90,3 +99,16 @@ precision = 2
 
 [tool.coverage.html]
 directory = "htmlcov"
+
+[tool.bandit]
+exclude_dirs = ["tests", ".*", "venv", ".venv"]
+skips = ["B101", "B110"]  # B101 assert_used (tests); B110 try_except_pass (treat separately)
+targets = ["src/deda"]
+
+[tool.radon.complexity]
+min = "C"
+max_line_length = 120
+exclude = ["tests/*", ".*", "*/venv/*", "*/.venv/*"]
+no_assert = true
+show_closures = false
+total_average = true
