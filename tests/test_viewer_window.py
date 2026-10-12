@@ -495,6 +495,56 @@ class TestSettings:
         assert window.width() == 777
 
 
+class TestUvEditor:
+    @staticmethod
+    def _view_menu(window):
+        return next(m for m in window.menuBar().findChildren(QtWidgets.QMenu) if m.title() == '&View')
+
+    @staticmethod
+    def _stage_with_mesh(tmp_path):
+        path = tmp_path / 'uv.usda'
+        stage = Usd.Stage.CreateNew(str(path))
+        mesh = UsdGeom.Mesh.Define(stage, '/quad')
+        mesh.CreatePointsAttr([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)])
+        mesh.CreateFaceVertexCountsAttr([4])
+        mesh.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
+        primvar = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar('st', Sdf.ValueTypeNames.TexCoord2fArray, 'vertex')
+        primvar.Set([(0, 0), (1, 0), (1, 1), (0, 1)])
+        stage.GetRootLayer().Save()
+        return path
+
+    def test_view_menu_toggles_the_floating_editor(self, window):
+        action = next(a for a in self._view_menu(window).actions() if a.text() == 'UV Editor')
+        assert action.isCheckable() and not action.isChecked()
+        assert window._uv_editor.isFloating() and not window._uv_editor.isVisible()
+        action.trigger()
+        assert window._uv_editor.isVisible() and action.isChecked()
+        action.trigger()
+        assert not window._uv_editor.isVisible()
+
+    def test_opening_a_stage_feeds_the_editor(self, window, tmp_path):
+        window._uv_editor.show()
+        window._open_path(str(self._stage_with_mesh(tmp_path)))
+        assert window._uv_editor.panel.mesh_paths == ['/quad']
+        assert window._uv_editor.panel.canvas.uv_layout.uv_set.name == 'st'
+
+    def test_editor_visibility_and_geometry_round_trip(self, window):
+        window._uv_editor.show()
+        window._uv_editor.resize(640, 480)
+        window._save_view_settings()
+        again = _window.MainWindow()
+        assert again._uv_editor.isVisible()
+        assert again._uv_editor.size().width() == 640
+        again.close()
+
+    def test_editor_stays_closed_when_it_was_closed(self, window):
+        window._uv_editor.hide()
+        window._save_view_settings()
+        again = _window.MainWindow()
+        assert not again._uv_editor.isVisible()
+        again.close()
+
+
 @pytest.fixture
 def entity(window, tmp_path):
     root = tmp_path / 'asset_root'

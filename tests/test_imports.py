@@ -94,6 +94,8 @@ def _import_deda_core() -> None:
         import deda.core.viewer._reticle  # noqa: F401
         import deda.core.viewer._slate  # noqa: F401
         import deda.core.viewer._usd_viewer  # noqa: F401
+        import deda.core.viewer._uv  # noqa: F401
+        import deda.core.viewer._uv_panel  # noqa: F401
         import deda.core.viewer._window  # noqa: F401
     except (ModuleNotFoundError, ImportError):
         pass
