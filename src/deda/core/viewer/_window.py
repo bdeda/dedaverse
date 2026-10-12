@@ -44,6 +44,7 @@ from . import _media_view
 from . import _playbar
 from . import _reticle
 from . import _slate
+from . import _uv_panel
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +85,8 @@ _KEY_RECENT_FILES = 'file/recentFiles'
 _KEY_RETICLE_ENABLED = 'view/reticleEnabled'
 _KEY_RETICLE_STYLE = 'view/reticleStyle'
 _KEY_SLATE_ENABLED = 'view/slateEnabled'
+_KEY_UV_EDITOR_GEOMETRY = 'view/uvEditorGeometry'
+_KEY_UV_EDITOR_VISIBLE = 'view/uvEditorVisible'
 
 _MAX_RECENT_FILES = 10
 
@@ -218,6 +221,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._dedacam = _dedacam.DedacamController(self._viewer.stage_view)
 
+        # Floating UV editor; the View menu's toggle action shows and hides it.
+        self._uv_editor = _uv_panel.UvEditorDock(parent=self)
+        self.addDockWidget(QtCore.Qt.DockWidgetArea.RightDockWidgetArea, self._uv_editor)
+        self._uv_editor.setFloating(True)
+        self._uv_editor.hide()
         self.setAcceptDrops(True)
         
         self._build_menu_bar()
@@ -282,6 +290,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ab_compare_action.triggered.connect(self._on_ab_compare)
         self._ab_exit_action = view_menu.addAction('E&xit A|B Compare')
         self._ab_exit_action.triggered.connect(self._exit_ab_compare)
+        view_menu.addSeparator()
+        view_menu.addAction(self._uv_editor.toggleViewAction())
         view_menu.addSeparator()
         self._build_camera_menu(view_menu)
         self._build_media_menu(view_menu)
@@ -650,6 +660,8 @@ class MainWindow(QtWidgets.QMainWindow):
         s.setValue(_KEY_RETICLE_ENABLED, self._viewer.reticle_overlay.enabled)
         s.setValue(_KEY_RETICLE_STYLE, self._viewer.reticle_overlay.style)
         s.setValue(_KEY_SLATE_ENABLED, self._viewer.slate_overlay.enabled)
+        s.setValue(_KEY_UV_EDITOR_VISIBLE, self._uv_editor.isVisible())
+        s.setValue(_KEY_UV_EDITOR_GEOMETRY, self._uv_editor.saveGeometry())
 
     def _restore_view_settings(self):
         """Restore view options from QSettings."""
@@ -715,6 +727,11 @@ class MainWindow(QtWidgets.QMainWindow):
         slate_enabled = s.value(_KEY_SLATE_ENABLED, False, type=bool)
         self._viewer.slate_overlay.enabled = slate_enabled
         self._slate_layer_action.setChecked(slate_enabled)
+        # UV editor: geometry first so it reopens where it was left, then visibility
+        uv_geometry = s.value(_KEY_UV_EDITOR_GEOMETRY)
+        if uv_geometry:
+            self._uv_editor.restoreGeometry(uv_geometry)
+        self._uv_editor.setVisible(s.value(_KEY_UV_EDITOR_VISIBLE, False, type=bool))
 
     def _restore_geometry(self):
         """Restore window geometry (position and size) from QSettings."""
@@ -806,6 +823,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if stage:
                 self._set_mode('3d')
                 self._viewer.stage = stage
+                self._uv_editor.set_stage(stage)
                 # Resolve entity for title (project name) and content rootdir
                 self._opened_entity = Project.from_path(file_path)
                 project_part = f'[{self._opened_entity.project.name}] ' if self._opened_entity else ''
