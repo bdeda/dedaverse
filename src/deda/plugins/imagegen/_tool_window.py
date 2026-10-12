@@ -547,10 +547,11 @@ class ImageGenToolWindow(QtWidgets.QMainWindow):
 
     def _on_thumbnail_clicked(self, path: str) -> None:
         """Open the image in the system default viewer."""
+        import os
         import subprocess
         import sys
         if sys.platform == 'win32':
-            subprocess.Popen(['start', '', path], shell=True)
+            os.startfile(path)  # nosec B606 - opens a file the user generated, with its default app
         else:
             subprocess.Popen(['xdg-open', path])
 

@@ -80,7 +80,8 @@ def _model_path(model_key: str) -> Path:
     if override and Path(override).is_file():
         return Path(override)
     from huggingface_hub import hf_hub_download
-    return Path(hf_hub_download(repo_id=entry['repo_id'], filename=entry['filename']))
+    # Weights come from the fixed repos in UPSCALE_MODELS; no pinned revisions are known.
+    return Path(hf_hub_download(repo_id=entry['repo_id'], filename=entry['filename']))  # nosec B615
 
 
 def _load_model(model_key: str):

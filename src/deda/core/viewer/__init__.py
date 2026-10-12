@@ -19,6 +19,11 @@
 
 __all__ = ['CameraReticlePlugin', 'Playbar', 'UsdViewWidget']
 
-from ._camera_reticle import CameraReticlePlugin
-from ._playbar import Playbar
-from ._usd_viewer import UsdViewWidget
+try:
+    from ._camera_reticle import CameraReticlePlugin
+    from ._playbar import Playbar
+    from ._usd_viewer import UsdViewWidget
+except ImportError:
+    # The 3D viewport needs a USD build with usdview (pxr.Usdviewq); the 2D media modules
+    # (_media, _media_view) do not. Running the viewer reports the missing module.
+    CameraReticlePlugin = Playbar = UsdViewWidget = None

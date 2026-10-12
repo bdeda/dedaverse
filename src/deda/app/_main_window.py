@@ -989,7 +989,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         try:
             safe_arg = shlex.quote(arg)
-            subprocess.Popen(f"{command} {safe_arg}", shell=True)
+            subprocess.Popen(f"{command} {safe_arg}", shell=True)  # nosec B602 - command is the user's own app config, arg is quoted
             log.info("Launched app with asset USD path %s: %s", arg, command)
         except Exception as err:
             log.error("Failed to launch app with asset: %s", err)
@@ -1036,7 +1036,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         # Non-Python or unparseable: run via shell
         try:
-            subprocess.Popen(command, shell=True)
+            subprocess.Popen(command, shell=True)  # nosec B602 - command is the user's own app config
             log.info(f"Launched app: {command}")
         except Exception as err:
             log.error(f"Failed to launch app '{command}': {err}")
