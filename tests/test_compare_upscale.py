@@ -70,8 +70,7 @@ def fake_torch(monkeypatch):
     torch = types.ModuleType('torch')
     torch.uint8 = np.uint8
     torch.from_numpy = lambda array: FakeTensor(array)
-    torch.no_grad = lambda: types.SimpleNamespace(__enter__=lambda s: None, __exit__=lambda s, *a: False) \
-        if False else _NoGrad()
+    torch.no_grad = _NoGrad
     torch.cuda = types.SimpleNamespace(is_available=lambda: False)
     monkeypatch.setitem(sys.modules, 'torch', torch)
     return torch
