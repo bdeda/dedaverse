@@ -255,6 +255,8 @@ class ModelBrowserDialog(QtWidgets.QDialog):
         
         # Connect selection change
         self._model_list.currentItemChanged.connect(self._on_selection_changed)
+        # The first row was selected while loading, before the signal was connected: show its details now.
+        self._on_selection_changed(self._model_list.currentItem(), None)
 
     def _load_models(self):
         """Load available models for this category."""
