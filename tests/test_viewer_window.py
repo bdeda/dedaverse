@@ -646,3 +646,33 @@ def test_close_event_saves_settings_and_stops_playback(window, png_sequence):
     window.close()
     window._settings.sync()
     assert not window._play_timer.isActive() and window.settings_file.is_file()
+
+
+class TestTitleAndCompare:
+    def test_title_shows_the_full_path_of_the_loaded_file(self, window, stage_file):
+        window._open_path(str(stage_file))
+        assert str(Path(stage_file)) in window.windowTitle()
+
+    def test_compare_two_stages_and_exit(self, window, stage_file, tmp_path):
+        other = tmp_path / 'other.usda'
+        other.write_text(stage_file.read_text())
+        assert window.compare_files(str(stage_file), str(other))
+        assert window.mode == 'ab'
+        assert str(stage_file) in window.windowTitle() and str(other) in window.windowTitle()
+        assert window._ab_exit_action.isEnabled() and not window._dome_light_action.isEnabled()
+        assert not window._media_actions[0].isEnabled()
+        window._exit_ab_compare()
+        assert window.mode == '3d' and not window._ab_exit_action.isEnabled()
+
+    def test_compare_refuses_a_missing_file(self, window, stage_file, tmp_path):
+        assert not window.compare_files(str(stage_file), str(tmp_path / 'nope.usda'))
+        assert window.mode == '3d'
+
+    def test_slider_clips_b_and_is_clamped(self, window):
+        compare = window._ab_compare
+        compare.resize(400, 200)
+        compare.set_split(0.25)
+        assert compare._split_x() == 100
+        assert compare.viewer_b.mask().boundingRect().left() == 100
+        compare.set_split(5)
+        assert compare.split == 1.0
