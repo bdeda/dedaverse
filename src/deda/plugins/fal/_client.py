@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
-from ._models import IMAGE, MESH, FalModel
+from ._models import AUDIO, IMAGE, MESH, VIDEO, FalModel
 
 log = logging.getLogger(__name__)
 
@@ -49,9 +49,11 @@ class FalRequest:
         model: The model to call.
         prompt: The text prompt (ignored by models without one).
         image: The source image, for image-to-image, edit and 3D models.
+        video: The source video, for models that add sound to a video.
         reference_image: A second image to steer the result: a moodboard, a sketch or an image with
             annotations drawn on it. Only used by models that take one.
-        annotations: Written art direction. It is added to the prompt, so it works with every model that takes a prompt.
+        annotations: Written art direction. It is added to the prompt of models that take direction; speech
+            models read their text out verbatim, so it is left out there.
         negative_prompt: Things to avoid, for models that take one.
         params: Overrides of the model's parameters, by argument name.
         output_dir: Where downloaded results are saved.
@@ -61,6 +63,7 @@ class FalRequest:
     model: FalModel
     prompt: str = ''
     image: Path | None = None
+    video: Path | None = None
     reference_image: Path | None = None
     annotations: str = ''
     negative_prompt: str = ''
@@ -125,12 +128,22 @@ def describe_status(status) -> str:
     return name
 
 
+def _prompt_for(request: 'FalRequest') -> str:
+    """The text to send: the prompt, with the art direction added unless the model reads its text verbatim."""
+    if not request.model.direction_in_prompt:
+        return request.prompt.strip()
+    return compose_prompt(request.prompt, request.annotations)
+
+
 def compose_prompt(prompt: str, annotations: str) -> str:
     """The prompt with the written art direction added to it."""
     prompt, annotations = prompt.strip(), annotations.strip()
     if prompt and annotations:
         return f'{prompt}\n\nArt direction: {annotations}'
     return prompt or annotations
+
+
+_DEFAULT_SUFFIX = {IMAGE: '.png', MESH: '.glb', AUDIO: '.wav', VIDEO: '.mp4'}
 
 
 class FalClient:
@@ -173,20 +186,22 @@ class FalClient:
     # ------------------------------------------------------------------------------------------
 
     @staticmethod
-    def build_arguments(request: FalRequest, image_url: str | None = None, reference_url: str | None = None) -> dict:
+    def build_arguments(request: FalRequest, image_url: str | None = None, reference_url: str | None = None,
+                        video_url: str | None = None) -> dict:
         """The ``arguments`` to send to the model for ``request``.
 
         Args:
             request: The request.
             image_url: The uploaded source image URL.
             reference_url: The uploaded reference image URL.
+            video_url: The uploaded source video URL.
 
         Returns:
             The model defaults, overridden by the request's parameters (clamped to their ranges), plus the
             prompt and image inputs the model takes. Arguments that are None are left out.
 
         Raises:
-            ValueError: If the model needs an image or a prompt and none was given.
+            ValueError: If the model needs an image, a video or a prompt and none was given.
         """
         model = request.model
         arguments = model.defaults()
@@ -194,7 +209,7 @@ class FalClient:
             param = model.param(name)
             arguments[name] = param.coerce(value) if param and value is not None else value
         if model.prompt_arg:
-            prompt = compose_prompt(request.prompt, request.annotations)
+            prompt = _prompt_for(request)
             if not prompt:
                 raise ValueError(f'{model.label} needs a prompt')
             arguments[model.prompt_arg] = prompt
@@ -204,6 +219,10 @@ class FalClient:
             if not image_url:
                 raise ValueError(f'{model.label} needs a source image')
             arguments[model.image_arg] = image_url
+        if model.video_arg:
+            if not video_url:
+                raise ValueError(f'{model.label} needs a source video')
+            arguments[model.video_arg] = video_url
         if reference_url:
             if model.reference_arg:
                 arguments[model.reference_arg] = reference_url
@@ -242,17 +261,22 @@ class FalClient:
         model = request.model
         if model.image_arg and request.image is None:
             raise ValueError(f'{model.label} needs a source image')
-        if model.prompt_arg and not compose_prompt(request.prompt, request.annotations):
+        if model.video_arg and request.video is None:
+            raise ValueError(f'{model.label} needs a source video')
+        if model.prompt_arg and not _prompt_for(request):
             raise ValueError(f'{model.label} needs a prompt')
         session = self._session()
-        image_url = reference_url = None
+        image_url = reference_url = video_url = None
         if model.image_arg:
             report('Uploading the source image')
             image_url = self.upload(request.image)
+        if model.video_arg:
+            report('Uploading the source video')
+            video_url = self.upload(request.video)
         if request.reference_image is not None and model.reference_arg:
             report('Uploading the reference image')
             reference_url = self.upload(request.reference_image)
-        arguments = self.build_arguments(request, image_url, reference_url)
+        arguments = self.build_arguments(request, image_url, reference_url, video_url)
         report(f'Sending to {model.endpoint}')
         log.info(f'fal.ai run {model.endpoint}: {sorted(arguments)}')
         raw = session.subscribe(model.endpoint, arguments=arguments, with_logs=True,
@@ -296,4 +320,4 @@ class FalClient:
             suffix = mimetypes.guess_extension(file.content_type.split(';')[0].strip()) or ''
         if file.kind == MESH and suffix.lower() in ('', '.png', '.jpg', '.jpeg'):
             return '.glb'        # fal.ai reports some mesh files with an image content type
-        return suffix or ('.png' if file.kind == IMAGE else '.glb')
+        return suffix or _DEFAULT_SUFFIX.get(file.kind, '')

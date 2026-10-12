@@ -175,9 +175,107 @@ class TestParameters:
             _models.Param('a', 'A', 'int'), _models.Param('b', 'B', 'float'),
             _models.Param('c', 'C', 'float', 2.5, help='tip')))
         form.set_model(model)
-        assert form.values() == {'a': 0, 'b': 0.0, 'c': 2.5}
+        assert form.values() == {'c': 2.5}                       # the unset numbers read "Auto" and are left out
+        editors = {n: e for n, (p, e) in form._editors.items()}
+        editors['a'].setValue(3)
+        editors['b'].setValue(1.5)
+        assert form.values() == {'a': 3, 'b': 1.5, 'c': 2.5}
         form.set_model(None)
         assert form.values() == {}
+
+
+class TestAudio:
+    def test_every_audio_task_is_offered(self, make_window):
+        window = make_window()
+        for task in ('text_to_music', 'sound_effect', 'text_to_speech', 'video_to_audio'):
+            assert window._task_combo.findData(task) >= 0
+
+    def test_music_uses_the_prompt_and_direction(self, make_window):
+        window = make_window()
+        select_task(window, _models.TEXT_TO_MUSIC)
+        assert window.model.endpoint == 'fal-ai/stable-audio-25/text-to-audio'
+        assert not window._prompt_edit.isHidden() and not window._direction_edit.isHidden()
+        assert window._image_edit.isHidden() and window._video_edit.isHidden()
+
+    def test_speech_hides_the_direction_and_relabels_the_prompt(self, make_window):
+        window = make_window()
+        select_task(window, _models.TEXT_TO_SPEECH)
+        assert window._direction_edit.isHidden() and window._direction_label.isHidden()
+        assert window._prompt_label.text() == 'Text to speak:'
+        select_task(window, _models.TEXT_TO_MUSIC)
+        assert not window._direction_edit.isHidden() and window._prompt_label.text() == 'Prompt:'
+
+    def test_text_parameters_are_edited_as_text(self, make_window):
+        window = make_window()
+        select_task(window, _models.TEXT_TO_SPEECH)
+        window._speed_combo.setCurrentIndex(window._speed_combo.findData('quality'))
+        assert window.model.endpoint == 'fal-ai/elevenlabs/tts/turbo-v2.5'
+        editors = {n: e for n, (p, e) in window._params._editors.items()}
+        assert isinstance(editors['voice'], QtWidgets.QLineEdit) and window._params.values()['voice'] == 'Rachel'
+        editors['voice'].setText('Aria')
+        editors['language_code'].setText(' fr ')
+        assert window._params.values()['voice'] == 'Aria' and window._params.values()['language_code'] == 'fr'
+        editors['language_code'].setText('')
+        assert 'language_code' not in window._params.values()
+
+    def test_optional_numbers_read_auto_until_set(self, make_window):
+        window = make_window()
+        select_task(window, _models.SOUND_EFFECT)
+        editors = {n: e for n, (p, e) in window._params._editors.items()}
+        assert editors['duration_seconds'].specialValueText() == 'Auto' and 'duration_seconds' not in window._params.values()
+        editors['duration_seconds'].setValue(5.0)
+        assert window._params.values()['duration_seconds'] == 5.0
+
+    def test_the_video_row_follows_the_model(self, make_window, monkeypatch):
+        window = make_window()
+        select_task(window, _models.VIDEO_TO_AUDIO)
+        assert not window._video_edit.isHidden() and window._image_edit.isHidden()
+        monkeypatch.setattr(QtWidgets.QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: ('C:/clip.mp4', '')))
+        window._on_browse_video()
+        assert window._video_edit.text() == 'C:/clip.mp4' and window._build_request().video == Path('C:/clip.mp4')
+        monkeypatch.setattr(QtWidgets.QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: ('', '')))
+        window._on_browse_video()
+        assert window._video_edit.text() == 'C:/clip.mp4'
+
+    def test_a_missing_video_is_reported(self, make_window, dialogs, tmp_path):
+        window = make_window()
+        select_task(window, _models.VIDEO_TO_AUDIO)
+        window._prompt_edit.setPlainText('rain')
+        window._on_run()
+        assert 'source video' in dialogs[-1][2]
+        window._video_edit.setText(str(tmp_path / 'ghost.mp4'))
+        window._on_run()
+        assert 'video that exists' in dialogs[-1][2] and window.fake.requests == []
+
+    def test_audio_and_video_results_get_play_buttons(self, make_window, tmp_path):
+        window = make_window()
+        select_task(window, _models.TEXT_TO_MUSIC)
+        window._prompt_edit.setPlainText('lofi')
+        track = tmp_path / 'track.mp3'
+        track.write_bytes(b'mp3')
+        window.fake.result_files = [track]
+        window._on_run()
+        wait_for(lambda: window._results_layout.count() == 1 and window._run_btn.isEnabled())
+        button = window._results_layout.itemAt(0).widget()
+        assert 'track.mp3' in button.text() and button.text().endswith('Play')
+        opened = []
+        window._open = lambda path: opened.append(path)
+        button.click()
+        assert opened == [str(track)]
+
+    def test_a_video_result_also_plays(self, make_window, tmp_path):
+        window = make_window()
+        select_task(window, _models.VIDEO_TO_AUDIO)
+        clip = tmp_path / 'in.mp4'
+        clip.write_bytes(b'v')
+        window._video_edit.setText(str(clip))
+        window._prompt_edit.setPlainText('rain')
+        out = tmp_path / 'out.mp4'
+        out.write_bytes(b'v')
+        window.fake.result_files = [out]
+        window._on_run()
+        wait_for(lambda: window._results_layout.count() == 1 and window._run_btn.isEnabled())
+        assert window._results_layout.itemAt(0).widget().text().endswith('Play')
 
 
 class TestInputsAndRequests:

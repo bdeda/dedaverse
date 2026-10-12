@@ -25,14 +25,14 @@ from pathlib import Path
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ._client import ENV_API_KEY, DEFAULT_OUTPUT_DIR, FalClient, FalRequest
-from ._models import IMAGE_EDIT, IMAGE_TO_3D, IMAGE_TO_IMAGE, MESH, TASKS, FalModel, Param, models_for, recommend
+from ._models import IMAGE, TASKS, TEXT_TO_SPEECH, FalModel, Param, models_for, recommend
 from ._notes import load_notes
 
 log = logging.getLogger(__name__)
 
 _IMAGE_FILTER = 'Images (*.png *.jpg *.jpeg *.webp *.bmp)'
+_VIDEO_FILTER = 'Videos (*.mp4 *.mov *.webm *.mkv *.avi)'
 _SPEEDS = (('Recommended', None), ('Fast', 'fast'), ('Balanced', 'balanced'), ('Best quality', 'quality'))
-_SEED_RANDOM = -1
 
 
 class _RunWorker(QtCore.QThread):
@@ -86,23 +86,33 @@ class _ParamForm(QtWidgets.QWidget):
             for choice in param.choices:
                 editor.addItem(str(choice), choice)
             editor.setCurrentIndex(max(0, editor.findData(param.default)))
+        elif param.kind == 'text':
+            editor = QtWidgets.QLineEdit('' if param.default is None else str(param.default))
         elif param.kind == 'int':
             editor = QtWidgets.QSpinBox()
             low = int(param.minimum if param.minimum is not None else 0)
-            if param.name == 'seed':
-                editor.setRange(_SEED_RANDOM, int(param.maximum or 2 ** 31 - 1))
-                editor.setSpecialValueText('Random')
-                editor.setValue(_SEED_RANDOM if param.default is None else int(param.default))
+            high = int(param.maximum if param.maximum is not None else 10 ** 6)
+            if param.default is None:
+                # One step below the range means "not set": the argument is left out and the model decides.
+                editor.setRange(low - 1, high)
+                editor.setSpecialValueText('Random' if param.name == 'seed' else 'Auto')
+                editor.setValue(low - 1)
             else:
-                editor.setRange(low, int(param.maximum if param.maximum is not None else 10 ** 6))
-                editor.setValue(int(param.default if param.default is not None else low))
+                editor.setRange(low, high)
+                editor.setValue(int(param.default))
         else:
             editor = QtWidgets.QDoubleSpinBox()
             editor.setDecimals(2)
             editor.setSingleStep(0.1)
-            editor.setRange(float(param.minimum if param.minimum is not None else 0.0),
-                            float(param.maximum if param.maximum is not None else 1000.0))
-            editor.setValue(float(param.default if param.default is not None else editor.minimum()))
+            low = float(param.minimum if param.minimum is not None else 0.0)
+            high = float(param.maximum if param.maximum is not None else 1000.0)
+            if param.default is None:
+                editor.setRange(low - 0.1, high)
+                editor.setSpecialValueText('Auto')
+                editor.setValue(low - 0.1)
+            else:
+                editor.setRange(low, high)
+                editor.setValue(float(param.default))
         if param.help:
             editor.setToolTip(param.help)
         return editor
@@ -115,7 +125,9 @@ class _ParamForm(QtWidgets.QWidget):
                 value = editor.isChecked()
             elif isinstance(editor, QtWidgets.QComboBox):
                 value = editor.currentData()
-            elif param.name == 'seed' and editor.value() == _SEED_RANDOM:
+            elif isinstance(editor, QtWidgets.QLineEdit):
+                value = editor.text().strip() or None
+            elif param.default is None and editor.value() == editor.minimum():
                 value = None
             else:
                 value = editor.value()
@@ -216,12 +228,14 @@ class FalToolWindow(QtWidgets.QMainWindow):
         self._direction_edit = QtWidgets.QPlainTextEdit()
         self._direction_edit.setMaximumHeight(70)
         self._direction_edit.setPlaceholderText('Art direction: look, mood, references (added to the prompt)')
-        inputs.addRow('Direction:', self._direction_edit)
+        self._direction_label = QtWidgets.QLabel('Direction:')
+        inputs.addRow(self._direction_label, self._direction_edit)
         load_notes_btn = QtWidgets.QPushButton('Use Viewer Notes...')
         load_notes_btn.setToolTip('Take the text and the snapshot from notes saved in the Dedaverse viewer')
         load_notes_btn.clicked.connect(self._on_use_notes)
         inputs.addRow('', load_notes_btn)
         self._image_edit, self._image_label = self._path_row(inputs, 'Source image:', self._on_browse_image)
+        self._video_edit, self._video_label = self._path_row(inputs, 'Source video:', self._on_browse_video)
         self._reference_edit, self._reference_label = self._path_row(
             inputs, 'Reference image:', self._on_browse_reference)
         self._reference_edit.setPlaceholderText('Moodboard, sketch or annotated snapshot (optional)')
@@ -324,6 +338,12 @@ class FalToolWindow(QtWidgets.QMainWindow):
                                  ' '.join(part for part in (model.description, model.notes) if part))
         has_prompt = bool(model and model.prompt_arg)
         has_image = bool(model and model.image_arg)
+        speaks = bool(model and model.task == TEXT_TO_SPEECH)
+        self._prompt_label.setText('Text to speak:' if speaks else 'Prompt:')
+        for widget in (self._direction_edit, self._direction_label):
+            widget.setVisible(bool(model and model.direction_in_prompt))
+        for widget in (self._video_edit, self._video_label):
+            widget.setVisible(bool(model and model.video_arg))
         for widget in (self._prompt_edit, self._prompt_label):
             widget.setVisible(has_prompt)
         for widget in (self._negative_edit, self._negative_label):
@@ -342,6 +362,7 @@ class FalToolWindow(QtWidgets.QMainWindow):
             model=model, prompt=self._prompt_edit.toPlainText(), annotations=self._direction_edit.toPlainText(),
             negative_prompt=self._negative_edit.text(),
             image=Path(self._image_edit.text().strip()) if self._image_edit.text().strip() else None,
+            video=Path(self._video_edit.text().strip()) if self._video_edit.text().strip() else None,
             reference_image=Path(self._reference_edit.text().strip()) if self._reference_edit.text().strip() else None,
             params=self._params.values(),
             output_dir=Path(self._out_dir_edit.text().strip() or str(DEFAULT_OUTPUT_DIR)),
@@ -353,6 +374,11 @@ class FalToolWindow(QtWidgets.QMainWindow):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Source image', '', _IMAGE_FILTER)
         if path:
             self._image_edit.setText(path)
+
+    def _on_browse_video(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Source video', '', _VIDEO_FILTER)
+        if path:
+            self._video_edit.setText(path)
 
     def _on_browse_reference(self) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Reference image', '', _IMAGE_FILTER)
@@ -392,9 +418,12 @@ class FalToolWindow(QtWidgets.QMainWindow):
             return
         try:
             request = self._build_request()
-            self._client.build_arguments(request, 'x' if request.model.image_arg else None)
+            self._client.build_arguments(request, 'x' if request.model.image_arg else None, None,
+                                         'x' if request.model.video_arg else None)
             if request.model.image_arg and (request.image is None or not request.image.is_file()):
                 raise ValueError('Choose a source image that exists')
+            if request.model.video_arg and (request.video is None or not request.video.is_file()):
+                raise ValueError('Choose a source video that exists')
         except ValueError as err:
             QtWidgets.QMessageBox.warning(self, 'fal.ai', str(err))
             return
@@ -423,8 +452,9 @@ class FalToolWindow(QtWidgets.QMainWindow):
     def _show_results(self, result) -> None:
         for path in result.paths:
             index = self._results_layout.count()
-            if result.model.output_kind == MESH:
-                button = QtWidgets.QPushButton(f'{path.name}\nOpen')
+            if result.model.output_kind != IMAGE:
+                verb = 'Play' if result.model.output_kind in ('audio', 'video') else 'Open'
+                button = QtWidgets.QPushButton(f'{path.name}\n{verb}')
                 button.setFixedSize(180, 80)
                 button.setToolTip(str(path))
                 button.clicked.connect(lambda checked=False, p=str(path): self._open(p))

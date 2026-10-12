@@ -86,6 +86,70 @@ class TestRegistry:
             _models.task_for(*args)
 
 
+class TestAudioModels:
+    def model(self, endpoint):
+        return next(m for m in _models.BUILTIN_MODELS if m.endpoint == endpoint)
+
+    def test_every_audio_task_has_models_and_a_default(self):
+        picks = {task: _models.recommend(task).endpoint for task in (
+            _models.TEXT_TO_MUSIC, _models.SOUND_EFFECT, _models.TEXT_TO_SPEECH, _models.VIDEO_TO_AUDIO)}
+        assert picks == {'text_to_music': 'fal-ai/stable-audio-25/text-to-audio',
+                         'sound_effect': 'fal-ai/elevenlabs/sound-effects/v2',
+                         'text_to_speech': 'fal-ai/kokoro/american-english', 'video_to_audio': 'fal-ai/mmaudio-v2'}
+        assert _models.recommend(_models.TEXT_TO_MUSIC, 'quality').endpoint == 'fal-ai/lyria2'
+        assert _models.recommend(_models.SOUND_EFFECT, 'fast').endpoint == 'fal-ai/mmaudio-v2/text-to-audio'
+        assert _models.recommend(_models.TEXT_TO_SPEECH, 'quality').endpoint == 'fal-ai/elevenlabs/tts/turbo-v2.5'
+
+    def test_outputs_and_inputs(self):
+        for endpoint in ('fal-ai/stable-audio-25/text-to-audio', 'fal-ai/lyria2', 'fal-ai/kokoro/american-english'):
+            assert self.model(endpoint).output_kind == 'audio' and self.model(endpoint).output_field == 'audio'
+        video = self.model('fal-ai/mmaudio-v2')
+        assert video.video_arg == 'video_url' and video.output_kind == 'video' and video.output_field == 'video'
+
+    def test_arguments_for_music_and_effects(self):
+        music = _client.FalClient.build_arguments(_client.FalRequest(
+            self.model('fal-ai/stable-audio-25/text-to-audio'), prompt='lofi beat', annotations='warm',
+            params={'seconds_total': 999}))
+        assert music['seconds_total'] == 190 and music['prompt'] == 'lofi beat\n\nArt direction: warm'
+        effect = _client.FalClient.build_arguments(_client.FalRequest(
+            self.model('fal-ai/elevenlabs/sound-effects/v2'), prompt='door creak', params={'duration_seconds': 99}))
+        assert effect['text'] == 'door creak' and effect['duration_seconds'] == 22.0 and 'prompt' not in effect
+        assert effect['output_format'] == 'mp3_44100_128'
+        assert 'duration_seconds' not in _client.FalClient.build_arguments(
+            _client.FalRequest(self.model('fal-ai/elevenlabs/sound-effects/v2'), prompt='x'))
+
+    def test_speech_is_never_given_art_direction(self):
+        request = _client.FalRequest(self.model('fal-ai/kokoro/american-english'), prompt=' Hello there. ',
+                                     annotations='whisper it, sadly', params={'voice': 'am_adam', 'speed': 9})
+        arguments = _client.FalClient.build_arguments(request)
+        assert arguments['prompt'] == 'Hello there.' and arguments['voice'] == 'am_adam' and arguments['speed'] == 2.0
+        eleven = _client.FalRequest(self.model('fal-ai/elevenlabs/tts/turbo-v2.5'), prompt='Bonjour',
+                                    annotations='ignored', params={'voice': 'Aria', 'language_code': 'fr'})
+        arguments = _client.FalClient.build_arguments(eleven)
+        assert arguments['text'] == 'Bonjour' and arguments['voice'] == 'Aria' and arguments['language_code'] == 'fr'
+        assert _models.Param('v', 'V', 'text', 'x').coerce(5) == '5'
+
+    def test_speech_needs_text(self):
+        request = _client.FalRequest(self.model('fal-ai/kokoro/american-english'), annotations='only direction')
+        with pytest.raises(ValueError, match='needs a prompt'):
+            _client.FalClient.build_arguments(request)
+
+    def test_a_video_is_required_and_passed_on(self):
+        model = self.model('fal-ai/mmaudio-v2')
+        request = _client.FalRequest(model, prompt='rain on a roof')
+        with pytest.raises(ValueError, match='needs a source video'):
+            _client.FalClient.build_arguments(request)
+        arguments = _client.FalClient.build_arguments(request, video_url='u://clip')
+        assert arguments['video_url'] == 'u://clip' and arguments['prompt'] == 'rain on a roof'
+
+    def test_user_models_can_declare_audio(self, tmp_path):
+        file = tmp_path / 'm.json'
+        file.write_text(json.dumps([{'endpoint': 'fal-ai/x', 'label': 'X', 'task': 'text_to_music',
+                                     'output_kind': 'audio', 'direction_in_prompt': False, 'video_arg': 'v'}]))
+        model = _models.load_user_models(file)[0]
+        assert model.output_field == 'audio' and model.direction_in_prompt is False and model.video_arg == 'v'
+
+
 class TestUserModels:
     def entry(self, **extra):
         return {'endpoint': 'fal-ai/custom', 'label': 'Custom', 'task': 'text_to_image', **extra}
@@ -118,7 +182,7 @@ class TestUserModels:
         not_a_list.write_text('{}')
         mixed = tmp_path / 'mixed.json'
         mixed.write_text(json.dumps([self.entry(), {'endpoint': 'x'}, self.entry(task='nonsense'),
-                                     self.entry(output_kind='video'), 5]))
+                                     self.entry(output_kind='hologram'), 5]))
         with caplog.at_level('WARNING'):
             assert _models.load_user_models(broken) == [] and _models.load_user_models(not_a_list) == []
             assert len(_models.load_user_models(mixed)) == 1
@@ -242,6 +306,39 @@ class TestRun:
                                image=png(tmp_path / 's.png'), reference_image=png(tmp_path / 'r.png'))
         client.run(request)
         assert client.session.uploads == ['s.png']
+
+    def test_audio_is_downloaded_with_the_right_suffix(self, tmp_path):
+        client = make_client({'audio': {'url': 'https://x/out', 'content_type': 'audio/mpeg'}, 'seed': 3}, tmp_path)
+        request = self.request(tmp_path, 'fal-ai/stable-audio-25/text-to-audio', prompt='beat')
+        result = client.run(request)
+        assert result.paths[0].suffix == '.mp3' and result.files[0].kind == 'audio' and result.seed == 3
+
+    @pytest.mark.parametrize('entry, kind, suffix', [
+        ({'url': 'https://x/a'}, 'audio', '.wav'), ({'url': 'https://x/a', 'file_name': 'mix.flac'}, 'audio', '.flac'),
+        ({'url': 'https://x/a'}, 'video', '.mp4')])
+    def test_audio_and_video_suffix_fallbacks(self, entry, kind, suffix):
+        assert _client.FalClient._suffix(_client.FalFile(kind=kind, **entry)) == suffix
+
+    def test_a_video_is_uploaded_and_the_result_is_a_video(self, tmp_path):
+        client = make_client({'video': {'url': 'https://x/v.mp4', 'content_type': 'video/mp4'}}, tmp_path)
+        clip = tmp_path / 'clip.mp4'
+        clip.write_bytes(b'video')
+        request = self.request(tmp_path, 'fal-ai/mmaudio-v2', prompt='rain', video=clip)
+        result = client.run(request)
+        assert client.session.uploads == ['clip.mp4'] and client.session.calls[0][1]['video_url'].endswith('clip.mp4')
+        assert result.paths[0].suffix == '.mp4' and result.files[0].kind == 'video'
+
+    def test_a_video_model_needs_a_video(self, tmp_path):
+        with pytest.raises(ValueError, match='needs a source video'):
+            make_client({}, tmp_path).run(self.request(tmp_path, 'fal-ai/mmaudio-v2', prompt='rain'))
+
+    def test_speech_runs_without_direction(self, tmp_path):
+        client = make_client({'audio': {'url': 'https://x/s.wav'}}, tmp_path)
+        request = self.request(tmp_path, 'fal-ai/kokoro/american-english', prompt='Hi', annotations='shout')
+        client.run(request)
+        assert client.session.calls[0][1]['prompt'] == 'Hi'
+        with pytest.raises(ValueError, match='needs a prompt'):
+            client.run(self.request(tmp_path, 'fal-ai/kokoro/american-english', annotations='only direction'))
 
     def test_a_mesh_result_is_saved_as_glb_even_with_an_image_content_type(self, tmp_path):
         client = make_client({'model_mesh': {'url': 'https://x/mesh', 'content_type': 'image/png',

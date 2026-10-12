@@ -37,6 +37,10 @@ TEXT_TO_IMAGE = 'text_to_image'
 IMAGE_TO_IMAGE = 'image_to_image'
 IMAGE_EDIT = 'image_edit'
 IMAGE_TO_3D = 'image_to_3d'
+TEXT_TO_MUSIC = 'text_to_music'
+SOUND_EFFECT = 'sound_effect'
+TEXT_TO_SPEECH = 'text_to_speech'
+VIDEO_TO_AUDIO = 'video_to_audio'
 
 #: Task keys in the order the UI shows them, with their labels.
 TASKS = {
@@ -44,10 +48,17 @@ TASKS = {
     IMAGE_TO_IMAGE: 'Image from image (restyle / art direction)',
     IMAGE_EDIT: 'Edit an image with instructions',
     IMAGE_TO_3D: '3D mesh from image',
+    TEXT_TO_MUSIC: 'Music from text',
+    SOUND_EFFECT: 'Sound effect from text',
+    TEXT_TO_SPEECH: 'Speech from text',
+    VIDEO_TO_AUDIO: 'Sound for a video',
 }
 
 IMAGE = 'image'
 MESH = 'mesh'
+AUDIO = 'audio'
+VIDEO = 'video'
+OUTPUT_KINDS = (IMAGE, MESH, AUDIO, VIDEO)
 
 
 @dataclass(frozen=True)
@@ -57,7 +68,7 @@ class Param:
     Attributes:
         name: The fal.ai argument name.
         label: Text for the UI.
-        kind: ``int``, ``float``, ``bool`` or ``choice``.
+        kind: ``int``, ``float``, ``bool``, ``choice`` or ``text``.
         default: Value used when the user does not change it (None leaves the argument out).
         minimum: Lowest allowed value for ``int``/``float``.
         maximum: Highest allowed value for ``int``/``float``.
@@ -78,6 +89,8 @@ class Param:
         """Return ``value`` converted to this parameter's type and clamped to its range."""
         if self.kind == 'bool':
             return bool(value)
+        if self.kind == 'text':
+            return str(value)
         if self.kind == 'choice':
             return value if value in self.choices else self.default
         number = int(value) if self.kind == 'int' else float(value)
@@ -99,11 +112,14 @@ class FalModel:
         description: What it is good for.
         prompt_arg: Name of the text prompt argument, or None if the model takes none.
         image_arg: Name of the argument that takes the source image URL, or None for text-only models.
+        video_arg: Name of the argument that takes a source video URL, or None.
         reference_arg: Name of an argument that takes a second, reference image (art direction, a markup or
             sketch), or None if the model has no such input.
         negative_prompt_arg: Name of the negative prompt argument, or None.
         output_field: The result field holding the files (a list for images, a single file for meshes).
-        output_kind: ``image`` or ``mesh``.
+        output_kind: ``image``, ``mesh``, ``audio`` or ``video``.
+        direction_in_prompt: Whether written art direction may be added to the prompt. False for models
+            that speak or sing their text verbatim.
         params: Tunable inputs.
         speed: ``fast``, ``balanced`` or ``quality``; used by the recommender.
         notes: Anything to know before using it (cost, licence, status).
@@ -115,10 +131,12 @@ class FalModel:
     description: str
     prompt_arg: str | None = 'prompt'
     image_arg: str | None = None
+    video_arg: str | None = None
     reference_arg: str | None = None
     negative_prompt_arg: str | None = None
     output_field: str = 'images'
     output_kind: str = IMAGE
+    direction_in_prompt: bool = True
     params: tuple = ()
     speed: str = 'balanced'
     notes: str = ''
@@ -201,6 +219,67 @@ BUILTIN_MODELS = (
                 Param('guidance_scale', 'Guidance', 'float', 7.5, 1.0, 20.0),
                 Param('octree_resolution', 'Octree resolution', 'int', 256, 64, 512), _SEED),
         speed='quality', notes='fal.ai marks this endpoint deprecated; use it only if TRELLIS does not suit.'),
+    FalModel(
+        'fal-ai/stable-audio-25/text-to-audio', 'Stable Audio 2.5', TEXT_TO_MUSIC,
+        'Music and ambience from a text description, up to about three minutes. Name genre, instruments, mood and tempo.',
+        output_field='audio', output_kind=AUDIO,
+        params=(Param('seconds_total', 'Length (s)', 'int', 30, 1, 190),
+                Param('num_inference_steps', 'Steps', 'int', 8, 1, 50),
+                Param('guidance_scale', 'Guidance', 'float', 1.0, 0.0, 20.0), _SEED),
+        speed='balanced'),
+    FalModel(
+        'fal-ai/lyria2', 'Google Lyria 2', TEXT_TO_MUSIC,
+        'High fidelity instrumental music: 48 kHz WAV, 30 seconds per clip.',
+        negative_prompt_arg='negative_prompt', output_field='audio', output_kind=AUDIO,
+        params=(_SEED,), speed='quality'),
+    FalModel(
+        'fal-ai/elevenlabs/sound-effects/v2', 'ElevenLabs sound effects', SOUND_EFFECT,
+        'Sound effects from a description ("heavy wooden door creaks open"). Can loop smoothly.',
+        prompt_arg='text', output_field='audio', output_kind=AUDIO,
+        params=(Param('duration_seconds', 'Length (s)', 'float', None, 0.5, 22.0),
+                Param('prompt_influence', 'Prompt influence', 'float', 0.3, 0.0, 1.0,
+                      help='Higher means less variation.'),
+                Param('loop', 'Loop', 'bool', False),
+                Param('output_format', 'Format', 'choice', 'mp3_44100_128',
+                      choices=('mp3_44100_128', 'mp3_44100_192', 'mp3_44100_64', 'pcm_44100', 'pcm_48000',
+                               'opus_48000_128'))),
+        speed='balanced'),
+    FalModel(
+        'fal-ai/mmaudio-v2/text-to-audio', 'MMAudio (text to audio)', SOUND_EFFECT,
+        'Sound effects and ambience from a description, with a negative prompt.',
+        negative_prompt_arg='negative_prompt', output_field='audio', output_kind=AUDIO,
+        params=(Param('duration', 'Length (s)', 'float', 8.0, 1.0, 30.0),
+                Param('num_steps', 'Steps', 'int', 25, 1, 100),
+                Param('cfg_strength', 'Prompt strength', 'float', 4.5, 0.0, 20.0), _SEED),
+        speed='fast'),
+    FalModel(
+        'fal-ai/kokoro/american-english', 'Kokoro (American English speech)', TEXT_TO_SPEECH,
+        'Fast, natural text to speech in American English. Good for scratch dialogue and narration.',
+        prompt_arg='prompt', output_field='audio', output_kind=AUDIO, direction_in_prompt=False,
+        params=(Param('voice', 'Voice', 'choice', 'af_heart', choices=(
+                    'af_heart', 'af_alloy', 'af_aoede', 'af_bella', 'af_jessica', 'af_kore', 'af_nicole', 'af_nova',
+                    'af_river', 'af_sarah', 'af_sky', 'am_adam', 'am_echo', 'am_eric', 'am_fenrir', 'am_liam',
+                    'am_michael', 'am_onyx', 'am_puck', 'am_santa')),
+                Param('speed', 'Speed', 'float', 1.0, 0.5, 2.0)),
+        speed='fast'),
+    FalModel(
+        'fal-ai/elevenlabs/tts/turbo-v2.5', 'ElevenLabs Turbo v2.5 (speech)', TEXT_TO_SPEECH,
+        'Expressive multilingual text to speech with named voices.',
+        prompt_arg='text', output_field='audio', output_kind=AUDIO, direction_in_prompt=False,
+        params=(Param('voice', 'Voice', 'text', 'Rachel', help='An ElevenLabs voice name, such as Rachel or Aria.'),
+                Param('stability', 'Stability', 'float', 0.5, 0.0, 1.0),
+                Param('similarity_boost', 'Similarity', 'float', 0.75, 0.0, 1.0),
+                Param('speed', 'Speed', 'float', 1.0, 0.7, 1.2),
+                Param('language_code', 'Language code', 'text', None, help='ISO 639-1, such as en or fr.')),
+        speed='quality'),
+    FalModel(
+        'fal-ai/mmaudio-v2', 'MMAudio (sound for a video)', VIDEO_TO_AUDIO,
+        'Adds synchronised sound to a video from a description. The result is a video with the new audio.',
+        video_arg='video_url', negative_prompt_arg='negative_prompt', output_field='video', output_kind=VIDEO,
+        params=(Param('duration', 'Length (s)', 'float', 8.0, 1.0, 30.0),
+                Param('num_steps', 'Steps', 'int', 25, 1, 100),
+                Param('cfg_strength', 'Prompt strength', 'float', 4.5, 0.0, 20.0), _SEED),
+        speed='balanced'),
 )
 
 #: What the recommender prefers for each task when no speed is asked for (or none matches).
@@ -209,7 +288,14 @@ _DEFAULT_PICK = {
     IMAGE_TO_IMAGE: 'fal-ai/flux/dev/image-to-image',
     IMAGE_EDIT: 'fal-ai/flux-pro/kontext',
     IMAGE_TO_3D: 'fal-ai/trellis',
+    TEXT_TO_MUSIC: 'fal-ai/stable-audio-25/text-to-audio',
+    SOUND_EFFECT: 'fal-ai/elevenlabs/sound-effects/v2',
+    TEXT_TO_SPEECH: 'fal-ai/kokoro/american-english',
+    VIDEO_TO_AUDIO: 'fal-ai/mmaudio-v2',
 }
+
+
+_DEFAULT_OUTPUT_FIELD = {IMAGE: 'images', MESH: 'model_mesh', AUDIO: 'audio', VIDEO: 'video'}
 
 
 def _param_from_dict(data: dict) -> Param:
@@ -230,13 +316,14 @@ def model_from_dict(data: dict) -> FalModel:
     if task not in TASKS:
         raise ValueError(f'unknown task {task!r}; expected one of {sorted(TASKS)}')
     kind = data.get('output_kind', IMAGE)
-    if kind not in (IMAGE, MESH):
-        raise ValueError(f'output_kind must be {IMAGE!r} or {MESH!r}, not {kind!r}')
+    if kind not in OUTPUT_KINDS:
+        raise ValueError(f'output_kind must be one of {OUTPUT_KINDS}, not {kind!r}')
     return FalModel(
         endpoint=data['endpoint'], label=data['label'], task=task, description=data.get('description', ''),
-        prompt_arg=data.get('prompt_arg', 'prompt'), image_arg=data.get('image_arg'),
+        prompt_arg=data.get('prompt_arg', 'prompt'), image_arg=data.get('image_arg'), video_arg=data.get('video_arg'),
         reference_arg=data.get('reference_arg'), negative_prompt_arg=data.get('negative_prompt_arg'),
-        output_field=data.get('output_field', 'model_mesh' if kind == MESH else 'images'), output_kind=kind,
+        output_field=data.get('output_field', _DEFAULT_OUTPUT_FIELD[kind]), output_kind=kind,
+        direction_in_prompt=data.get('direction_in_prompt', True),
         params=tuple(_param_from_dict(p) for p in data.get('params', ())), speed=data.get('speed', 'balanced'),
         notes=data.get('notes', ''))
 
