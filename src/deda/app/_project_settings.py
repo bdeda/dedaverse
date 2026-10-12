@@ -40,10 +40,11 @@ def _uniquify_proj_name(name, projects):
     if name not in projects:
         return name
     n = 1
-    name = f'{name} ({n})'
-    while name in projects and n < 1000: # cap it
+    candidate = f'{name} ({n})'
+    while candidate in projects and n < 1000: # cap it
         n += 1
-    return name
+        candidate = f'{name} ({n})'
+    return candidate
 
 
 class StartProjectDialog(QtWidgets.QDialog):
@@ -397,7 +398,7 @@ class ProjectSettingsDialog(QtWidgets.QDialog):
         dlg = StartProjectDialog(self._config, parent=self)
         dlg.project_changed.connect(self.initialize)
         dlg.exec_()
-        self.project_changed.emit()
+        self.project_changed.emit(self._config.current_project)
         
     def _current_project_changed(self, index):
         """User changed the combobox for the current project."""
