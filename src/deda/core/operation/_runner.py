@@ -32,6 +32,8 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
+from . import _config
+
 __all__ = ['CopilotRunner', 'RunnerResult']
 
 
@@ -54,8 +56,14 @@ class RunnerResult:
 class CopilotRunner:
     """Thin wrapper around the ``copilot`` CLI.
 
+    Each argument defaults to ``None`` so it falls through to the matching
+    ``_config.COPILOT_*`` module global — which in turn is populated from
+    ``OPERATION_COPILOT_*`` env vars (see :mod:`._config`). Pass an
+    explicit value to override config for a single runner instance.
+
     Args:
-        executable: Path or command name. ``None`` → resolve via ``PATH``.
+        executable: Path or command name. ``None`` → ``_config.COPILOT_EXECUTABLE``,
+            which itself defaults to resolving ``copilot`` via ``PATH``.
         model: Optional ``--model`` value (e.g. ``gpt-5``).
         allow_all_tools: If True, pass ``--allow-all-tools`` — convenient for
             local dev; review before using in unattended deployments.
@@ -66,13 +74,15 @@ class CopilotRunner:
         self,
         executable: str | None = None,
         model: str | None = None,
-        allow_all_tools: bool = False,
-        timeout: float = 600.0,
+        allow_all_tools: bool | None = None,
+        timeout: float | None = None,
     ) -> None:
-        self._executable = executable
-        self._model = model
-        self._allow_all_tools = allow_all_tools
-        self._timeout = timeout
+        self._executable = executable if executable is not None else _config.COPILOT_EXECUTABLE
+        self._model = model if model is not None else _config.COPILOT_MODEL
+        self._allow_all_tools = (
+            allow_all_tools if allow_all_tools is not None else _config.COPILOT_ALLOW_ALL_TOOLS
+        )
+        self._timeout = timeout if timeout is not None else _config.COPILOT_TIMEOUT_SEC
 
     def resolve_executable(self) -> str:
         """Return the copilot executable path; raises if not found."""

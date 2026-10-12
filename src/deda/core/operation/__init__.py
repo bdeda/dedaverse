@@ -28,13 +28,31 @@ visible while the real policy gets designed.
 Run as: ``py -3.13 -m deda.core.operation``
 """
 
-from ._config import HOST, PORT, TASKS_DIR, TEMPLATES_DIR, TICK_INTERVAL_SEC
+from ._config import (
+    COPILOT_ALLOW_ALL_TOOLS,
+    COPILOT_EXECUTABLE,
+    COPILOT_MODEL,
+    COPILOT_TIMEOUT_SEC,
+    DEFAULT_ENV_PATH,
+    HOST,
+    PORT,
+    TASKS_DIR,
+    TEMPLATES_DIR,
+    TICK_INTERVAL_SEC,
+    load_env,
+    reload_config,
+)
 from ._prompts import compose_prompt, load_template
 from ._runner import CopilotRunner, RunnerResult
 from ._server import OperationServer, start_server
 from ._tasks import Task, TaskStatus, discover_tasks, is_ready_to_run
 
 __all__ = [
+    'COPILOT_ALLOW_ALL_TOOLS',
+    'COPILOT_EXECUTABLE',
+    'COPILOT_MODEL',
+    'COPILOT_TIMEOUT_SEC',
+    'DEFAULT_ENV_PATH',
     'HOST',
     'PORT',
     'TASKS_DIR',
@@ -48,6 +66,8 @@ __all__ = [
     'compose_prompt',
     'discover_tasks',
     'is_ready_to_run',
+    'load_env',
     'load_template',
+    'reload_config',
     'start_server',
 ]
