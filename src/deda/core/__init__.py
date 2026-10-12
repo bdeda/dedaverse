@@ -17,6 +17,7 @@
 # ###################################################################################
 from ._check_for_updates import check_for_updates, is_dev_mode
 from ._config import *
+from ._image_io import *
 from ._plugin import *
 from ._types import *
 from .types import *

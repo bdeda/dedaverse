@@ -71,7 +71,7 @@ def install():
         
         if bat_path.is_file():
             with open(cmd_path, 'w') as f:
-                f.write(f'@echo off\nstart "{bat_path}"\n')
+                f.write(f'@echo off\nstart "" "{bat_path}"\n')
             print(f'Startup script installed to {cmd_path}')
             return 0
         else:

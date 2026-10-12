@@ -57,11 +57,24 @@ jobs:
                       pytest \
                       pytest-cov \
                       pylint \
-                      apache-license-check
-                  python -m pip install .
+                      apache-license-check \
+                      bandit[toml] \
+                      radon
+                  python -m pip install ".[dev]"
 
             - name: Run license-check
               run: apache-license-check --copyright "Ben Deda"
+
+            - name: Security scan with bandit
+              run: |
+                  bandit -r src/deda -c pyproject.toml -f json -o bandit-report.json
+                  bandit -r src/deda -c pyproject.toml -f screen
+
+            - name: Complexity check with radon
+              continue-on-error: true
+              run: |
+                  radon cc src/deda -n C -a -s --total-average
+                  radon cc src/deda -n C -a -s --total-average -j -o radon-report.json || true
 
             - name: Lint with pylint
               run: |
@@ -108,6 +121,12 @@ jobs:
                   fail_ci_if_error: false
                   verbose: true
 
+            - name: Security & complexity summary
+              run: |
+                  echo "## Security (bandit) & Complexity (radon)" >> $GITHUB_STEP_SUMMARY
+                  if [ -f bandit-report.json ]; then echo "Bandit report: ✅" >> $GITHUB_STEP_SUMMARY; fi
+                  if [ -f radon-report.json ]; then echo "Radon report: ✅" >> $GITHUB_STEP_SUMMARY; fi
+
             - name: Coverage summary
               run: |
                   echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
@@ -126,6 +145,17 @@ jobs:
                   name: coverage-report-${{ matrix.python-version }}
                   path: htmlcov/
                   retention-days: 30
+
+            - name: Upload bandit and radon reports
+              uses: actions/upload-artifact@v6
+              if: always()
+              with:
+                  name: bandit-radon-reports-${{ matrix.python-version }}
+                  path: |
+                      bandit-report.json
+                      radon-report.json
+                  retention-days: 14
+                  if-no-files-found: ignore
 
     # Deploy coverage report to GitHub Pages
     deploy-coverage:

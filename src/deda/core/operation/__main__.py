@@ -17,8 +17,9 @@
 # ###################################################################################
 """Module entry point: ``py -3.13 -m deda.core.operation``.
 
-Starts the loop + HTTP server with defaults from ``_config`` and blocks
-until Ctrl-C.
+Starts the loop + HTTP server using :mod:`_config` values (which are
+sourced from :data:`os.environ` and the optional ``.env`` file) and
+blocks until Ctrl-C.
 """
 
 import argparse
@@ -26,6 +27,7 @@ import logging
 import signal
 import sys
 import threading
+from pathlib import Path
 
 from . import _config
 from ._server import start_server
@@ -33,8 +35,16 @@ from ._server import start_server
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog='deda.core.operation')
-    parser.add_argument('--host', default=_config.HOST)
-    parser.add_argument('--port', type=int, default=_config.PORT)
+    parser.add_argument(
+        '--env-file',
+        type=Path,
+        default=None,
+        help='Path to a .env file. Overrides OPERATION_ENV_FILE / the default '
+        '~/.dedaverse/operation/.env. Values in this file take precedence '
+        'over existing environment variables.',
+    )
+    parser.add_argument('--host', default=None)
+    parser.add_argument('--port', type=int, default=None)
     parser.add_argument(
         '--log-level',
         default='INFO',
@@ -45,12 +55,20 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+
+    if args.env_file is not None:
+        _config.load_env(env_file=args.env_file, override=True)
+        _config.reload_config()
+
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format='%(asctime)s %(levelname)s %(name)s: %(message)s',
     )
 
-    op = start_server(host=args.host, port=args.port)
+    host = args.host if args.host is not None else _config.HOST
+    port = args.port if args.port is not None else _config.PORT
+
+    op = start_server(host=host, port=port)
 
     stop_event = threading.Event()
 
