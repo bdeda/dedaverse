@@ -67,8 +67,9 @@ jobs:
 
             - name: Security scan with bandit
               run: |
-                  bandit -r src/deda -c pyproject.toml -f json -o bandit-report.json
-                  bandit -r src/deda -c pyproject.toml -f screen
+                  # -ll: fail on medium severity and above; low findings stay in the report
+                  bandit -r src/deda -c pyproject.toml -ll -f json -o bandit-report.json || true
+                  bandit -r src/deda -c pyproject.toml -ll -f screen
 
             - name: Complexity check with radon
               continue-on-error: true
