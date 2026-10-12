@@ -36,6 +36,7 @@ from deda.core.types import Element, Project
 
 from ._usd_viewer import UsdViewWidget
 
+from . import _ab_compare
 from . import _annotation
 from . import _dedacam
 from . import _media
@@ -170,6 +171,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._env_texture_path = None  # Track selected environment texture for persistence
         self._recent_files = self._load_recent_files()
         self._opened_entity = None  # Project/Collection/Asset from Project.from_path when a file is opened
+        self._opened_path = None  # path of the file shown in the title bar
         
         self.setWindowTitle('Dedaverse')
         # Use same star icon as main Dedaverse window (deda.app._main_window)
@@ -191,8 +193,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._stack = QtWidgets.QStackedWidget(self)
         self._stack.addWidget(self._viewer)
         self._stack.addWidget(self._media_view)
+        self._ab_compare = _ab_compare.AbCompareWidget(parent=self)
+        self._stack.addWidget(self._ab_compare)
         vbox.addWidget(self._stack, 1)
         self._mode = '3d'
+        self._compare_paths = None  # (A, B) while comparing
 
         self._loading_overlay = LoadingOverlay(parent=self._viewer)
         self._loading_overlay.raise_()
@@ -212,6 +217,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._play_timer.timeout.connect(self._on_play_tick)
 
         self._dedacam = _dedacam.DedacamController(self._viewer.stage_view)
+
         self.setAcceptDrops(True)
         
         self._build_menu_bar()
@@ -271,6 +277,11 @@ class MainWindow(QtWidgets.QMainWindow):
         view_menu.addSeparator()
         self._build_aspect_ratio_submenu(view_menu)
         self._build_environment_texture_submenu(view_menu)
+        view_menu.addSeparator()
+        self._ab_compare_action = view_menu.addAction('A|B &Compare...')
+        self._ab_compare_action.triggered.connect(self._on_ab_compare)
+        self._ab_exit_action = view_menu.addAction('E&xit A|B Compare')
+        self._ab_exit_action.triggered.connect(self._exit_ab_compare)
         view_menu.addSeparator()
         self._build_camera_menu(view_menu)
         self._build_media_menu(view_menu)
@@ -381,28 +392,33 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @property
     def mode(self) -> str:
-        """``'3d'`` while a USD stage is shown, ``'2d'`` for an image, sequence or video."""
+        """``'3d'`` while a USD stage is shown, ``'2d'`` for an image, sequence or video,
+        ``'ab'`` while two stages are compared."""
         return self._mode
 
     def _set_mode(self, mode):
         """Switch between the 3D and 2D viewports."""
         self._stop_playback()
+        if self._mode == 'ab' and mode != 'ab':
+            self._ab_compare.release()
+            self._compare_paths = None
         self._mode = mode
-        self._stack.setCurrentWidget(self._viewer if mode == '3d' else self._media_view)
-        self._playbar.setVisible(mode == '3d' or (
+        self._stack.setCurrentWidget({'3d': self._viewer, '2d': self._media_view, 'ab': self._ab_compare}[mode])
+        self._playbar.setVisible(mode in ('3d', 'ab') or (
             self._media_view.source is not None and self._media_view.source.frame_count > 1))
         self._update_mode_actions()
 
     def _update_mode_actions(self):
         """Enable the menu items that belong to the current viewport."""
         is_3d = self._mode == '3d'
+        self._ab_exit_action.setEnabled(self._mode == 'ab')
         for action in (self._dome_light_action, self._mask_opaque_action, self._show_hud_action,
                        self._show_bboxes_action, self._slate_layer_action, self._annotation_layer_action):
             action.setEnabled(is_3d)
         self._dedacam_menu.menuAction().setEnabled(is_3d)
         self._camera_menu.menuAction().setEnabled(is_3d)
         for action in self._media_actions:
-            action.setEnabled(not is_3d)
+            action.setEnabled(self._mode == '2d')
 
     def _open_path(self, file_path):
         """Open a USD stage, image, image sequence or video, by its extension."""
@@ -428,7 +444,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._playbar.setFrame(source.first_frame)
         self._playbar.blockSignals(False)
         self._set_mode('2d')
-        self.setWindowTitle(f'Dedaverse - {source.name}')
+        self._opened_path = str(Path(file_path))
+        self.setWindowTitle(f'Dedaverse - {self._opened_path}')
         self._add_to_recent_files(file_path)
 
     def _on_channel_selected(self, channel):
@@ -792,7 +809,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 # Resolve entity for title (project name) and content rootdir
                 self._opened_entity = Project.from_path(file_path)
                 project_part = f'[{self._opened_entity.project.name}] ' if self._opened_entity else ''
-                self.setWindowTitle(f'Dedaverse - {project_part}{Path(file_path).name}')
+                self._opened_path = str(Path(file_path))
+                self.setWindowTitle(f'Dedaverse - {project_part}{self._opened_path}')
                 start_frame = int(stage.GetStartTimeCode())
                 end_frame = int(stage.GetEndTimeCode())
                 if end_frame <= start_frame:
@@ -815,6 +833,59 @@ class MainWindow(QtWidgets.QMainWindow):
             )
         finally:
             self._hide_loading_overlay()
+
+    def _on_ab_compare(self):
+        """Ask for two USD files and compare them with a slider."""
+        dialog = _ab_compare.AbCompareDialog(
+            self._compare_paths[0] if self._compare_paths else (self._opened_path or ''),
+            self._compare_paths[1] if self._compare_paths else '',
+            parent=self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        path_a, path_b = dialog.paths()
+        self.compare_files(path_a, path_b)
+
+    def compare_files(self, path_a, path_b) -> bool:
+        """Show the USD files ``path_a`` and ``path_b`` side by side behind a slider, with one shared camera.
+
+        Returns False (after telling the user) when either file cannot be opened.
+        """
+        self._show_loading_overlay()
+        try:
+            stages = []
+            for label, path in (('A', path_a), ('B', path_b)):
+                stage = Usd.Stage.Open(path) if path and Path(path).is_file() else None
+                if not stage:
+                    QtWidgets.QMessageBox.warning(self, 'Compare Failed', f'Could not open {label}:\n{path}')
+                    return False
+                stages.append(stage)
+            self._set_mode('ab')
+            self._ab_compare.set_stages(stages[0], stages[1], path_a, path_b)
+            self._ab_compare.start()
+            for viewer in (self._ab_compare.viewer_a, self._ab_compare.viewer_b):
+                viewer.set_dome_light_texture(self._env_texture_path)
+            self._compare_paths = (path_a, path_b)
+            start_frame = int(stages[0].GetStartTimeCode())
+            end_frame = int(stages[0].GetEndTimeCode())
+            if end_frame <= start_frame:
+                start_frame, end_frame = 0, max(100, start_frame + 1)
+            self._playbar.setFrameRange(start_frame, end_frame)
+            self._playbar.setFrame(start_frame)
+            self.setWindowTitle(f'Dedaverse - A|B  A: {Path(path_a)}  |  B: {Path(path_b)}')
+            return True
+        except Exception as err:
+            QtWidgets.QMessageBox.warning(self, 'Compare Failed', str(err))
+            return False
+        finally:
+            self._hide_loading_overlay()
+
+    def _exit_ab_compare(self):
+        """Leave the A|B comparison and go back to the 3D viewport."""
+        if self._mode != 'ab':
+            return
+        self._set_mode('3d')
+        title_path = self._opened_path
+        self.setWindowTitle(f'Dedaverse - {title_path}' if title_path else 'Dedaverse')
 
     @property
     def opened_entity(self):
@@ -1053,12 +1124,14 @@ class MainWindow(QtWidgets.QMainWindow):
         """Sync the viewport to the playbar's current frame."""
         if self._mode == '2d':
             self._media_view.set_frame(frame)
+        elif self._mode == 'ab':
+            self._ab_compare.set_current_frame(frame)
         else:
             self._viewer.set_current_frame(frame)
 
     def _get_stage_fps(self):
         """Return the stage's frames per second, or _DEFAULT_FPS if not set."""
-        stage = self._viewer.stage
+        stage = self._ab_compare.viewer_a.stage if self._mode == 'ab' else self._viewer.stage
         if not stage:
             return _DEFAULT_FPS
         fps = stage.GetTimeCodesPerSecond()
@@ -1099,6 +1172,8 @@ class MainWindow(QtWidgets.QMainWindow):
         """Frame the view to fit all geometry, or fit the image in the 2D viewport."""
         if self._mode == '2d':
             self._media_view.fit()
+        elif self._mode == 'ab':
+            self._ab_compare.frame_all()
         else:
             self._viewer.update_view(resetCam=True, forceComputeBBox=True)
 
@@ -1129,6 +1204,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._save_view_settings()
         self._stop_playback()
         self._media_view.set_source(None)
+        self._ab_compare.release()
         self._viewer.closeEvent(event)
         super().closeEvent(event)
         
