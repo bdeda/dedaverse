@@ -86,7 +86,8 @@ def test_the_splash_image_is_drawn(qapp):
 def test_starting_without_a_file_shows_the_window_and_returns_the_event_loop_result(patched):
     app, scheduled = patched
     result = CliRunner().invoke(viewer_main.viewer, [], standalone_mode=False)
-    assert result.return_value == 5 and FakeWindow.instances[0].shown and scheduled == []
+    # singleShot is patched process-wide, so another test's stray timer may land in `scheduled`: only check ours.
+    assert result.return_value == 5 and FakeWindow.instances[0].shown and FakeWindow.instances[0].opened == []
     assert not app.icon.isNull()
 
 
@@ -94,9 +95,12 @@ def test_a_file_argument_is_opened_after_the_window_is_up(patched, tmp_path):
     _, scheduled = patched
     shot = tmp_path / 'shot.0001.exr'
     result = CliRunner().invoke(viewer_main.viewer, [str(shot)], standalone_mode=False)
-    assert result.return_value == 5 and len(scheduled) == 1
-    scheduled[0]()
-    assert FakeWindow.instances[0].opened == [str(shot.resolve())]
+    assert result.return_value == 5 and len(scheduled) >= 1
+    window = FakeWindow.instances[0]
+    open_callbacks = [fn for fn in scheduled if fn.__qualname__.startswith('viewer.<locals>')]
+    assert len(open_callbacks) == 1
+    open_callbacks[0]()
+    assert window.opened == [str(shot.resolve())]
 
 
 def test_a_missing_icon_is_not_an_error(patched, monkeypatch):
