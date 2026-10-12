@@ -36,6 +36,7 @@ imagegen = [
 ]
 dev = [
   "bandit[toml]>=1.7",
+  "pillow>=10.0",  # tests build fake images (tests/test_trellis2_fake_server.py)
   "pre-commit>=4.6.0",
   "pytest>=9.1.0",
   "pytest-cov>=7.1.0",
