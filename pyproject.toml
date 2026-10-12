@@ -42,6 +42,9 @@ dev = [
   "pytest-cov>=7.1.0",
   "radon>=6.0",
 ]
+fal = [
+  "fal_client>=0.5",        # fal.ai hosted models (deda.plugins.fal)
+]
 upscale = [
   "torch>=2.2",
   "spandrel>=0.3.4",
