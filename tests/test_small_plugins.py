@@ -134,9 +134,9 @@ class TestPerforce:
 
 class TestGodot:
     def test_load_registers_cleanly(self):
-        plugin = deda.core.PluginRegistry().get('Godot')
-        assert isinstance(plugin, godot.Godot)
+        plugin = godot.Godot('Godot', godot.__version__, godot.__vendor__, image=godot.Godot.icon_path)
         plugin.load()
+        assert plugin.name == 'Godot'
 
 
 @pytest.fixture

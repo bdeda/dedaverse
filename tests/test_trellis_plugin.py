@@ -108,13 +108,12 @@ class TestService:
 class TestTool:
     def test_load_finds_the_service_in_the_registry(self, service):
         registry = trellis.PluginRegistry()
-        original = registry.get('trellis')
         registry.register(service)
         try:
             tool = trellis.TrellisTool()
             assert tool.load() is True and tool._service is service
         finally:
-            registry.register(original)
+            trellis.PluginRegistry._registry_.pop(service.name, None)
 
     def test_load_without_a_service_warns(self, monkeypatch, caplog):
         monkeypatch.setattr(trellis.PluginRegistry, 'get', lambda self, name: None)
