@@ -56,7 +56,14 @@ raw_formats = [
 dedaverse = "dedaverse.__main__:dedaverse"
 
 [tool.setuptools.package-data]
-"deda" = ["app/icons/*.png"]
+"deda" = [
+  "app/icons/*.png",
+  "core/operation/templates/*.md",
+  "core/operation/templates/examples/*",
+  "plugins/*.png",
+  "plugins/*/*.png",
+  "plugins/*/icons/*.png",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

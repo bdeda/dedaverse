@@ -24,7 +24,7 @@ __all__ = ["TaskbarIcon"]
 import logging
 import sys
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 
 log = logging.getLogger(__name__)
@@ -98,7 +98,7 @@ class TaskbarIcon(QtWidgets.QSystemTrayIcon):
             return
         text = f'Update and restart (v{latest_version})' if latest_version else 'Update and restart'
         if self._action_update_restart is None:
-            self._action_update_restart = QtWidgets.QAction(text, self._menu)
+            self._action_update_restart = QtGui.QAction(text, self._menu)
             self._action_update_restart.triggered.connect(self._on_update_restart)
             self._menu.insertAction(self._action_restart, self._action_update_restart)
         else:

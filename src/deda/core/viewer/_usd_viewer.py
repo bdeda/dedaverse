@@ -78,6 +78,17 @@ def _to_matrix4d(val):  # -> Gf.Matrix4d | None
     return None
 
 
+def _set_gf_camera_transform(free_camera, camera, matrix) -> None:
+    """Set a free camera's transform. ``Gf.Camera.transform`` is a property (older USD had SetTransform())."""
+    if hasattr(camera, 'SetTransform'):
+        camera.SetTransform(matrix)
+    else:
+        camera.transform = matrix
+    pull = getattr(free_camera, '_pullFromCameraTransform', None)
+    if callable(pull):
+        pull()  # make usdview's FreeCamera re-read its rotation, centre and distance from the camera
+
+
 def _create_engine_wrapper(engine, view_settings_getter):
     """Wrap UsdImagingGL.Engine to inject dome light texture from viewSettings."""
 
@@ -1007,13 +1018,13 @@ class UsdViewWidget(QtWidgets.QWidget):
                 free_camera = getattr(vs, 'freeCamera', None)
                 if free_camera is not None:
                     camera = getattr(free_camera, '_camera', None)
-                    if camera is not None and hasattr(camera, 'SetTransform'):
+                    if camera is not None:
                         try:
-                            camera.SetTransform(mat)
+                            _set_gf_camera_transform(free_camera, camera, mat)
                             set_count += 1
-                            log.debug('set_camera_transform: set via viewSettings.freeCamera._camera.SetTransform()')
+                            log.debug('set_camera_transform: set via viewSettings.freeCamera._camera')
                         except Exception as e:
-                            log.debug('set_camera_transform: viewSettings.freeCamera._camera.SetTransform() failed: %s', e)
+                            log.debug('set_camera_transform: viewSettings.freeCamera._camera failed: %s', e)
                 # Fallback: viewSettings attributes (usdview often uses this as source of truth).
                 for attr in ('freeCameraMatrix', 'freeCameraTransform'):
                     if hasattr(vs, attr):
@@ -1065,9 +1076,9 @@ class UsdViewWidget(QtWidgets.QWidget):
                 free_camera = getattr(vs, 'freeCamera', None)
                 if free_camera is not None:
                     camera = getattr(free_camera, '_camera', None)
-                    if camera is not None and hasattr(camera, 'SetTransform'):
+                    if camera is not None:
                         try:
-                            camera.SetTransform(mat)
+                            _set_gf_camera_transform(free_camera, camera, mat)
                         except Exception:
                             pass
                 # Fallback: viewSettings attributes.

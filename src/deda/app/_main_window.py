@@ -52,6 +52,20 @@ from deda.core.types import Asset, Collection
 _COLLECTION_ASSET_TYPES = frozenset({'Collection', 'Sequence', 'Shot'})
 
 
+def _extract_external_references(usd_utils, path):
+    """Return (sublayers, references, payloads) of a USD file.
+
+    Current USD returns them from ExtractExternalReferences(path); older USD filled three lists passed in.
+    """
+    try:
+        sublayers, refs, payloads = usd_utils.ExtractExternalReferences(path)
+        return list(sublayers), list(refs), list(payloads)
+    except (TypeError, ValueError):
+        sublayers, refs, payloads = [], [], []
+        usd_utils.ExtractExternalReferences(path, sublayers, refs, payloads)
+        return sublayers, refs, payloads
+
+
 def _collect_usd_dependencies(root_file_path):
     """Collect root USD file and all nested references; return list of (abs_path, relative_path).
 
@@ -89,8 +103,7 @@ def _collect_usd_dependencies(root_file_path):
             rp = abs_str
         layer_dir = Path(rp).resolve().parent
         try:
-            sublayers, refs, payloads = [], [], []
-            UsdUtils.ExtractExternalReferences(rp, sublayers, refs, payloads)
+            sublayers, refs, payloads = _extract_external_references(UsdUtils, rp)
             for ref in sublayers + refs + payloads:
                 ref_clean = ref.strip().strip('@')
                 if not ref_clean:

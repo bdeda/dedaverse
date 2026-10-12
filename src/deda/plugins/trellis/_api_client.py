@@ -384,10 +384,7 @@ class TrellisApiClient:
                     
                 except ImportError:
                     log.warning('trimesh not available, trying alternative GLB to USD conversion')
-                    # Fallback: create a basic USD file with a note
-                    stage = Usd.Stage.CreateNew(tmp_usd_path)
-                    root_prim = stage.DefinePrim('/Model', 'Xform')
-                    stage.SetDefaultPrim(root_prim)
+                    # Fallback: keep the empty /Model prim defined above, with a note
                     
                     # Add a note about the GLB file
                     root_prim.SetMetadata('comment', 'Converted from GLB. trimesh library required for full conversion.')

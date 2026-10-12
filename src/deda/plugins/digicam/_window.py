@@ -107,8 +107,9 @@ class _ReviewTab(QtWidgets.QWidget):
             self.dest_dir_changed.emit(directory)
 
     def _scan(self) -> None:
-        source = Path(self._source_edit.text())
-        if not source.is_dir():
+        source_text = self._source_edit.text().strip()
+        source = Path(source_text)
+        if not source_text or not source.is_dir():  # Path('') is the current directory, not "nothing chosen"
             QtWidgets.QMessageBox.warning(self, 'Digicam', 'Choose a valid source folder first.')
             return
         self._settings.setValue(_SETTINGS_SOURCE_DIR, str(source))

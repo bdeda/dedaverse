@@ -78,8 +78,9 @@ def test_an_invalid_custom_dir_is_ignored(layout, monkeypatch, caplog):
 
 def test_existing_module_path_is_kept_after_ours(layout, monkeypatch):
     monkeypatch.setenv(maya_plugin.ENV_MAYAUSD_DIR, str(layout['custom']))
-    env = build_env(MAYA_MODULE_PATH='D:/studio/modules')
-    assert entries(env, 'MAYA_MODULE_PATH')[-1] == 'D:/studio/modules'
+    studio = os.path.join(str(layout['custom'].parent), 'studio_modules')
+    env = build_env(MAYA_MODULE_PATH=studio)
+    assert entries(env, 'MAYA_MODULE_PATH')[-1] == studio
     assert entries(env, 'MAYA_MODULE_PATH')[0] == str(layout['custom'])
 
 
