@@ -36,7 +36,7 @@ import platform
 import shlex
 import subprocess
 import time
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def find_install(path: str | Path | None = None) -> Path | None:
 
 def to_wsl_path(path: str | Path) -> str:
     r"""Convert a Windows path to its WSL mount path, e.g. ``F:\a\b`` to ``/mnt/f/a/b``."""
-    p = Path(path)
+    p = PureWindowsPath(path)   # parse as a Windows path whatever the host is
     if not p.drive:
         return p.as_posix()
     return f'/mnt/{p.drive[0].lower()}' + p.as_posix()[len(p.drive):]
