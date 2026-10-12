@@ -327,6 +327,13 @@ python -m pytest tests/ -m "not network"
 - Use **mocks or patches** for any code that would perform network I/O (e.g. `@patch('module.requests.get')`, `unittest.mock.Mock`).
 - Tests that require real network access must be marked with `@pytest.mark.network` and excluded from the default run: `pytest -m "not network"`.
 
+#### Tests for All New Code (required)
+- **Every change that adds or modifies code under `src/deda` must add or update unit tests in the same change.** A PR with new functions, classes, plugins, CLI commands or UI logic and no tests is incomplete. Do not leave tests for a follow-up.
+- Cover the success path, each branch, and at least one failure/edge case. Check with `--cov=src/deda --cov-report=term-missing` that every line you wrote is hit.
+- When fixing a bug, first add a test that fails because of the bug, then fix it.
+- Keep Qt logic testable: put decisions in plain functions/classes that need no widgets, and test widgets offscreen (`QT_QPA_PLATFORM=offscreen`) with a shared `QApplication` fixture.
+- Before finishing, run the whole suite; the total coverage must not go down.
+
 #### Coverage Goal
 - **Aim for 100% test coverage** for code you add or change, excluding lines that are explicitly excluded (e.g. `pragma: no cover`, or platform-specific branches that are hard to exercise in CI).
 - Coverage is reported in `htmlcov/` and via `--cov-report=term-missing`. Use it to find untested branches and add tests.
