@@ -25,31 +25,31 @@ readme = "README.md"
 
 [project.optional-dependencies]
 media = [
-  "OpenEXR>=3.3",  # EXR images and sequences in the viewer (deda.core.viewer._media)
+  "OpenEXR>=3.5.2",  # EXR images and sequences in the viewer (deda.core.viewer._media)
 ]
 trellis = [
-  "gradio_client>=1.0",  # talks to the TRELLIS.2 Gradio server
+  "gradio_client>=2.7.2",  # talks to the TRELLIS.2 Gradio server
 ]
 imagegen = [
-  "google-genai>=1.0",          # Imagen 3 / Gemini image generation (recommended)
+  "google-genai>=2.29.0",          # Imagen 3 / Gemini image generation (recommended)
   # "google-generativeai>=0.8", # Alternative: older Gemini SDK (fallback)
 ]
 dev = [
-  "bandit[toml]>=1.7",
-  "pillow>=10.0",  # tests build fake images (tests/test_trellis2_fake_server.py)
-  "pre-commit>=4.6.0",
-  "pytest>=9.1.0",
+  "bandit[toml]>=1.9.4",
+  "pillow>=12.3.0",  # tests build fake images (tests/test_trellis2_fake_server.py)
+  "pre-commit>=4.6.2",
+  "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
-  "radon>=6.0",
+  "radon>=6.0.1",
 ]
 upscale = [
-  "torch>=2.2",
-  "spandrel>=0.3.4",
-  "huggingface_hub>=0.20",
+  "torch>=2.14.1",
+  "spandrel>=0.4.2",
+  "huggingface_hub>=2.2.0",
 ]
 raw_formats = [
-  "pillow-heif>=0.13",
-  "rawpy>=0.19",
+  "pillow-heif>=1.8.0",
+  "rawpy>=0.27.1",
 ]
 
 [project.scripts]
