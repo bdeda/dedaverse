@@ -148,7 +148,7 @@ jobs:
                   retention-days: 30
 
             - name: Upload bandit and radon reports
-              uses: actions/upload-artifact@v6
+              uses: actions/upload-artifact@v7
               if: always()
               with:
                   name: bandit-radon-reports-${{ matrix.python-version }}
