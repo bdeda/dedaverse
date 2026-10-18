@@ -60,7 +60,7 @@ jobs:
                       apache-license-check \
                       bandit[toml] \
                       radon
-                  python -m pip install ".[dev]"
+                  python -m pip install -e ".[dev]"
 
             - name: Run license-check
               run: apache-license-check --copyright "Ben Deda"
