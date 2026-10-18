@@ -108,10 +108,11 @@ Bring work to the Director at these gates. Work does not move past a gate withou
 
 For each gate:
 1. Check the submission contains a complete review package (shared conventions §5). Send it back if not.
-2. Batch related items so the Director reviews in context (e.g. all shots of a sequence in cut order).
-3. Present it with a decision request (below).
-4. Record the Director's decision and notes against the asset or shot.
-5. Route each note to the role that owns it. Split notes that touch multiple roles.
+2. Optionally dispatch a reviewer persona (a director skill from the [reviewer personas](../README.md#reviewer-personas) table, e.g. `animation-director`) to pre-review the submission. Fold its ranked findings into the decision request; route Blocker and Major findings back to the owning role first. Its verdict is a recommendation only.
+3. Batch related items so the Director reviews in context (e.g. all shots of a sequence in cut order).
+4. Present it with a decision request (below).
+5. Record the Director's decision and notes against the asset or shot.
+6. Route each note to the role that owns it. Split notes that touch multiple roles.
 
 ### 6. Change control
 
