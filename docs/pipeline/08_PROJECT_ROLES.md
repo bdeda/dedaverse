@@ -255,6 +255,11 @@ The Producer brings work to the Director at these gates. Work does not move past
 | Effects and lighting | VFX Artist, Lighting Artist | Shot look against color keys |
 | Final cut and mix | Editor, Audio Artist | Delivery |
 
+Before each gate the Producer may assign a **reviewer persona** (a specialist director skill such as
+`animation-director` or `art-director`) to an agent to pre-review the submission. Reviewers give a ranked
+recommendation and never approve; the human Director still decides. See
+[Reviewer personas](../../.github/skills/README.md#reviewer-personas).
+
 ---
 
 ## 8.5 From role to skill

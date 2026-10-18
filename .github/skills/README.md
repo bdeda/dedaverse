@@ -25,6 +25,50 @@ described in [docs/pipeline/08_PROJECT_ROLES.md](../../docs/pipeline/08_PROJECT_
 | [`audio-artist`](audio-artist/SKILL.md) | Audio Artist | [06 VFX, Lighting and Audio](../../docs/pipeline/06_VFX_LIGHTING_AUDIO.md) |
 | [`editor`](editor/SKILL.md) | Editor | [05 Story, Editorial, Previz and Layout](../../docs/pipeline/05_STORY_EDITORIAL_PREVIZ_LAYOUT.md) |
 
+## Reviewer personas
+
+Reviewer personas are specialist **directors** that critique the deliverables of the role skills above before the
+human Director's review gate ([08 Project Roles, section 8.4](../../docs/pipeline/08_PROJECT_ROLES.md)). The Producer
+assigns a persona to an agent as a task ("review `SH0040_anim_blocking_v002` as the `animation-director`"); the agent
+loads the matching skill and follows the conventions below. A persona never replaces the human Director.
+
+| Skill | Persona | Gate(s) reviewed | Primary process doc |
+|-------|---------|------------------|---------------------|
+| [`animation-director`](animation-director/SKILL.md) | Animation Director | Performance, Final animation | [04 Animation](../../docs/pipeline/04_ANIMATION.md) |
+| [`story-director`](story-director/SKILL.md) | Story Director | Story and script | [05 Story, Editorial, Previz and Layout](../../docs/pipeline/05_STORY_EDITORIAL_PREVIZ_LAYOUT.md) |
+| [`art-director`](art-director/SKILL.md) | Art Director | Visual Bible, Asset design, Asset look | [01 Visual Development](../../docs/pipeline/01_VISUAL_DEVELOPMENT.md) |
+| [`layout-director`](layout-director/SKILL.md) | Layout Director | Storyboards and story reel, Previz | [05 Story, Editorial, Previz and Layout](../../docs/pipeline/05_STORY_EDITORIAL_PREVIZ_LAYOUT.md) |
+| [`rigging-director`](rigging-director/SKILL.md) | Rigging Director | Rig deformation | [03 Rigging and Deformation](../../docs/pipeline/03_RIGGING_AND_DEFORMATION.md) |
+| [`vfx-director`](vfx-director/SKILL.md) | VFX Director | Effects and lighting (effects) | [06 VFX, Lighting and Audio](../../docs/pipeline/06_VFX_LIGHTING_AUDIO.md) |
+| [`lighting-director`](lighting-director/SKILL.md) | Lighting Director | Effects and lighting (lighting), final color | [06 VFX, Lighting and Audio](../../docs/pipeline/06_VFX_LIGHTING_AUDIO.md) |
+| [`sound-director`](sound-director/SKILL.md) | Sound Director | Dialogue takes, Final mix | [06 VFX, Lighting and Audio](../../docs/pipeline/06_VFX_LIGHTING_AUDIO.md) |
+| [`editorial-director`](editorial-director/SKILL.md) | Editorial Director | Story reel pacing, Final cut | [05 Story, Editorial, Previz and Layout](../../docs/pipeline/05_STORY_EDITORIAL_PREVIZ_LAYOUT.md) |
+
+### Reviewer persona conventions
+
+1. **Reviewers advise; the Director decides.** A verdict is a recommendation to the Producer. Never approve, reject,
+   or change story, tone, look, performance, or camera language on the Director's behalf.
+2. **Read-only.** A reviewer never edits, overwrites, or re-publishes the work under review, and does not do the
+   role's work. Fixes go back to the owning role through the Producer.
+3. **Review against approved targets**, not personal taste. If a target is missing, send a blocker report (section 7).
+4. **Be specific and actionable.** Tie every finding to a frame, timecode, view, or element, say what is wrong, why
+   it matters, and what to try. Say what works too.
+5. **Rank findings.** `Blocker` (cannot pass the gate), `Major` (should fix before the gate), `Minor` (polish).
+6. **Cost recording** still applies (section 6); the review task has its own ledger file.
+
+Review report (`review/<ENTITY>_review_<persona>_<element>_v###.md`):
+
+```
+Review: <entity, element, version>   Persona: <skill name>   Task: <task ID>
+Targets used: <approved references compared against>
+Verdict: Recommend approve | Recommend notes | Recommend reject
+Summary: <2-3 sentences: what works, what is the main problem>
+Findings:
+  1. [Blocker|Major|Minor] <frame/timecode/view> - <issue> - <why it matters> - <suggested fix>
+Questions for the Director: <decisions only the Director can make, with 2-4 options if needed>
+Open issues: <missing inputs, risks>
+```
+
 Each skill lives in `.github/skills/<skill-name>/SKILL.md`, with YAML front matter (`name`, `description`)
 followed by the operating instructions.
 

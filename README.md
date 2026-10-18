@@ -89,6 +89,10 @@ perform the other roles**, with a **Producer agent orchestrating** the work
 | `audio-artist` | Dialogue, ambience, effects, music, mix |
 | `editor` | The cut and shot frame ranges |
 
+Reviewer personas (`animation-director`, `story-director`, `art-director`, `layout-director`, `rigging-director`,
+`vfx-director`, `lighting-director`, `sound-director`, `editorial-director`) critique each role's deliverables before
+the Director's review gates. They advise and never approve.
+
 All skills share one set of conventions (approval rules, where work lives in the project, naming, task status,
 review packages, and cost recording), documented in [`.github/skills/README.md`](.github/skills/README.md).
 
