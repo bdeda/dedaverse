@@ -22,7 +22,7 @@ Dedaverse is a Python-based asset management system for visual media projects (f
 
 ## 📋 Core Principles
 
-**Defined strategies for agents:** (1) **Code integrity** — preserve existing behavior; never relax or remove tests to make a change pass; fix implementation to satisfy tests. (2) **Test patterns** — use the project’s test layout, naming, fixtures, and mocks (see [Testing](#10-testing)). (3) **Testability** — write testable code and add tests for new or touched code; run the test suite after changes.
+**Defined strategies for agents:** (1) **Code integrity** — preserve existing behavior; never relax or remove tests to make a change pass; fix implementation to satisfy tests. (2) **Test patterns** — use the project’s test layout, naming, fixtures, and mocks (see [Testing](#10-testing)). (3) **Testability** — write testable code and **add tests for all new code in the same change**; run the test suite after changes. (4) **Green CI** — after pushing, watch the CI run and fix every failure before calling the work done (see [Continuous Integration](#continuous-integration)).
 
 ### 1. Follow Existing Patterns
 - **Study the codebase first** - Understand existing patterns before making changes
@@ -333,6 +333,19 @@ python -m pytest tests/ -m "not network"
 - When fixing a bug, first add a test that fails because of the bug, then fix it.
 - Keep Qt logic testable: put decisions in plain functions/classes that need no widgets, and test widgets offscreen (`QT_QPA_PLATFORM=offscreen`) with a shared `QApplication` fixture.
 - Before finishing, run the whole suite; the total coverage must not go down.
+- **Never mark work complete without tests.** If code genuinely cannot be tested (e.g. a platform-only branch), say so in the PR description and use a narrow `# pragma: no cover` with a one-line reason.
+- This applies to every agent, including those assigned production roles, whenever the task changes code in this repository.
+
+#### Continuous Integration
+The workflow in `.github/workflows/tests.yml` runs on every push and must be green. It runs, in order: license check, bandit, radon (informational), **pylint**, **pytest with coverage**, and a per-module coverage check.
+- **pylint** uses `.pylintrc` and fails below the score in the workflow (`--fail-under`). New code should add no new pylint messages. Raise the threshold as the score improves; never lower it to get a change through.
+- **pytest** runs the whole suite with coverage and fails below the `--cov-fail-under` value in the workflow. Review the coverage summary on the run page (and `htmlcov/` artifact) and add tests for any line you added that is red.
+- **Run the same checks locally before pushing:**
+```bash
+pip install pylint   # once
+pylint src/deda --rcfile=.pylintrc --fail-under=8.5
+QT_QPA_PLATFORM=offscreen python -m pytest tests/ -m "not network" --cov=src/deda --cov-report=term-missing
+```
 
 #### Coverage Goal
 - **Aim for 100% test coverage** for code you add or change, excluding lines that are explicitly excluded (e.g. `pragma: no cover`, or platform-specific branches that are hard to exercise in CI).
@@ -394,6 +407,8 @@ Before submitting code, ensure:
 - [ ] Resources properly managed (context managers)
 - [ ] Configuration changes are validated
 - [ ] Plugin registration follows patterns
+- [ ] **pylint passes** (`pylint src/deda --rcfile=.pylintrc --fail-under=8.5`) with no new messages in changed code
+- [ ] **CI is green** on the pushed commit (watched to completion; failures fixed)
 - [ ] **pytest passes** in the project venv (`python -m pytest tests/`); unit tests do not hit the network
 - [ ] **Code integrity** — Tests were not relaxed, skipped, or removed to make a change pass; failing tests were fixed by correcting the implementation (or by updating tests only when intended behavior changed)
 - [ ] **Testability** — New or touched code has tests (or is covered by existing tests); new modules are listed in `tests/test_imports.py` where appropriate
@@ -507,6 +522,13 @@ def load_project(self, proj_name: str) -> ProjectConfig | None:
   - Format: `improvements/description`
   - Examples: `improvements/critical-fixes`, `improvements/type-hints`, `improvements/code-cleanup`
 
+#### Pushing, CI, and PRs (required)
+When you commit and push to a branch or PR:
+1. **Watch CI** for the pushed commit until every check finishes, e.g. `gh pr checks <pr> --watch` or `gh run watch`. Do not report the work as done while checks are pending or red.
+2. **On a failure, fix it.** Read the failing step's log (`gh run view <run-id> --log-failed`), reproduce locally, fix the root cause in the implementation, commit, push, and watch again. Repeat until CI is green.
+3. **Never bypass CI.** Do not skip, weaken, or delete tests, lower `--fail-under` or `--cov-fail-under`, add `|| true` or `continue-on-error` to a gating step, or disable pylint messages to get green. If a failure is outside your change (flaky test, broken base branch, infrastructure), say so with the log evidence and ask the user.
+4. **Report** the final CI state (green, or what remains and why) when you finish.
+
 #### Commit Messages
 - Use clear, descriptive commit messages
 - Reference issues if applicable
@@ -539,6 +561,9 @@ python -m pytest tests/test_imports.py -v
 # Run a single test file or test
 python -m pytest tests/test_imports.py -v
 python -m pytest tests/test_imports.py::TestImports::test_import_deda_core -v
+
+# Lint (pylint; install with: pip install pylint)
+pylint src/deda --rcfile=.pylintrc --fail-under=8.5
 
 # Security scan (bandit)
 bandit -r src/deda -c pyproject.toml -f screen
@@ -591,6 +616,8 @@ When asked to modify or add code:
 10. **Run pytest** - After making code changes, run pytest in the project venv: `python -m pytest tests/ -m "not network"` (see [Testing](#10-testing)). Unit tests must not hit the network; use mocks for I/O
 11. **Add tests for new code** - New modules or public behavior should have tests in the same change; use [Test Patterns](#test-patterns) and [Design for Testability](#design-for-testability)
 12. **Update docs** - Add/update docstrings as needed
+13. **Run pylint** - `pylint src/deda --rcfile=.pylintrc --fail-under=8.5`; fix messages in the code you touched
+14. **Push and watch CI** - Follow [Pushing, CI, and PRs](#pushing-ci-and-prs-required); fix any failure until the run is green
 
 ## 🎬 Production Role Skills
 

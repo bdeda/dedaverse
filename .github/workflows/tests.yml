@@ -60,7 +60,7 @@ jobs:
                       apache-license-check \
                       bandit[toml] \
                       radon
-                  python -m pip install ".[dev]"
+                  python -m pip install -e ".[dev]"
 
             - name: Run license-check
               run: apache-license-check --copyright "Ben Deda"
@@ -79,11 +79,8 @@ jobs:
 
             - name: Lint with pylint
               run: |
-                  # Run pylint on source code
-                  pylint src/deda/ --rcfile=.pylintrc || true
-                  # Exit with error if pylint score is below threshold
-                  pylint src/deda/ --rcfile=.pylintrc --fail-under=7.0 || true
-              continue-on-error: true
+                  # Gate on the score. Baseline is 8.77 (2026-10); raise the threshold as the score improves, never lower it.
+                  pylint src/deda/ --rcfile=.pylintrc --fail-under=8.5
 
             - name: Run pytest with coverage
               env:
@@ -98,7 +95,7 @@ jobs:
                       --cov-report=term-missing \
                       --cov-report=xml \
                       --cov-report=html \
-                      --cov-fail-under=0 \
+                      --cov-fail-under=80 \
                       -v
                   EXIT=$?
                   if [ $EXIT -eq 134 ]; then
@@ -134,6 +131,7 @@ jobs:
                   echo "Coverage report generated. See details in artifacts." >> $GITHUB_STEP_SUMMARY
                   if [ -f coverage.xml ]; then
                       echo "Coverage XML: ✅" >> $GITHUB_STEP_SUMMARY
+                      coverage report --skip-covered --format=markdown >> $GITHUB_STEP_SUMMARY || true
                   fi
                   if [ -d htmlcov ]; then
                       echo "HTML Coverage: ✅" >> $GITHUB_STEP_SUMMARY

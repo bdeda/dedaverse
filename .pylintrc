@@ -1,0 +1,20 @@
+[MAIN]
+# C-extension bindings pylint cannot introspect; without this every pxr/Qt member is a false no-member.
+extension-pkg-allow-list=pxr,PySide6,shiboken6,numpy
+ignore=__pycache__
+jobs=0
+
+[TYPECHECK]
+ignored-modules=pxr,pxr.Usd,pxr.UsdGeom,pxr.UsdShade,pxr.UsdLux,pxr.Gf,pxr.Sdf,pxr.Tf,pxr.Vt,pxr.Ar,pxr.Kind,pxr.UsdSkel,pxr.UsdUtils,pxr.Usdviewq,P4,PySide6,OpenEXR,Imath
+
+[FORMAT]
+max-line-length=120
+
+[MESSAGES CONTROL]
+# Style/design noise the codebase does not follow; real defects (E, W, most R/C) still count.
+disable=missing-module-docstring,missing-class-docstring,missing-function-docstring,
+        too-many-instance-attributes,too-many-arguments,too-many-positional-arguments,too-many-locals,
+        too-many-branches,too-many-statements,too-many-public-methods,too-few-public-methods,
+        too-many-lines,too-many-return-statements,too-many-nested-blocks,
+        broad-exception-caught,logging-fstring-interpolation,import-outside-toplevel,
+        duplicate-code,fixme,invalid-name,protected-access,wrong-import-position
