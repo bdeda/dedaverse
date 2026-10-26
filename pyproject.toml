@@ -31,12 +31,12 @@ trellis = [
   "gradio_client>=2.7.2",  # talks to the TRELLIS.2 Gradio server
 ]
 imagegen = [
-  "google-genai>=2.31.0",          # Imagen 3 / Gemini image generation (recommended)
+  "google-genai>=2.33.0",          # Imagen 3 / Gemini image generation (recommended)
   # "google-generativeai>=0.8", # Alternative: older Gemini SDK (fallback)
 ]
 dev = [
   "bandit[toml]>=1.9.4",
-  "pillow>=12.3.0",  # tests build fake images (tests/test_trellis2_fake_server.py)
+  "pillow>=13.0.0",  # tests build fake images (tests/test_trellis2_fake_server.py)
   "pre-commit>=4.7.0",
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
@@ -48,7 +48,7 @@ fal = [
 upscale = [
   "torch>=2.14.1",
   "spandrel>=0.4.2",
-  "huggingface_hub>=2.2.0",
+  "huggingface_hub>=2.3.0",
 ]
 raw_formats = [
   "pillow-heif>=1.8.1",
