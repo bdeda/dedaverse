@@ -2,7 +2,7 @@
 name = "dedaverse"
 dynamic = ["version"]
 dependencies = [
-  "usd-core>=26.8",
+  "usd-core>=26.11",
   "PySide6>=6.12.0",
   "PyOpenGL",             # usdview's stage view (deda.core.viewer) imports OpenGL
   "p4python>=2025.2.2863679",
