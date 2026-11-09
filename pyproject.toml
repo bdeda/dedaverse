@@ -88,6 +88,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "network: marks tests that require network access (deselect with '-m \"not network\"' for offline unit runs)",
+    "blender: runs a real Blender (skipped when Blender is not installed)",
 ]
 
 [tool.coverage.run]

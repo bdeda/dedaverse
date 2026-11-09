@@ -15,3 +15,7 @@
 # limitations under the License.
 #
 # ###################################################################################
+"""Application finders: locate installed DCC applications."""
+from ._blender import BLENDER_ENV_VAR, find_blender, iter_blender_installs
+
+__all__ = ['BLENDER_ENV_VAR', 'find_blender', 'iter_blender_installs']
