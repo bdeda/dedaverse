@@ -57,6 +57,7 @@ def _import_deda_core() -> None:
     import deda.core._types  # noqa: F401
     import deda.core.finder  # noqa: F401
     import deda.core.finder._adobe  # noqa: F401
+    import deda.core.finder._blender  # noqa: F401
     import deda.core.finder._houdini  # noqa: F401
     import deda.core.finder._maya  # noqa: F401
     import deda.core.finder._substance  # noqa: F401
@@ -113,6 +114,14 @@ def _import_deda_plugins() -> None:
     """deda.plugins (no network; optional plugins may be skipped)."""
     import deda.plugins.application_manager  # noqa: F401
     import deda.plugins.autodesk_flow  # noqa: F401
+    import deda.plugins.game_asset  # noqa: F401
+    import deda.plugins.game_asset.__main__  # noqa: F401
+    import deda.plugins.game_asset._blender_job  # noqa: F401
+    import deda.plugins.game_asset._metrics  # noqa: F401
+    import deda.plugins.game_asset._options  # noqa: F401
+    import deda.plugins.game_asset._runner  # noqa: F401
+    import deda.plugins.game_asset._symmetry  # noqa: F401
+    import deda.plugins.game_asset._tool_window  # noqa: F401
     import deda.plugins.godot  # noqa: F401
     import deda.plugins.houdini  # noqa: F401
     import deda.plugins.jira  # noqa: F401
