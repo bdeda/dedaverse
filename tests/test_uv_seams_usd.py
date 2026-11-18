@@ -24,6 +24,7 @@ import pytest
 from pxr import Gf, Sdf, Usd, UsdGeom, Vt
 
 from deda.core.ai.uv_seams import _usd as usd
+from deda.core.ai.uv_seams import islands_from_uv, prepare_sample
 
 QUAD_POINTS = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
 QUAD_UV = [(0, 0), (1, 0), (1, 1), (0, 1)]
@@ -49,6 +50,10 @@ def add_mesh(stage, prim_path, points=QUAD_POINTS, counts=(4,), corners=(0, 1, 2
         if indices is not None:
             primvar.SetIndices(Vt.IntArray(list(indices)))
     return mesh
+
+
+def islands(vertices, faces, layout):
+    return islands_from_uv(vertices, faces, layout.uv, layout.faces_uv)
 
 
 def cube_stage(path):
@@ -111,10 +116,12 @@ class TestLoadUsdMesh:
     def test_cube_loads_as_triangles_with_six_islands(self, tmp_path):
         path = cube_stage(tmp_path / 'cube.usda')
         (ref,) = usd.list_usd_meshes(path)
-        vertices, faces, island = usd.load_usd_mesh(ref)
+        vertices, faces, layout = usd.load_usd_mesh(ref)
         assert vertices.shape == (8, 3) and vertices.dtype == np.float64
         assert faces.shape == (12, 3) and faces.dtype == np.int64
-        assert island.shape == (12,) and island.max() + 1 == 6
+        assert layout.faces_uv.shape == (12, 3)
+        assert islands(vertices, faces, layout).max() + 1 == 6
+        assert prepare_sample(vertices, faces, layout).seam.sum() == 12  # the cube's 12 edges
 
     def test_indexed_primvar_is_followed(self, tmp_path):
         stage = new_stage(tmp_path / 'a.usda')
@@ -123,17 +130,17 @@ class TestLoadUsdMesh:
         # Two quads sharing an edge; shared corners reuse the same UV values through the indices.
         add_mesh(stage, '/Strip', points, [4, 4], [0, 1, 2, 3, 1, 4, 5, 2], uv, indices=[0, 1, 2, 3, 1, 4, 5, 2])
         stage.Save()
-        _, faces, island = usd.load_usd_mesh(usd.UsdMeshRef(tmp_path / 'a.usda', '/Strip'))
+        vertices, faces, layout = usd.load_usd_mesh(usd.UsdMeshRef(tmp_path / 'a.usda', '/Strip'))
         assert len(faces) == 4
-        assert island.max() == 0
+        assert islands(vertices, faces, layout).max() == 0
 
     def test_vertex_interpolated_primvar(self, tmp_path):
         stage = new_stage(tmp_path / 'a.usda')
         add_mesh(stage, '/Quad', interpolation='vertex')
         stage.Save()
-        _, faces, island = usd.load_usd_mesh(usd.UsdMeshRef(tmp_path / 'a.usda', '/Quad'))
+        vertices, faces, layout = usd.load_usd_mesh(usd.UsdMeshRef(tmp_path / 'a.usda', '/Quad'))
         assert faces.tolist() == [[0, 1, 2], [0, 2, 3]]
-        assert island.tolist() == [0, 0]
+        assert islands(vertices, faces, layout).tolist() == [0, 0]
 
     def test_z_up_stage_is_rotated_to_y_up(self, tmp_path):
         stage = new_stage(tmp_path / 'a.usda', up_axis=UsdGeom.Tokens.z)
@@ -177,8 +184,8 @@ class TestLoadUsdMesh:
         add_mesh(stage, '/Quad', uv_set='st1')
         stage.Save()
         ref = usd.UsdMeshRef(tmp_path / 'a.usda', '/Quad')
-        _, _, island = usd.load_usd_mesh(ref, uv_set='st1')
-        assert island.tolist() == [0, 0]
+        vertices, faces, layout = usd.load_usd_mesh(ref, uv_set='st1')
+        assert islands(vertices, faces, layout).tolist() == [0, 0]
         with pytest.raises(ValueError, match="no 'st' UV"):
             usd.load_usd_mesh(ref)
 
@@ -218,8 +225,8 @@ class TestUsdSource:
         stage.Save()
         source = usd.UsdSource(usd.list_usd_meshes(tmp_path / 'a.usda'))
         assert len(source) == 2
-        vertices, faces, island = source.get(1, np.random.default_rng(0))
-        assert vertices.shape == (4, 3) and faces.shape == (2, 3) and island.shape == (2,)
+        vertices, faces, layout = source.get(1, np.random.default_rng(0))
+        assert vertices.shape == (4, 3) and faces.shape == (2, 3) and layout.faces_uv.shape == (2, 3)
 
     def test_options_reach_the_loader(self, tmp_path):
         stage = new_stage(tmp_path / 'a.usda')

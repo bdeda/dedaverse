@@ -26,6 +26,26 @@ def make_box(n=4, seed=0):
     return geo.make_synthetic_box(n, np.random.default_rng(seed))
 
 
+def cylinder(segments=8):
+    """Open cylinder wall made of quads (two triangles each), unwrapped as one rectangle.
+
+    The ring closes in 3D, but in UV the last column of corners sits at u=1 while the first sits at u=0, so the
+    closing edge is a seam inside a single island.
+    """
+    angles = np.arange(segments) * 2 * np.pi / segments
+    ring = np.stack([np.cos(angles), np.sin(angles)], axis=1)
+    verts = np.concatenate([np.column_stack([ring, np.zeros(segments)]), np.column_stack([ring, np.ones(segments)])])
+    faces, faces_uv = [], []
+    uv = np.array([(i / segments, v) for v in (0.0, 1.0) for i in range(segments + 1)])
+    for i in range(segments):
+        j = (i + 1) % segments
+        bottom_i, bottom_j, top_i, top_j = i, j, i + segments, j + segments
+        uv_bi, uv_bj, uv_ti, uv_tj = i, i + 1, i + segments + 1, i + segments + 2
+        faces += [[bottom_i, bottom_j, top_j], [bottom_i, top_j, top_i]]
+        faces_uv += [[uv_bi, uv_bj, uv_tj], [uv_bi, uv_tj, uv_ti]]
+    return verts, np.array(faces), uv, np.array(faces_uv)
+
+
 def reference_components(pairs, num_nodes):
     """Plain union-find, numbered by each component's lowest node (the order label_components promises)."""
     parent = list(range(num_nodes))
@@ -152,6 +172,12 @@ class TestPrepareSample:
         (np.zeros((3, 3)), np.array([[0, 1, 3]]), None, 'do not exist'),
         (np.zeros((3, 3)), np.array([[0, 1, -1]]), None, 'do not exist'),
         (np.zeros((3, 3)), np.array([[0, 1, 2]]), np.array([0, 1]), 'face_island must have shape'),
+        (np.zeros((3, 3)), np.array([[0, 1, 2]]), geo.UvLayout(np.zeros((3, 3)), np.array([[0, 1, 2]])),
+         'uv must have shape'),
+        (np.zeros((3, 3)), np.array([[0, 1, 2]]), geo.UvLayout(np.zeros((3, 2)), np.array([[0, 1]])),
+         'faces_uv must have shape'),
+        (np.zeros((3, 3)), np.array([[0, 1, 2]]), geo.UvLayout(np.zeros((3, 2)), np.array([[0, 1, 3]])),
+         'do not exist'),
     ])
     def test_invalid_meshes_raise(self, verts, faces, island, message):
         with pytest.raises(ValueError, match=message):
@@ -231,7 +257,7 @@ class TestIslandsFromUv:
     def test_one_island_per_box_side(self):
         verts, faces, island = make_box(4)
         uv, faces_uv = self.per_corner_uv(verts, faces, island)
-        labels = geo.islands_from_uv(uv, faces_uv)
+        labels = geo.islands_from_uv(verts, faces, uv, faces_uv)
         assert labels.max() + 1 == 6
         assert len(set(zip(labels.tolist(), island.tolist()))) == 6
 
@@ -240,7 +266,62 @@ class TestIslandsFromUv:
         uv, faces_uv = self.per_corner_uv(verts, faces, island)
         face_y = np.repeat(verts[faces].mean(axis=1)[:, 1], 3)
         uv[(np.repeat(island, 3) == 0) & (face_y > 0)] += 100.0
-        assert geo.islands_from_uv(uv, faces_uv).max() + 1 == 7
+        assert geo.islands_from_uv(verts, faces, uv, faces_uv).max() + 1 == 7
+
+    def test_stacked_shells_in_uv_space_stay_separate(self):
+        # Two quads far apart in 3D whose UVs lie exactly on top of each other (overlapping/mirrored shells).
+        quad = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], dtype=float)
+        verts = np.concatenate([quad, quad + [5.0, 0.0, 0.0]])
+        faces = np.array([[0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7]])
+        uv = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=float)
+        faces_uv = np.array([[0, 1, 2], [0, 2, 3], [0, 1, 2], [0, 2, 3]])
+        labels = geo.islands_from_uv(verts, faces, uv, faces_uv)
+        assert labels.tolist() == [0, 0, 1, 1]
+
+    def test_cylinder_wall_is_one_island(self):
+        verts, faces, uv, faces_uv = cylinder()
+        assert geo.islands_from_uv(verts, faces, uv, faces_uv).max() == 0
+
+
+class TestUvSeamLabels:
+    def test_closing_cut_of_a_cylinder_is_a_seam(self):
+        verts, faces, uv, faces_uv = cylinder(8)
+        sample = geo.prepare_sample(verts, faces, geo.UvLayout(uv, faces_uv))
+        assert sample.seam.sum() == 1
+        closing = sample.pairs[sample.seam == 1][0]
+        assert sorted(closing.tolist()) == [1, 14]  # last quad's second triangle meets the first quad
+
+    def test_island_ids_miss_that_cut(self):
+        verts, faces, uv, faces_uv = cylinder(8)
+        sample = geo.prepare_sample(verts, faces, np.zeros(len(faces), dtype=int))
+        assert sample.seam.sum() == 0
+
+    def test_box_sides_give_the_twelve_box_edges(self):
+        verts, faces, island = make_box(3)
+        uv, faces_uv = TestIslandsFromUv.per_corner_uv(verts, faces, island)
+        from_uv = geo.prepare_sample(verts, faces, geo.UvLayout(uv, faces_uv)).seam
+        from_islands = geo.prepare_sample(verts, faces, island).seam
+        np.testing.assert_array_equal(from_uv, from_islands)
+
+    def test_indexed_and_per_corner_uvs_agree(self):
+        verts, faces, uv, faces_uv = cylinder(6)
+        per_corner = uv[faces_uv].reshape(-1, 2)
+        indexed = geo.prepare_sample(verts, faces, geo.UvLayout(uv, faces_uv)).seam
+        flat = geo.prepare_sample(verts, faces, geo.UvLayout(per_corner, np.arange(len(per_corner)).reshape(-1, 3)))
+        np.testing.assert_array_equal(indexed, flat.seam)
+
+    def test_differences_within_tolerance_are_continuous(self):
+        verts, faces, uv, faces_uv = cylinder(6)
+        per_corner = uv[faces_uv].reshape(-1, 2) + np.random.default_rng(0).uniform(-1e-7, 1e-7, (len(faces) * 3, 2))
+        layout = geo.UvLayout(per_corner, np.arange(len(per_corner)).reshape(-1, 3))
+        assert geo.prepare_sample(verts, faces, layout).seam.sum() == 1
+
+    def test_no_shared_edges_gives_no_labels(self):
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
+        layout = geo.UvLayout(np.zeros((3, 2)), np.array([[0, 1, 2]]))
+        pairs, edge_verts = geo.build_dual_graph(np.array([[0, 1, 2]]))
+        assert geo.uv_seam_labels(np.array([[0, 1, 2]]), layout, pairs, edge_verts).shape == (0,)
+        assert geo.prepare_sample(verts, np.array([[0, 1, 2]]), layout).seam.shape == (0,)
 
 
 class TestMakeSyntheticBox:

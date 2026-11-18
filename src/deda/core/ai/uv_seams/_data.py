@@ -19,8 +19,9 @@
 
 Data format, one ``.npz`` per asset:
     ``vertices (V, 3)`` float, ``faces (F, 3)`` int, and either
-    ``face_island (F,)`` int (preferred), or ``faces_uv (F, 3)`` int plus ``uv (U, 2)`` float, in which case
-    islands are derived from UV connectivity (``faces_uv`` must list faces in the same order as ``faces``).
+    ``faces_uv (F, 3)`` int plus ``uv (U, 2)`` float (preferred: seams are read from UV discontinuities, so cuts
+    inside one island are kept; ``faces_uv`` must list faces and corners in the same order as ``faces``), or
+    ``face_island (F,)`` int (seams are edges between different islands only).
 """
 import random
 import re
@@ -31,7 +32,7 @@ from typing import Protocol
 
 import numpy as np
 
-from ._geometry import SeamSample, islands_from_uv, make_synthetic_box, prepare_sample
+from ._geometry import SeamSample, UvLayout, make_synthetic_box, prepare_sample
 
 __all__ = ['ROTATION_MODES', 'Batch', 'MeshSeamDataset', 'MeshSource', 'NpzSource', 'SyntheticSource',
            'collate_samples', 'estimate_pos_weight', 'random_rotation', 'regex_group_key', 'split_paths']
@@ -75,8 +76,11 @@ class MeshSource(Protocol):
     def __len__(self) -> int:
         raise NotImplementedError
 
-    def get(self, index: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Return ``(vertices, faces, face_island)`` for item ``index``."""
+    def get(self, index: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray | UvLayout]:
+        """Return ``(vertices, faces, labels)`` for item ``index``.
+
+        ``labels`` is the mesh's :class:`~deda.core.ai.uv_seams.UvLayout` or an ``(F,)`` island id per face.
+        """
         raise NotImplementedError
 
 
@@ -118,12 +122,12 @@ class MeshSeamDataset:
         for step in range(size):
             item = (index + step) % size
             rng = np.random.default_rng([self.seed, self.epoch if self.train else 0, item])
-            vertices, faces, island = self.source.get(item, rng)
+            vertices, faces, labels = self.source.get(item, rng)
             if len(faces) > self.max_faces:
                 continue
             if self.train and self.rot_aug != 'none':
                 vertices = vertices @ random_rotation(rng, self.rot_aug).T
-            sample = prepare_sample(vertices, faces, island)
+            sample = prepare_sample(vertices, faces, labels)
             if sample.num_edges:
                 return sample
         raise RuntimeError(f'no usable mesh in the source (check max_faces={self.max_faces})')
@@ -145,24 +149,26 @@ class NpzSource:
     def __len__(self) -> int:
         return len(self.paths)
 
-    def get(self, index: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Load item ``index``.
+    def get(self, index: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray | UvLayout]:
+        """Load item ``index``; a UV layout is used when the file has one, else ``face_island``.
 
         Raises:
-            ValueError: If the file has neither ``face_island`` nor ``faces_uv`` + ``uv``.
+            ValueError: If the file has neither ``faces_uv`` + ``uv`` nor ``face_island``.
         """
         del rng  # loading is deterministic
         path = self.paths[index]
         with np.load(path) as data:
             vertices = np.asarray(data['vertices'], dtype=np.float64)
             faces = np.asarray(data['faces'], dtype=np.int64)
-            if 'face_island' in data:
-                island = np.asarray(data['face_island'], dtype=np.int64)
-            elif 'faces_uv' in data and 'uv' in data:
-                island = islands_from_uv(data['uv'], data['faces_uv'])
+            labels: np.ndarray | UvLayout
+            if 'faces_uv' in data and 'uv' in data:
+                labels = UvLayout(np.asarray(data['uv'], dtype=np.float64),
+                                  np.asarray(data['faces_uv'], dtype=np.int64))
+            elif 'face_island' in data:
+                labels = np.asarray(data['face_island'], dtype=np.int64)
             else:
                 raise ValueError(f'{path}: need face_island, or faces_uv together with uv')
-        return vertices, faces, island
+        return vertices, faces, labels
 
 
 class SyntheticSource:

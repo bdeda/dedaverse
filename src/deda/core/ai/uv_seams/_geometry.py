@@ -22,7 +22,10 @@ numpy only, so it is importable (and fully tested) without PyTorch.
 Conventions:
     * A mesh is ``vertices (V, 3) float`` and ``faces (F, 3) int`` (triangles only).
     * The *dual graph* has one node per face and one edge per mesh edge shared by exactly two faces.
-      A dual edge is a *seam* when its two faces belong to different UV islands.
+      A dual edge is a *seam* when the UVs on its two sides differ at either end of the shared mesh edge
+      (:func:`uv_seam_labels`). This catches seams inside a single connected island too, such as the closing cut
+      of an unwrapped cylinder. When only island ids are known (:func:`seam_labels`), a seam is an edge between
+      two different islands, which misses such cuts.
     * Game assets duplicate vertices along UV seams and hard edges, so vertices must be welded by position
       before adjacency is built. Otherwise every seam looks like a mesh boundary and the label leaks into
       the input.
@@ -31,9 +34,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-__all__ = ['EDGE_DIM', 'NODE_DIM', 'WELD_TOL', 'SeamSample', 'build_dual_graph', 'decode_islands', 'edge_features',
-           'face_geometry', 'islands_from_uv', 'label_components', 'make_synthetic_box', 'node_features',
-           'normalize_vertices', 'prepare_sample', 'seam_labels', 'weld_vertices']
+__all__ = ['EDGE_DIM', 'NODE_DIM', 'UV_TOL', 'WELD_TOL', 'SeamSample', 'UvLayout', 'build_dual_graph',
+           'decode_islands', 'edge_features', 'face_geometry', 'islands_from_uv', 'label_components',
+           'make_synthetic_box', 'node_features', 'normalize_vertices', 'prepare_sample', 'seam_labels',
+           'uv_seam_labels', 'weld_vertices']
 
 # Per-face feature count: normal (3), centroid (3), log relative area (1).
 NODE_DIM = 7
@@ -43,6 +47,9 @@ EDGE_DIM = 4
 
 # Vertex weld tolerance, applied after normalising the mesh to [-1, 1].
 WELD_TOL = 1e-5
+
+# Largest UV difference (in UV units) across a mesh edge that still counts as continuous.
+UV_TOL = 1e-5
 
 
 @dataclass(eq=False)
@@ -70,6 +77,20 @@ class SeamSample:
     def num_faces(self) -> int:
         """Number of faces."""
         return int(self.node_feat.shape[0])
+
+
+@dataclass(eq=False)
+class UvLayout:
+    """The authored UV layout of a mesh: the label source that keeps every seam.
+
+    Attributes:
+        uv: ``(U, 2)`` UV coordinates.
+        faces_uv: ``(F, 3)`` indices into ``uv``, one row per mesh face in the same order as the faces, with the
+            corners in the same order as each face's vertices.
+    """
+
+    uv: np.ndarray
+    faces_uv: np.ndarray
 
 
 def build_dual_graph(faces: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -175,23 +196,29 @@ def face_geometry(vertices: np.ndarray, faces: np.ndarray) -> tuple[np.ndarray, 
     return tri.mean(axis=1), cross / np.maximum(double_area[:, None], 1e-12), 0.5 * double_area
 
 
-def islands_from_uv(uv: np.ndarray, faces_uv: np.ndarray, tol: float = 1e-6) -> np.ndarray:
-    """UV island id per face from UV connectivity.
+def islands_from_uv(vertices: np.ndarray, faces: np.ndarray, uv: np.ndarray, faces_uv: np.ndarray,
+                    tol: float = UV_TOL) -> np.ndarray:
+    """UV island id per face.
 
-    Faces share an island when they are joined across a UV edge. UV points are welded by value first, so
-    per-corner UV arrays work. ``faces_uv`` must list faces in the same order as the 3D faces.
+    Two faces are in one island when they are joined, directly or through other faces, across mesh edges whose UVs
+    are continuous (see :func:`uv_seam_labels`). Only edges the faces share in 3D are compared, so UV shells that
+    are stacked or mirrored on top of each other in UV space stay separate.
 
     Args:
+        vertices: ``(V, 3)`` positions (welded by position here, so split vertices are fine).
+        faces: ``(F, 3)`` vertex indices.
         uv: ``(U, 2)`` UV coordinates.
-        faces_uv: ``(F, 3)`` indices into ``uv``.
-        tol: Weld tolerance for coincident UV points.
+        faces_uv: ``(F, 3)`` indices into ``uv``, in the same face and corner order as ``faces``.
+        tol: Largest UV difference across an edge that still counts as continuous.
 
     Returns:
         ``(F,)`` int64 island ids, contiguous from 0.
     """
-    _, welded = weld_vertices(np.asarray(uv, dtype=np.float64), np.asarray(faces_uv, dtype=np.int64), tol)
-    pairs, _ = build_dual_graph(welded)
-    return label_components(pairs, len(welded))
+    _, tris = weld_vertices(normalize_vertices(np.asarray(vertices, dtype=np.float64)),
+                            np.asarray(faces, dtype=np.int64), WELD_TOL)
+    pairs, edge_verts = build_dual_graph(tris)
+    seam = uv_seam_labels(tris, UvLayout(uv, faces_uv), pairs, edge_verts, tol)
+    return label_components(pairs[seam == 0], len(tris))
 
 
 def label_components(pairs: np.ndarray, num_nodes: int) -> np.ndarray:
@@ -290,28 +317,35 @@ def normalize_vertices(vertices: np.ndarray) -> np.ndarray:
     return (vertices - (low + high) / 2.0) / half_extent
 
 
-def prepare_sample(vertices: np.ndarray, faces: np.ndarray, face_island: np.ndarray | None = None) -> SeamSample:
-    """Raw mesh to model inputs, plus seam labels when island ids are given.
+def prepare_sample(vertices: np.ndarray, faces: np.ndarray,
+                   labels: np.ndarray | UvLayout | None = None) -> SeamSample:
+    """Raw mesh to model inputs, plus seam labels when a label source is given.
 
     Face order is preserved, so per-face predictions map straight back onto the input mesh.
 
     Args:
         vertices: ``(V, 3)`` positions.
         faces: ``(F, 3)`` vertex indices.
-        face_island: Optional ``(F,)`` UV island id per face.
+        labels: The mesh's :class:`UvLayout` (preferred: keeps every authored seam), an ``(F,)`` UV island id per
+            face (misses seams inside one island), or ``None`` for an unlabelled sample.
 
     Returns:
         The prepared :class:`SeamSample`.
 
     Raises:
-        ValueError: If the arrays have the wrong shape or a face index is out of range.
+        ValueError: If the arrays have the wrong shape or an index is out of range.
     """
-    _validate_mesh(vertices, faces, face_island)
+    _validate_mesh(vertices, faces, labels)
     welded, tris = weld_vertices(normalize_vertices(np.asarray(vertices, dtype=np.float64)),
                                  np.asarray(faces, dtype=np.int64), WELD_TOL)
     centroid, normal, area = face_geometry(welded, tris)
     pairs, edge_verts = build_dual_graph(tris)
-    seam = None if face_island is None else seam_labels(np.asarray(face_island), pairs)
+    if labels is None:
+        seam = None
+    elif isinstance(labels, UvLayout):
+        seam = uv_seam_labels(tris, labels, pairs, edge_verts)
+    else:
+        seam = seam_labels(np.asarray(labels), pairs)
     return SeamSample(node_feat=node_features(centroid, normal, area),
                       edge_feat=edge_features(welded, centroid, normal, pairs, edge_verts), pairs=pairs, seam=seam)
 
@@ -327,6 +361,39 @@ def seam_labels(face_island: np.ndarray, pairs: np.ndarray) -> np.ndarray:
         ``(E,)`` float32 labels.
     """
     return (face_island[pairs[:, 0]] != face_island[pairs[:, 1]]).astype(np.float32)
+
+
+def uv_seam_labels(faces: np.ndarray, layout: UvLayout, pairs: np.ndarray, edge_verts: np.ndarray,
+                   tol: float = UV_TOL) -> np.ndarray:
+    """1.0 for dual edges where the UVs on the two sides of the shared mesh edge differ, else 0.0.
+
+    For each shared edge, the UV of each of its two vertices is looked up in both faces; the edge is a seam when
+    either end differs by more than ``tol``. UVs are compared by value, so indexed and per-corner UV arrays give
+    the same result.
+
+    Args:
+        faces: ``(F, 3)`` welded vertex indices (as used to build ``pairs``).
+        layout: The mesh's UV layout, in the same face and corner order as ``faces``.
+        pairs: ``(E, 2)`` dual edges from :func:`build_dual_graph`.
+        edge_verts: ``(E, 2)`` vertex indices of each shared edge, from :func:`build_dual_graph`.
+        tol: Largest UV difference that still counts as continuous.
+
+    Returns:
+        ``(E,)`` float32 labels.
+    """
+    faces = np.asarray(faces, dtype=np.int64)
+    faces_uv = np.asarray(layout.faces_uv, dtype=np.int64)
+    uv = np.asarray(layout.uv, dtype=np.float64)
+    seam = np.zeros(len(pairs), dtype=bool)
+    for end in (0, 1):
+        vertex = edge_verts[:, end]
+        sides = []
+        for side in (0, 1):
+            face = pairs[:, side]
+            column = np.argmax(faces[face] == vertex[:, None], axis=1)
+            sides.append(uv[faces_uv[face, column]])
+        seam |= np.abs(sides[0] - sides[1]).max(axis=1, initial=0.0) > tol
+    return seam.astype(np.float32)
 
 
 def weld_vertices(vertices: np.ndarray, faces: np.ndarray, tol: float = WELD_TOL) -> tuple[np.ndarray, np.ndarray]:
@@ -380,7 +447,7 @@ def _merge_small_islands(labels: np.ndarray, pairs: np.ndarray, min_faces: int) 
     return dense.reshape(-1).astype(np.int64)
 
 
-def _validate_mesh(vertices: np.ndarray, faces: np.ndarray, face_island: np.ndarray | None) -> None:
+def _validate_mesh(vertices: np.ndarray, faces: np.ndarray, labels: np.ndarray | UvLayout | None) -> None:
     """Raise ``ValueError`` unless the mesh arrays are consistent."""
     vertices, faces = np.asarray(vertices), np.asarray(faces)
     if vertices.ndim != 2 or vertices.shape[1] != 3 or len(vertices) == 0:
@@ -389,5 +456,13 @@ def _validate_mesh(vertices: np.ndarray, faces: np.ndarray, face_island: np.ndar
         raise ValueError(f'faces must have shape (F, 3) with F > 0, got {faces.shape}')
     if faces.min() < 0 or faces.max() >= len(vertices):
         raise ValueError('faces reference vertices that do not exist')
-    if face_island is not None and np.asarray(face_island).shape != (len(faces),):
-        raise ValueError(f'face_island must have shape ({len(faces)},), got {np.asarray(face_island).shape}')
+    if isinstance(labels, UvLayout):
+        uv, faces_uv = np.asarray(labels.uv), np.asarray(labels.faces_uv)
+        if uv.ndim != 2 or uv.shape[1] != 2:
+            raise ValueError(f'uv must have shape (U, 2), got {uv.shape}')
+        if faces_uv.shape != faces.shape:
+            raise ValueError(f'faces_uv must have shape {faces.shape}, got {faces_uv.shape}')
+        if faces_uv.min() < 0 or faces_uv.max() >= len(uv):
+            raise ValueError('faces_uv reference UVs that do not exist')
+    elif labels is not None and np.asarray(labels).shape != (len(faces),):
+        raise ValueError(f'face_island must have shape ({len(faces)},), got {np.asarray(labels).shape}')

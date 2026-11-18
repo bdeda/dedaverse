@@ -37,21 +37,20 @@ import importlib
 
 from ._data import (ROTATION_MODES, Batch, MeshSeamDataset, MeshSource, NpzSource, SyntheticSource, collate_samples,
                     estimate_pos_weight, random_rotation, regex_group_key, split_paths)
-from ._geometry import (EDGE_DIM, NODE_DIM, WELD_TOL, SeamSample, build_dual_graph, decode_islands, edge_features,
-                        face_geometry, islands_from_uv, label_components, make_synthetic_box, node_features,
-                        normalize_vertices, prepare_sample, seam_labels, weld_vertices)
+from ._geometry import (EDGE_DIM, NODE_DIM, UV_TOL, WELD_TOL, SeamSample, UvLayout, build_dual_graph, decode_islands,
+                        edge_features, face_geometry, islands_from_uv, label_components, make_synthetic_box,
+                        node_features, normalize_vertices, prepare_sample, seam_labels, uv_seam_labels, weld_vertices)
 from ._metrics import EdgeCounts, best_threshold, island_count_error
 from ._options import TrainConfig, lr_scale
 from ._usd_arrays import USD_SUFFIXES, UV_INTERPOLATIONS, find_usd_files, usd_mesh_to_arrays, z_up_to_y_up
 
-__all__ = ['EDGE_DIM', 'NODE_DIM', 'ROTATION_MODES', 'USD_SUFFIXES', 'UV_INTERPOLATIONS', 'WELD_TOL', 'Batch',
-           'EdgeCounts', 'MeshSeamDataset',
-           'MeshSource', 'NpzSource', 'SeamSample', 'SyntheticSource', 'TrainConfig', 'best_threshold',
-           'build_dual_graph', 'collate_samples', 'decode_islands', 'edge_features', 'estimate_pos_weight',
-           'face_geometry', 'find_usd_files', 'island_count_error', 'islands_from_uv', 'label_components', 'lr_scale',
-           'make_synthetic_box', 'node_features',
-           'normalize_vertices', 'prepare_sample', 'random_rotation', 'regex_group_key', 'seam_labels',
-           'split_paths', 'usd_mesh_to_arrays', 'weld_vertices', 'z_up_to_y_up']
+__all__ = ['EDGE_DIM', 'NODE_DIM', 'ROTATION_MODES', 'USD_SUFFIXES', 'UV_INTERPOLATIONS', 'UV_TOL', 'WELD_TOL',
+           'Batch', 'EdgeCounts', 'MeshSeamDataset', 'MeshSource', 'NpzSource', 'SeamSample', 'SyntheticSource',
+           'TrainConfig', 'UvLayout', 'best_threshold', 'build_dual_graph', 'collate_samples', 'decode_islands',
+           'edge_features', 'estimate_pos_weight', 'face_geometry', 'find_usd_files', 'island_count_error',
+           'islands_from_uv', 'label_components', 'lr_scale', 'make_synthetic_box', 'node_features',
+           'normalize_vertices', 'prepare_sample', 'random_rotation', 'regex_group_key', 'seam_labels', 'split_paths',
+           'usd_mesh_to_arrays', 'uv_seam_labels', 'weld_vertices', 'z_up_to_y_up']
 
 # Public names loaded on first access, and the private module that defines each: the PyTorch parts need torch,
 # the USD reader needs pxr.

@@ -4,7 +4,7 @@
 Given a triangle mesh, predict where UV seams should go so the resulting islands can be fed to an unwrapper (PartUV, Blender, xatlas, etc.). Train on the UV layouts artists already made for our existing assets.
 
 ## Approach in one paragraph
-Work on the **face-adjacency (dual) graph**. Each mesh edge shared by two faces is labelled *seam* if the two faces sit in different UV islands in the artist's layout. A graph network predicts P(seam) per edge. Islands = connected components after cutting edges above a threshold, with tiny islands merged away. This needs no SAM masks, no multi-view rendering and no per-shape optimization, which is what makes SAMPart3D's `train.py` the wrong starting point. It also uses no third-party weights, so there is no licence question for the baseline.
+Work on the **face-adjacency (dual) graph**. Each mesh edge shared by two faces is labelled *seam* if the artist's UVs on its two sides differ (a UV discontinuity along that edge). This also catches cuts inside one connected island, such as the closing cut of an unwrapped cylinder, and only compares faces that share the edge in 3D, so stacked or mirrored UV shells are never joined. A graph network predicts P(seam) per edge. Islands = connected components after cutting edges above a threshold, with tiny islands merged away. This needs no SAM masks, no multi-view rendering and no per-shape optimization, which is what makes SAMPart3D's `train.py` the wrong starting point. It also uses no third-party weights, so there is no licence question for the baseline.
 
 ## Files
 Package `deda.core.ai.uv_seams` (`src/deda/core/ai/uv_seams/`):
@@ -26,12 +26,12 @@ The torch-free modules need only numpy (already a dependency; connected componen
 Relation to the existing `deda.plugins.game_asset` optimizer: its `--uv seams` mode derives seams from Smart UV Project on a smoothed copy. A trained seam model could replace or complement that step; Phase 2 compares them on distortion and packing.
 
 ## Phase 0: Data audit (before any training)
-1. Get the assets in. Either read USD directly (preferred, nothing to export): `train --usd <files or dirs...>` (any number of locations, searched recursively) and/or `--usd-list files.txt`; each `UsdGeomMesh` with the UV primvar `--uv-set` (default `st`) is one sample, converted in memory, and the artist's UV layout gives the island labels. Or export each asset to `.npz`: `vertices (V,3)`, `faces (F,3)`, plus either `face_island (F,)` or `faces_uv (F,3)` + `uv (U,2)` (face order in `faces_uv` must match `faces`) and train with `--data-dir`.
-   USD conventions: local-space points by default (`--usd-world-space` bakes transforms in), Z-up stages are rotated to Y-up, left-handed or mirrored meshes get their winding reversed, polygons are fan-triangulated, meshes under instanceable prims are not visited, and subdivision meshes are read as their control cage.
+1. Get the assets in. Either read USD directly (preferred, nothing to export): `train --usd <files or dirs...>` (any number of locations, searched recursively) and/or `--usd-list files.txt`; each `UsdGeomMesh` with the UV primvar `--uv-set` (default `st`) is one sample, converted in memory, and the artist's UV layout gives the seam labels. Or export each asset to `.npz`: `vertices (V,3)`, `faces (F,3)`, plus either `faces_uv (F,3)` + `uv (U,2)` (preferred; face and corner order must match `faces`) or `face_island (F,)` (seams are then only edges between different islands, so cuts inside an island are lost) and train with `--data-dir`.
+   USD conventions: local-space points by default (`--usd-world-space` bakes transforms in), Z-up stages are rotated to Y-up, left-handed or mirrored meshes get their winding reversed, convex polygons are fan-triangulated and concave ones ear-clipped (a concave polygon that crosses itself makes the mesh be skipped with a warning), meshes under instanceable prims are not visited, and subdivision meshes are read as their control cage.
 2. Triangulate consistently. Keep the artist's triangulation.
 3. Filter and report counts for each of these:
    - multiple UV sets (pick the primary lightmap/albedo set)
-   - overlapping or mirrored UVs (islands stacked on each other: labels become ambiguous; drop or flag)
+   - overlapping or mirrored UVs: labels are read per shared mesh edge, so stacked shells no longer merge, but check how often they occur
    - non-manifold or degenerate faces
    - face counts (decimate or LOD-pick above the `--max-faces` limit)
 4. Split by **asset family** (variants, LODs and colour swaps together), not by file, or validation will look better than reality. Use `--group-regex` for this, e.g. `--group-regex "^(.*?)(?:_lod\d+)?$"` keeps every LOD of an asset on one side of the split; without it each file is its own group.

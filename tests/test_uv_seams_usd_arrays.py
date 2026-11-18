@@ -114,7 +114,7 @@ class TestUsdMeshToArrays:
         points, counts, corners, uv = cube()
         _, faces, uv_out, faces_uv = ua.usd_mesh_to_arrays(points, counts, corners, uv)
         assert len(faces) == 12
-        island = islands_from_uv(uv_out, faces_uv)
+        island = islands_from_uv(points, faces, uv_out, faces_uv)
         assert island.max() + 1 == 6
         assert island.reshape(6, 2)[:, 0].tolist() == island.reshape(6, 2)[:, 1].tolist()  # both triangles together
 
@@ -123,8 +123,8 @@ class TestUsdMeshToArrays:
         points = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [2, 0, 0], [2, 1, 0]], dtype=np.float32)
         uv = np.array([[0, 0], [1, 0], [1, 1], [0, 1], [2, 0], [2, 1]], dtype=np.float32)
         corners = [0, 1, 2, 3, 1, 4, 5, 2]
-        _, _, uv_out, faces_uv = ua.usd_mesh_to_arrays(points, [4, 4], corners, uv[corners])
-        assert islands_from_uv(uv_out, faces_uv).max() == 0
+        _, faces, uv_out, faces_uv = ua.usd_mesh_to_arrays(points, [4, 4], corners, uv[corners])
+        assert islands_from_uv(points, faces, uv_out, faces_uv).max() == 0
 
     @pytest.mark.parametrize('interpolation', ['uniform', 'constant', 'bogus'])
     def test_unsupported_interpolation_raises(self, interpolation):
@@ -153,6 +153,59 @@ class TestUsdMeshToArrays:
     def test_bad_uv_data_raises(self, uv, uv_indices, interpolation, match):
         with pytest.raises(ValueError, match=match):
             ua.usd_mesh_to_arrays(QUAD_POINTS, [4], [0, 1, 2, 3], uv, uv_indices, interpolation)
+
+
+class TestConcavePolygons:
+    @staticmethod
+    def flat(polygon):
+        return np.array([(x, y, 0.0) for x, y in polygon])
+
+    @staticmethod
+    def signed_areas(points, faces):
+        tri = points[faces]
+        return 0.5 * np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+
+    def test_u_shape_is_covered_exactly_without_folded_triangles(self):
+        # The polygon from the review: a fan from its first corner folds over and covers area 11, not 7.
+        points = self.flat([(0, 0), (3, 0), (3, 3), (2, 3), (2, 1), (1, 1), (1, 3), (0, 3)])
+        _, faces, _, faces_uv = ua.usd_mesh_to_arrays(points, [8], range(8), np.zeros((8, 2)))
+        area = self.signed_areas(points, faces)[:, 2]
+        assert len(faces) == 6
+        assert (area > 0).all() and area.sum() == pytest.approx(7.0)
+        np.testing.assert_array_equal(faces, faces_uv)  # unindexed faceVarying: corner i -> uv i
+
+    def test_concave_quad(self):
+        points = self.flat([(0, 0), (2, 1), (4, 0), (2, 4)])
+        _, faces, _, _ = ua.usd_mesh_to_arrays(points, [4], range(4), np.zeros((4, 2)))
+        area = self.signed_areas(points, faces)[:, 2]
+        assert (area > 0).all() and area.sum() == pytest.approx(6.0)
+
+    def test_tilted_and_clockwise_polygons_keep_their_winding(self):
+        tilt = np.array([[1, 0, 0], [0, 0.6, -0.8], [0, 0.8, 0.6]])
+        points = self.flat([(0, 3), (1, 3), (1, 1), (2, 1), (2, 3), (3, 3), (3, 0), (0, 0)]) @ tilt.T
+        _, faces, _, _ = ua.usd_mesh_to_arrays(points, [8], range(8), np.zeros((8, 2)))
+        facing = self.signed_areas(points, faces) @ (np.array([0.0, 0.0, -1.0]) @ tilt.T)
+        assert (facing > 0).all() and facing.sum() == pytest.approx(7.0)
+
+    def test_corner_mapping_follows_the_polygon_offset(self):
+        square = self.flat([(0, 0), (1, 0), (1, 1), (0, 1)])
+        u_shape = self.flat([(0, 0), (3, 0), (3, 3), (2, 3), (2, 1), (1, 1), (1, 3), (0, 3)]) + [5.0, 0.0, 0.0]
+        points = np.concatenate([square, u_shape])
+        uv = np.arange(24, dtype=float).reshape(12, 2)
+        _, faces, _, faces_uv = ua.usd_mesh_to_arrays(points, [4, 8], range(12), uv)
+        assert faces[:2].tolist() == [[0, 1, 2], [0, 2, 3]]
+        assert (faces[2:] >= 4).all()
+        np.testing.assert_array_equal(faces, faces_uv)
+
+    def test_flat_polygon_keeps_the_fan(self):
+        points = self.flat([(0, 0), (1, 0), (2, 0), (3, 0)])
+        _, faces, _, _ = ua.usd_mesh_to_arrays(points, [4], range(4), np.zeros((4, 2)))
+        assert faces.tolist() == [[0, 1, 2], [0, 2, 3]]
+
+    def test_self_crossing_concave_polygon_raises(self):
+        points = self.flat([(0, 0), (4, 0), (1, 1), (4, 4), (0, 4), (3, 2)])
+        with pytest.raises(ValueError, match='cannot be triangulated'):
+            ua.usd_mesh_to_arrays(points, [6], range(6), np.zeros((6, 2)))
 
 
 class TestZUpToYUp:

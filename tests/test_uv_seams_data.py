@@ -93,17 +93,41 @@ class TestNpzSource:
         np.testing.assert_array_equal(out_faces, faces)
         np.testing.assert_array_equal(out_island, island)
 
-    def test_derives_islands_from_uv_connectivity(self, tmp_path):
-        verts, faces, island = box_mesh(3)
+    @staticmethod
+    def box_uv(verts, faces, island):
         uv = np.zeros((len(faces) * 3, 2))
         for i in range(len(faces)):
             axes = [k for k in range(3) if k != island[i] % 3]
             for k in range(3):
                 uv[i * 3 + k] = verts[faces[i, k], axes] * 0.1 + island[i] * 5.0
+        return uv, np.arange(len(faces) * 3).reshape(-1, 3)
+
+    def test_uv_files_give_a_uv_layout(self, tmp_path):
+        verts, faces, island = box_mesh(3)
+        uv, faces_uv = self.box_uv(verts, faces, island)
         path = tmp_path / 'uv.npz'
-        np.savez(path, vertices=verts, faces=faces, uv=uv, faces_uv=np.arange(len(faces) * 3).reshape(-1, 3))
-        _, _, derived = data.NpzSource([path]).get(0, np.random.default_rng(0))
-        assert derived.max() + 1 == 6
+        np.savez(path, vertices=verts, faces=faces, uv=uv, faces_uv=faces_uv)
+        _, _, labels = data.NpzSource([path]).get(0, np.random.default_rng(0))
+        assert isinstance(labels, geo.UvLayout)
+        np.testing.assert_array_equal(labels.faces_uv, faces_uv)
+        assert labels.uv.dtype == np.float64 and labels.faces_uv.dtype == np.int64
+        assert geo.islands_from_uv(verts, faces, labels.uv, labels.faces_uv).max() + 1 == 6
+
+    def test_uv_layout_is_preferred_over_face_island(self, tmp_path):
+        verts, faces, island = box_mesh(2)
+        uv, faces_uv = self.box_uv(verts, faces, island)
+        path = tmp_path / 'both.npz'
+        np.savez(path, vertices=verts, faces=faces, uv=uv, faces_uv=faces_uv, face_island=island)
+        _, _, labels = data.NpzSource([path]).get(0, np.random.default_rng(0))
+        assert isinstance(labels, geo.UvLayout)
+
+    def test_dataset_reads_seams_from_a_uv_layout(self, tmp_path):
+        verts, faces, island = box_mesh(2)
+        uv, faces_uv = self.box_uv(verts, faces, island)
+        path = tmp_path / 'uv.npz'
+        np.savez(path, vertices=verts, faces=faces, uv=uv, faces_uv=faces_uv)
+        sample = data.MeshSeamDataset(data.NpzSource([path]), train=False)[0]
+        assert sample.seam is not None and sample.seam.sum() > 0
 
     def test_file_without_labels_raises(self, tmp_path):
         verts, faces, _ = box_mesh()

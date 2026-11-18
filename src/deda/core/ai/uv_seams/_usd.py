@@ -18,8 +18,8 @@
 """Read meshes and their UV layouts from USD files and hand them to the seam training code.
 
 Each ``UsdGeomMesh`` that has the chosen UV primvar becomes one training sample: points and triangles come from the
-mesh, and the UV island of every triangle (the label the model learns) is derived from the UV layout the artist
-authored. Everything is converted in memory; no intermediate files are written.
+mesh, and the UV layout the artist authored is passed on as the label source, so every UV discontinuity (including a
+cut inside one island) becomes a seam label. Everything is converted in memory; no intermediate files are written.
 
 Conventions: time is the earliest authored time code; a Z-up stage is rotated to Y-up so rotation augmentation and
 the model see one up axis; left-handed meshes (and mirrored world transforms) have their winding reversed.
@@ -34,7 +34,7 @@ import numpy as np
 from pxr import Tf, Usd, UsdGeom
 
 from ._data import split_paths
-from ._geometry import islands_from_uv
+from ._geometry import UvLayout
 from ._usd_arrays import UV_INTERPOLATIONS, usd_mesh_to_arrays, z_up_to_y_up
 
 __all__ = ['UsdMeshRef', 'UsdSource', 'list_usd_meshes', 'load_usd_mesh', 'split_usd_sources']
@@ -77,8 +77,8 @@ class UsdSource:
     def __len__(self) -> int:
         return len(self.refs)
 
-    def get(self, index: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Load mesh ``index`` as ``(vertices, faces, face_island)``.
+    def get(self, index: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, UvLayout]:
+        """Load mesh ``index`` as ``(vertices, faces, uv_layout)``.
 
         Raises:
             ValueError: If the file or mesh cannot be read.
@@ -126,7 +126,7 @@ def list_usd_meshes(path: Path | str, uv_set: str = 'st') -> list[UsdMeshRef]:
 
 
 def load_usd_mesh(ref: UsdMeshRef, uv_set: str = 'st',
-                  world_space: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+                  world_space: bool = False) -> tuple[np.ndarray, np.ndarray, UvLayout]:
     """Read one mesh and convert it to the arrays the training code takes.
 
     Args:
@@ -135,8 +135,8 @@ def load_usd_mesh(ref: UsdMeshRef, uv_set: str = 'st',
         world_space: Bake the mesh's local-to-world transform into its points (otherwise local space is used).
 
     Returns:
-        ``(vertices (V, 3) float64, faces (T, 3) int64, face_island (T,) int64)``: the triangulated mesh, Y-up, and
-        the UV island id of each triangle.
+        ``(vertices (V, 3) float64, faces (T, 3) int64, uv_layout)``: the triangulated mesh, Y-up, and its
+        :class:`~deda.core.ai.uv_seams.UvLayout` (same triangle order), from which seam labels are read.
 
     Raises:
         ValueError: If the file cannot be opened, the prim is not a mesh, or its data is missing or inconsistent.
@@ -157,7 +157,7 @@ def load_usd_mesh(ref: UsdMeshRef, uv_set: str = 'st',
         vertices = vertices @ matrix[:3, :3] + matrix[3, :3]
     if UsdGeom.GetStageUpAxis(stage) == UsdGeom.Tokens.z:
         vertices = z_up_to_y_up(vertices)
-    return vertices, faces, islands_from_uv(uv, faces_uv)
+    return vertices, faces, UvLayout(uv, faces_uv)
 
 
 def split_usd_sources(files: Sequence[Path], val_frac: float, seed: int,
