@@ -507,7 +507,7 @@ def load_project(self, proj_name: str) -> ProjectConfig | None:
 
 ### 15. Git Workflow
 
-**When creating branches or pull requests, consult [BRANCHING_STRATEGY.md](BRANCHING_STRATEGY.md) for the full workflow.** That document defines the branch structure (feature/ and bugfix/ branches → dev → main), naming conventions, merge flow, and best practices.
+**When creating branches or pull requests, consult [BRANCHING_STRATEGY.md](BRANCHING_STRATEGY.md) for the full workflow.** That document defines the branch structure (feature/, bugfix/ and improvements/ branches cut from `main` and merged back into `main` by PR; there is no `dev` branch), naming conventions, merge flow, and best practices.
 
 #### Branch Naming
 - **Feature branches** - For new features, enhancements, or development work
@@ -606,7 +606,7 @@ When asked to modify or add code:
 
 1. **Read the relevant files** - Understand the existing code structure
 2. **Check [docs/ASSET_METADATA_DESIGN.md](docs/ASSET_METADATA_DESIGN.md)** - When changing asset hierarchy, `.dedaverse` layout, USDA structure, or asset content paths
-3. **Check BRANCHING_STRATEGY.md** - When creating branches or PRs, follow the documented workflow (feature/bugfix → dev → main)
+3. **Check BRANCHING_STRATEGY.md** - When creating branches or PRs, follow the documented workflow (feature/bugfix/improvements branches cut from and merged into `main`; no `dev` branch)
 4. **Check IMPROVEMENTS.md** - See if your change addresses a known issue
 5. **Follow patterns** - Match existing code style and architecture
 6. **Add type hints** - Always include type information
