@@ -105,6 +105,21 @@ class TestTrain:
         epochs = [json.loads(line)['epoch'] for line in (config.out / 'metrics.jsonl').read_text().splitlines()]
         assert epochs == [0, 1]
 
+    def test_resume_into_a_new_directory_keeps_a_best_checkpoint(self, tmp_path):
+        trainer.train(tiny_config(tmp_path, epochs=1))
+        elsewhere = tmp_path / 'other'
+        config = tiny_config(tmp_path, epochs=1, out=elsewhere, resume=tmp_path / 'run' / 'last.pt')
+        # Nothing left to train (epoch 1 of 1 is done): the carried-over best must still be there.
+        assert trainer.train(config) == elsewhere / 'best.pt'
+        assert (elsewhere / 'best.pt').exists()
+
+    def test_resume_without_an_earlier_best_starts_best_tracking_afresh(self, tmp_path):
+        trainer.train(tiny_config(tmp_path, epochs=1))
+        (tmp_path / 'run' / 'best.pt').unlink()
+        config = tiny_config(tmp_path, epochs=2, out=tmp_path / 'other', resume=tmp_path / 'run' / 'last.pt')
+        trainer.train(config)
+        assert (config.out / 'best.pt').exists()
+
     def test_resume_with_a_different_network_size_is_refused(self, tmp_path):
         trainer.train(tiny_config(tmp_path, epochs=1))
         with pytest.raises(ValueError, match='pass the same --hidden and --layers'):
@@ -140,6 +155,22 @@ class TestEvaluate:
                                'island_count_mae'}
         assert 0.0 <= result['seam_f1'] <= 1.0
         assert result['best_threshold'] in trainer.THRESHOLDS
+
+    def test_island_count_error_is_measured_at_the_selected_threshold(self, tmp_path, monkeypatch):
+        config = tiny_config(tmp_path)
+        _, val_set = trainer._build_datasets(config)
+        seen = []
+
+        def fake_error(prob, seam, pairs, num_faces, min_faces, threshold):
+            seen.append(threshold)
+            return 1 if threshold == 0.3 else 0
+
+        monkeypatch.setattr(trainer, 'island_count_error', fake_error)
+        monkeypatch.setattr(trainer, 'best_threshold', lambda counts: 0.3)
+        net = model_mod.SeamNet(hidden=16, layers=2)
+        result = trainer.evaluate(net, trainer._loader(val_set, config, shuffle=False), CPU, pos_weight=3.0)
+        assert set(seen) == set(trainer.THRESHOLDS)
+        assert result['island_count_mae'] == 1.0
 
 
 class TestPredict:

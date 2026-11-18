@@ -83,7 +83,8 @@ class MeshSource(Protocol):
 class MeshSeamDataset:
     """Map-style dataset (usable by ``torch.utils.data.DataLoader``) yielding :class:`SeamSample`.
 
-    Meshes above ``max_faces`` or without any shared edge are skipped by moving on to the next item.
+    Meshes above ``max_faces`` or without any shared edge are skipped by moving on to the next item (wrapping
+    around, so the whole source is searched before giving up).
     Training items are rotated by a random rotation drawn from ``(seed, epoch, index)``, so runs are reproducible
     and every epoch sees fresh augmentation (call :meth:`set_epoch` before each epoch).
     """
@@ -111,10 +112,10 @@ class MeshSeamDataset:
         """Prepare item ``index`` (or the next usable one).
 
         Raises:
-            RuntimeError: If none of the next 10 meshes is usable.
+            RuntimeError: If no mesh in the source is usable.
         """
         size = len(self.source)
-        for step in range(min(10, size)):
+        for step in range(size):
             item = (index + step) % size
             rng = np.random.default_rng([self.seed, self.epoch if self.train else 0, item])
             vertices, faces, island = self.source.get(item, rng)
@@ -125,7 +126,7 @@ class MeshSeamDataset:
             sample = prepare_sample(vertices, faces, island)
             if sample.num_edges:
                 return sample
-        raise RuntimeError(f'no usable mesh near index {index} (check max_faces={self.max_faces})')
+        raise RuntimeError(f'no usable mesh in the source (check max_faces={self.max_faces})')
 
     def __len__(self) -> int:
         return len(self.source)

@@ -25,6 +25,7 @@ import json
 import logging
 import math
 import random
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,12 +82,13 @@ def evaluate(model: SeamNet, loader: DataLoader, device: torch.device, pos_weigh
         amp_dtype: Autocast dtype, or ``None`` for full precision.
 
     Returns:
-        ``val_loss``, ``seam_f1``, ``seam_precision``, ``seam_recall`` (at the best threshold),
-        ``best_threshold`` and ``island_count_mae``.
+        ``val_loss``, ``seam_f1``, ``seam_precision``, ``seam_recall`` and ``island_count_mae`` (all at the best
+        threshold), and ``best_threshold`` itself.
     """
     model.eval()
     counts = {threshold: EdgeCounts() for threshold in THRESHOLDS}
-    loss_sum, num_edges, count_error, num_meshes = 0.0, 0, 0, 0
+    loss_sum, num_edges, num_meshes = 0.0, 0, 0
+    count_errors = {threshold: 0 for threshold in THRESHOLDS}
     weight = torch.tensor(pos_weight, device=device)
     with torch.no_grad():
         for batch in loader:
@@ -101,13 +103,15 @@ def evaluate(model: SeamNet, loader: DataLoader, device: torch.device, pos_weigh
             for graph in range(batch.num_graphs):
                 e_lo, e_hi = batch.edge_offsets[graph], batch.edge_offsets[graph + 1]
                 f_lo, f_hi = batch.face_offsets[graph], batch.face_offsets[graph + 1]
-                count_error += island_count_error(prob[e_lo:e_hi], batch.seam[e_lo:e_hi],
-                                                  batch.pairs[e_lo:e_hi] - f_lo, int(f_hi - f_lo), min_faces)
+                for threshold in THRESHOLDS:
+                    count_errors[threshold] += island_count_error(prob[e_lo:e_hi], batch.seam[e_lo:e_hi],
+                                                                  batch.pairs[e_lo:e_hi] - f_lo, int(f_hi - f_lo),
+                                                                  min_faces, threshold)
                 num_meshes += 1
     best = best_threshold(counts)
     return {'val_loss': loss_sum / max(num_edges, 1), 'seam_f1': counts[best].f1,
             'seam_precision': counts[best].precision, 'seam_recall': counts[best].recall, 'best_threshold': best,
-            'island_count_mae': count_error / max(num_meshes, 1)}
+            'island_count_mae': count_errors[best] / max(num_meshes, 1)}
 
 
 def predict(weights: Path, mesh: Path, threshold: float | None = None, min_faces: int = 8) -> SeamPrediction:
@@ -174,6 +178,9 @@ def train(config: TrainConfig) -> Path:
     if config.resume:
         start_epoch, step, best_f1 = _resume(config.resume, model, optimizer, model_cfg, device)
         log.info(f'resumed from {config.resume} at epoch {start_epoch}')
+        if not _carry_over_best(config.resume, config.out):
+            log.warning('no best.pt next to the resume checkpoint; the first epoch here will write a new one')
+            best_f1 = -1.0
     for epoch in range(start_epoch, config.epochs):
         train_set.set_epoch(epoch)
         model.train()
@@ -244,6 +251,29 @@ def _build_datasets(config: TrainConfig) -> tuple[MeshSeamDataset, MeshSeamDatas
         train_source, val_source = NpzSource(train_paths), NpzSource(val_paths)
     return (MeshSeamDataset(train_source, True, config.rot_aug, config.max_faces, config.seed),
             MeshSeamDataset(val_source, False, 'none', config.max_faces, config.seed))
+
+
+def _carry_over_best(resume: Path, out: Path) -> bool:
+    """Make sure ``out/best.pt`` exists after resuming, copying the earlier run's best checkpoint if needed.
+
+    Resuming restores the earlier best score, so without this a run into a new directory that never beats it would
+    finish without writing ``best.pt`` at all.
+
+    Args:
+        resume: The checkpoint being resumed from.
+        out: This run's output directory.
+
+    Returns:
+        ``True`` if ``out/best.pt`` exists afterwards; ``False`` if there is no earlier best to carry over.
+    """
+    target = out / 'best.pt'
+    if target.exists():
+        return True
+    previous = resume.parent / 'best.pt'
+    if not previous.is_file():
+        return False
+    shutil.copy2(previous, target)
+    return True
 
 
 def _device() -> torch.device:

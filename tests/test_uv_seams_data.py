@@ -144,6 +144,12 @@ class TestMeshSeamDataset:
         ds = data.MeshSeamDataset(ListSource([lone_triangle(), box_mesh(2)]), train=False)
         assert ds[0].num_faces == len(box_mesh(2)[1])
 
+    def test_usable_mesh_is_found_after_many_unusable_ones(self):
+        big, small = box_mesh(4), box_mesh(2)
+        ds = data.MeshSeamDataset(ListSource([big] * 12 + [small]), train=False, max_faces=len(small[1]))
+        for index in (0, 5, 12):
+            assert ds[index].num_faces == len(small[1])
+
     def test_raises_when_nothing_is_usable(self):
         ds = data.MeshSeamDataset(ListSource([box_mesh(2)]), train=False, max_faces=1)
         with pytest.raises(RuntimeError, match='no usable mesh'):
