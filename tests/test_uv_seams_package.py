@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 # ###################################################################################
-"""Tests for the deda.core.ai.uv_seams package: public API and lazily loaded PyTorch names."""
+"""Tests for the deda.core.ai.uv_seams package: public API and lazily loaded PyTorch and USD names."""
 import types
 
 import numpy as np
@@ -40,10 +40,12 @@ class TestPublicApi:
         assert labels.max() + 1 == 6
 
 
-class TestLazyTorchNames:
+class TestLazyNames:
     @pytest.mark.parametrize('name, module', [('SeamNet', '_model'), ('SeamPrediction', '_trainer'),
                                               ('evaluate', '_trainer'), ('predict', '_trainer'),
-                                              ('train', '_trainer')])
+                                              ('train', '_trainer'), ('UsdSource', '_usd'),
+                                              ('UsdMeshRef', '_usd'), ('list_usd_meshes', '_usd'),
+                                              ('load_usd_mesh', '_usd'), ('split_usd_sources', '_usd')])
     def test_name_is_loaded_from_the_right_module(self, monkeypatch, name, module):
         requested = []
         sentinel = object()

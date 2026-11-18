@@ -73,6 +73,25 @@ class TestTrainCommand:
         defaults = cli.TrainConfig(out=tmp_path / 'run', data_dir=tmp_path)
         assert config == defaults
 
+    def test_usd_paths_uv_set_and_world_space_are_passed_on(self, trainer, tmp_path):
+        code = cli.main(['train', '--usd', '/art/hero', '/art/props/crate.usd', '--uv-set', 'st1',
+                         '--usd-world-space', '--out', str(tmp_path)])
+        assert code == 0
+        config = trainer.configs[0]
+        assert config.usd_paths == [Path('/art/hero'), Path('/art/props/crate.usd')]
+        assert config.uv_set == 'st1' and config.usd_world_space is True
+
+    def test_usd_list_file_is_read_and_combined_with_usd(self, trainer, tmp_path):
+        listing = tmp_path / 'files.txt'
+        listing.write_text('# hero assets\n/art/a.usd\n\n  /art/b/  \n', encoding='utf-8')
+        cli.main(['train', '--usd', '/art/first.usd', '--usd-list', str(listing), '--out', str(tmp_path)])
+        assert trainer.configs[0].usd_paths == [Path('/art/first.usd'), Path('/art/a.usd'), Path('/art/b')]
+
+    def test_unreadable_usd_list_is_a_usage_error(self, trainer, tmp_path, capsys):
+        assert cli.main(['train', '--usd-list', str(tmp_path / 'missing.txt'), '--out', str(tmp_path)]) == 2
+        assert 'error:' in capsys.readouterr().err
+        assert trainer.configs == []
+
     def test_resume_path_is_passed_on(self, trainer, tmp_path):
         cli.main(['train', '--synthetic', '3', '--out', str(tmp_path), '--resume', str(tmp_path / 'last.pt')])
         assert trainer.configs[0].resume == tmp_path / 'last.pt'

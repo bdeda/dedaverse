@@ -55,12 +55,12 @@ def main(argv: list[str] | None = None) -> int:
                         format='%(asctime)s %(levelname)s %(message)s')
     config = None
     if args.command == 'train':
-        config = _config_from_args(args)
         try:
+            config = _config_from_args(args)
             config.validate()
             if config.group_regex:
                 regex_group_key(config.group_regex)
-        except (ValueError, re.error) as err:
+        except (ValueError, OSError, re.error) as err:
             print(f'error: {err}', file=sys.stderr)
             return 2
     trainer = _load_trainer()
@@ -88,6 +88,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     train = commands.add_parser('train', help='train the seam network')
     train.add_argument('--data-dir', type=Path, help='folder of .npz assets (vertices, faces, face_island)')
+    train.add_argument('--usd', type=Path, nargs='+', default=[], metavar='PATH',
+                       help='USD files and/or directories (searched recursively), from any locations')
+    train.add_argument('--usd-list', type=Path, metavar='FILE',
+                       help='text file with one USD file or directory per line (blank lines and # comments ignored)')
+    train.add_argument('--uv-set', default=defaults.uv_set, help='name of the USD UV primvar that defines the islands')
+    train.add_argument('--usd-world-space', action='store_true',
+                       help='bake each USD mesh\'s local-to-world transform into its points')
     train.add_argument('--synthetic', type=int, default=defaults.synthetic, metavar='N',
                        help='train on N random boxes instead (smoke test; no data needed)')
     train.add_argument('--out', type=Path, required=True, help='output folder for checkpoints and metrics')
@@ -121,11 +128,25 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _config_from_args(args: argparse.Namespace) -> TrainConfig:
+    usd_paths = list(args.usd)
+    if args.usd_list is not None:
+        usd_paths += _read_path_list(args.usd_list)
     return TrainConfig(out=args.out, data_dir=args.data_dir, synthetic=args.synthetic, epochs=args.epochs,
                        batch_size=args.batch_size, lr=args.lr, weight_decay=args.weight_decay, hidden=args.hidden,
                        layers=args.layers, val_frac=args.val_frac, rot_aug=args.rot_aug, max_faces=args.max_faces,
                        min_faces=args.min_faces, pos_weight=args.pos_weight, num_workers=args.num_workers,
-                       amp=args.amp, resume=args.resume, seed=args.seed, group_regex=args.group_regex)
+                       amp=args.amp, resume=args.resume, seed=args.seed, group_regex=args.group_regex,
+                       usd_paths=usd_paths, uv_set=args.uv_set, usd_world_space=args.usd_world_space)
+
+
+def _read_path_list(path: Path) -> list[Path]:
+    """Paths listed one per line in a text file; blank lines and ``#`` comments are ignored.
+
+    Raises:
+        OSError: If the file cannot be read.
+    """
+    lines = path.read_text(encoding='utf-8').splitlines()
+    return [Path(line.strip()) for line in lines if line.strip() and not line.strip().startswith('#')]
 
 
 def _load_trainer() -> ModuleType | None:

@@ -15,6 +15,8 @@ Package `deda.core.ai.uv_seams` (`src/deda/core/ai/uv_seams/`):
 | `_data.py` | no | `.npz` and synthetic sources, dataset, batching, grouped train/val split |
 | `_metrics.py` | no | seam-edge precision/recall/F1, best threshold, island-count error |
 | `_options.py` | no | `TrainConfig`, learning-rate schedule |
+| `_usd_arrays.py` | no | USD polygon/UV arrays to triangles + UV indices, USD file discovery, Z-up to Y-up |
+| `_usd.py` | needs `pxr` (core dependency) | read meshes and UV layouts from USD stages: `list_usd_meshes`, `load_usd_mesh`, `UsdSource`, `split_usd_sources` |
 | `_model.py` | **yes** | `SeamNet` (message passing + per-mesh context) |
 | `_trainer.py` | **yes** | `train`, `evaluate`, `predict`, checkpoints |
 | `__main__.py` | imports it lazily | `python -m deda.core.ai.uv_seams train / predict` |
@@ -24,7 +26,8 @@ The torch-free modules need only numpy (already a dependency; connected componen
 Relation to the existing `deda.plugins.game_asset` optimizer: its `--uv seams` mode derives seams from Smart UV Project on a smoothed copy. A trained seam model could replace or complement that step; Phase 2 compares them on distortion and packing.
 
 ## Phase 0: Data audit (before any training)
-1. Export each asset to `.npz`: `vertices (V,3)`, `faces (F,3)`, plus either `face_island (F,)` or `faces_uv (F,3)` + `uv (U,2)`. Face order in `faces_uv` must match `faces`.
+1. Get the assets in. Either read USD directly (preferred, nothing to export): `train --usd <files or dirs...>` (any number of locations, searched recursively) and/or `--usd-list files.txt`; each `UsdGeomMesh` with the UV primvar `--uv-set` (default `st`) is one sample, converted in memory, and the artist's UV layout gives the island labels. Or export each asset to `.npz`: `vertices (V,3)`, `faces (F,3)`, plus either `face_island (F,)` or `faces_uv (F,3)` + `uv (U,2)` (face order in `faces_uv` must match `faces`) and train with `--data-dir`.
+   USD conventions: local-space points by default (`--usd-world-space` bakes transforms in), Z-up stages are rotated to Y-up, left-handed or mirrored meshes get their winding reversed, polygons are fan-triangulated, meshes under instanceable prims are not visited, and subdivision meshes are read as their control cage.
 2. Triangulate consistently. Keep the artist's triangulation.
 3. Filter and report counts for each of these:
    - multiple UV sets (pick the primary lightmap/albedo set)

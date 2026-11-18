@@ -48,6 +48,20 @@ class TestTrainConfig:
         assert out['data_dir'] == 'data' and out['resume'] == 'a.pt'
         assert out['seed'] == 0 and out['group_regex'] is None
 
+    def test_usd_paths_alone_are_enough_input(self):
+        options.TrainConfig(out=Path('runs/x'), usd_paths=['/art/a', Path('/art/b.usd')]).validate()
+
+    def test_usd_paths_are_converted_and_serialised_as_strings(self):
+        config = options.TrainConfig(out=Path('runs/x'), usd_paths=['/art/a', Path('/art/b.usd')])
+        assert config.usd_paths == [Path('/art/a'), Path('/art/b.usd')]
+        out = config.to_dict()
+        assert out['usd_paths'] == [str(Path('/art/a')), str(Path('/art/b.usd'))]
+        assert out['uv_set'] == 'st' and out['usd_world_space'] is False
+
+    def test_empty_uv_set_raises(self):
+        with pytest.raises(ValueError, match='uv_set'):
+            options.TrainConfig(out=Path('runs/x'), usd_paths=['/art'], uv_set='').validate()
+
     def test_string_paths_are_converted(self):
         config = options.TrainConfig(out='runs/x', data_dir='data', resume='a.pt')
         assert config.out == Path('runs/x')

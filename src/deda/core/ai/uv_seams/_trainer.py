@@ -40,6 +40,8 @@ from ._geometry import decode_islands, prepare_sample
 from ._metrics import EdgeCounts, best_threshold, island_count_error
 from ._model import SeamNet
 from ._options import TrainConfig, lr_scale
+from ._usd import split_usd_sources
+from ._usd_arrays import find_usd_files
 
 __all__ = ['THRESHOLDS', 'SeamPrediction', 'evaluate', 'predict', 'train']
 
@@ -151,7 +153,7 @@ def train(config: TrainConfig) -> Path:
 
     Raises:
         ValueError: If the config is invalid, or ``config.resume`` was trained with a different network size.
-        FileNotFoundError: If ``config.data_dir`` holds no ``.npz`` files.
+        FileNotFoundError: If ``config.usd_paths`` or ``config.data_dir`` yields no input files.
     """
     config.validate()
     _seed_everything(config.seed)
@@ -218,10 +220,21 @@ def _amp_dtype(enabled: bool, device: torch.device) -> torch.dtype | None:
 
 
 def _build_datasets(config: TrainConfig) -> tuple[MeshSeamDataset, MeshSeamDataset]:
-    """Training and validation datasets for ``config`` (synthetic boxes, or ``.npz`` files split by group)."""
+    """Training and validation datasets for ``config``.
+
+    The input is synthetic boxes, else USD files from ``usd_paths``, else ``.npz`` files from ``data_dir``; real
+    data is split by file (or ``group_regex`` group).
+    """
     if config.synthetic:
         train_source = SyntheticSource(config.synthetic, config.seed)
         val_source = SyntheticSource(max(1, config.synthetic // 10), config.seed + 10_000)
+    elif config.usd_paths:
+        files = find_usd_files(config.usd_paths)
+        if not files:
+            raise FileNotFoundError(f'no USD files in {[str(p) for p in config.usd_paths]}')
+        key = regex_group_key(config.group_regex) if config.group_regex else None
+        train_source, val_source = split_usd_sources(files, config.val_frac, config.seed, key, config.uv_set,
+                                                     config.usd_world_space)
     else:
         paths = sorted(Path(config.data_dir).glob('*.npz'))
         if not paths:

@@ -82,6 +82,8 @@ def _import_deda_core() -> None:
     import deda.core.ai.uv_seams._geometry  # noqa: F401
     import deda.core.ai.uv_seams._metrics  # noqa: F401
     import deda.core.ai.uv_seams._options  # noqa: F401
+    import deda.core.ai.uv_seams._usd  # noqa: F401
+    import deda.core.ai.uv_seams._usd_arrays  # noqa: F401
     try:
         import deda.core.ai.uv_seams._model  # noqa: F401
         import deda.core.ai.uv_seams._trainer  # noqa: F401
