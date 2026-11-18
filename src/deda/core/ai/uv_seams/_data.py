@@ -153,9 +153,10 @@ class NpzSource:
         del rng  # loading is deterministic
         path = self.paths[index]
         with np.load(path) as data:
-            vertices, faces = data['vertices'].astype(np.float64), data['faces'].astype(np.int64)
+            vertices = np.asarray(data['vertices'], dtype=np.float64)
+            faces = np.asarray(data['faces'], dtype=np.int64)
             if 'face_island' in data:
-                island = data['face_island'].astype(np.int64)
+                island = np.asarray(data['face_island'], dtype=np.int64)
             elif 'faces_uv' in data and 'uv' in data:
                 island = islands_from_uv(data['uv'], data['faces_uv'])
             else:
