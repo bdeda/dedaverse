@@ -76,6 +76,19 @@ def _import_deda_core() -> None:
         import deda.core.ai._usd_training  # noqa: F401
     except ModuleNotFoundError:
         pass
+    import deda.core.ai.uv_seams  # noqa: F401
+    import deda.core.ai.uv_seams.__main__  # noqa: F401
+    import deda.core.ai.uv_seams._data  # noqa: F401
+    import deda.core.ai.uv_seams._geometry  # noqa: F401
+    import deda.core.ai.uv_seams._metrics  # noqa: F401
+    import deda.core.ai.uv_seams._options  # noqa: F401
+    import deda.core.ai.uv_seams._usd  # noqa: F401
+    import deda.core.ai.uv_seams._usd_arrays  # noqa: F401
+    try:
+        import deda.core.ai.uv_seams._model  # noqa: F401
+        import deda.core.ai.uv_seams._trainer  # noqa: F401
+    except ModuleNotFoundError:   # PyTorch is an optional dependency
+        pass
     import deda.core.types  # noqa: F401
     import deda.core.types._asset_id  # noqa: F401
     import deda.core.types._asset  # noqa: F401

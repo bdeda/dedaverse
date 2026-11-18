@@ -82,6 +82,11 @@ jobs:
                   # Gate on the score. Baseline is 8.77 (2026-10); raise the threshold as the score improves, never lower it.
                   pylint src/deda/ --rcfile=.pylintrc --fail-under=8.5
 
+            # Installed after pylint so lint results do not depend on it. CPU-only build: the uv_seams model and
+            # trainer tests (tests/test_uv_seams_trainer.py) need torch but no GPU.
+            - name: Install CPU PyTorch for optional-dependency tests
+              run: python -m pip install "torch>=2.14.1" --index-url https://download.pytorch.org/whl/cpu
+
             - name: Run pytest with coverage
               env:
                   QT_QPA_PLATFORM: offscreen
