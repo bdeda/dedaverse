@@ -252,12 +252,12 @@ class TestSplitUsdSources:
     def test_meshes_are_split_by_file(self, files):
         train, val = usd.split_usd_sources(files, val_frac=0.25, seed=0)
         assert len(train) == 6 and len(val) == 2
-        assert {ref.path for ref in train}.isdisjoint({ref.path for ref in val})
+        assert {ref.path for ref in train.refs}.isdisjoint({ref.path for ref in val.refs})
 
     def test_group_key_keeps_related_files_together(self, files):
         train, val = usd.split_usd_sources(files, 0.5, 0, group_key=lambda p: 'ab' if p.stem in 'ab' else 'cd')
-        assert len({ref.path for ref in train} & {ref.path for ref in val}) == 0
-        assert {ref.path.stem for ref in val} in ({'a', 'b'}, {'c', 'd'})
+        assert {ref.path for ref in train.refs}.isdisjoint({ref.path for ref in val.refs})
+        assert {ref.path.stem for ref in val.refs} in ({'a', 'b'}, {'c', 'd'})
 
     def test_files_without_usable_meshes_are_skipped(self, files, tmp_path, caplog):
         stage = new_stage(tmp_path / 'empty.usda')
