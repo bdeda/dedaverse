@@ -7,11 +7,19 @@ Given a triangle mesh, predict where UV seams should go so the resulting islands
 Work on the **face-adjacency (dual) graph**. Each mesh edge shared by two faces is labelled *seam* if the two faces sit in different UV islands in the artist's layout. A graph network predicts P(seam) per edge. Islands = connected components after cutting edges above a threshold, with tiny islands merged away. This needs no SAM masks, no multi-view rendering and no per-shape optimization, which is what makes SAMPart3D's `train.py` the wrong starting point. It also uses no third-party weights, so there is no licence question for the baseline.
 
 ## Files
-Live in `tools/uv_islands/`, deliberately **outside `src/deda`**: the baseline is experimental, so it stays out of the pylint, coverage and bandit gates until it is promoted.
-- `tools/uv_islands/uv_geometry.py`: welding, dual graph, labels, features, decoding, synthetic data (numpy + scipy; tested)
-- `tools/uv_islands/train_uv_islands.py`: dataset, model, train/eval loop, `predict` command (PyTorch; syntax-checked only, see Status)
+Package `deda.core.ai.uv_seams` (`src/deda/core/ai/uv_seams/`):
 
-Dependencies: `torch` and `numpy` are already in `pyproject.toml`; **`scipy` is not** (used for connected components). Adding it, and the move into `src/deda/core/ai/` with unit tests, are follow-ups that need your approval per AGENTS.md.
+| Module | Needs torch | Contents |
+|---|---|---|
+| `_geometry.py` | no | weld, face graph, labels, features, island decoding, synthetic boxes |
+| `_data.py` | no | `.npz` and synthetic sources, dataset, batching, grouped train/val split |
+| `_metrics.py` | no | seam-edge precision/recall/F1, best threshold, island-count error |
+| `_options.py` | no | `TrainConfig`, learning-rate schedule |
+| `_model.py` | **yes** | `SeamNet` (message passing + per-mesh context) |
+| `_trainer.py` | **yes** | `train`, `evaluate`, `predict`, checkpoints |
+| `__main__.py` | imports it lazily | `python -m deda.core.ai.uv_seams train / predict` |
+
+The torch-free modules need only numpy (already a dependency; connected components are done in numpy, so there is no scipy requirement). PyTorch stays optional: it is not installed in CI, and importing the package never imports it (`SeamNet`, `train`, `predict` etc. load on first access).
 
 Relation to the existing `deda.plugins.game_asset` optimizer: its `--uv seams` mode derives seams from Smart UV Project on a smoothed copy. A trained seam model could replace or complement that step; Phase 2 compares them on distortion and packing.
 
@@ -23,7 +31,7 @@ Relation to the existing `deda.plugins.game_asset` optimizer: its `--uv seams` m
    - overlapping or mirrored UVs (islands stacked on each other: labels become ambiguous; drop or flag)
    - non-manifold or degenerate faces
    - face counts (decimate or LOD-pick above the `--max-faces` limit)
-4. Split by **asset family** (variants, LODs and colour swaps together), not by file, or validation will look better than reality. The script splits by file as a placeholder; replace it with your family key.
+4. Split by **asset family** (variants, LODs and colour swaps together), not by file, or validation will look better than reality. Use `--group-regex` for this, e.g. `--group-regex "^(.*?)(?:_lod\d+)?$"` keeps every LOD of an asset on one side of the split; without it each file is its own group.
 5. Look at 20 random labelled meshes in a viewer. Confirm the seams look like what an artist would call a seam.
 
 **Gate:** at least a few thousand clean assets and a seam-edge fraction in a sane range (typically a few percent of edges).
@@ -61,11 +69,12 @@ Edge F1 against artist seams undersells a good model, since valid seam placement
 | Orientation conventions | Choose `--rot-aug` to match your assets (yaw assumes Y-up) |
 
 ## Status (be aware)
-- `uv_geometry.py` was run and verified: welding, dual-graph edge counts, seam counts on synthetic boxes (12n seams), island decoding, small-island merging, UV-to-island extraction.
-- `train_uv_islands.py` compiles but **was not executed**: this sandbox has no PyTorch and cannot install it. Run the smoke test first on your GPU box:
+- **Tested in CI (no torch needed):** geometry, data, metrics, config, CLI and the lazy package API: about 130 tests in `tests/test_uv_seams_*.py` covering every line of the torch-free modules except two lines the coverage config excludes.
+- **Written but not yet run:** `_model.py` and `_trainer.py`, and their tests (`tests/test_uv_seams_trainer.py`, skipped wherever torch is missing). They were developed on a machine without PyTorch, so **run them on your GPU box first**:
 
 ```
-python tools/uv_islands/train_uv_islands.py train --synthetic 200 --epochs 5 --out runs/smoke
+python -m pytest tests/test_uv_seams_trainer.py
+python -m deda.core.ai.uv_seams train --synthetic 200 --epochs 5 --out runs/smoke
 ```
 On the synthetic boxes, seam F1 should climb towards 1.0 within a few epochs (the seams are just 90-degree edges). If it does not, there is a bug to fix before touching real data.
 
