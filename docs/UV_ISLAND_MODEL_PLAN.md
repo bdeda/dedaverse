@@ -21,7 +21,7 @@ Package `deda.core.ai.uv_seams` (`src/deda/core/ai/uv_seams/`):
 | `_trainer.py` | **yes** | `train`, `evaluate`, `predict`, checkpoints |
 | `__main__.py` | imports it lazily | `python -m deda.core.ai.uv_seams train / predict` |
 
-The torch-free modules need only numpy (already a dependency; connected components are done in numpy, so there is no scipy requirement). PyTorch stays optional: it is not installed in CI, and importing the package never imports it (`SeamNet`, `train`, `predict` etc. load on first access).
+The torch-free modules need only numpy (already a dependency; connected components are done in numpy, so there is no scipy requirement). PyTorch stays optional: CI installs a CPU build only for the pytest step (after pylint), and importing the package never imports it (`SeamNet`, `train`, `predict` etc. load on first access).
 
 Relation to the existing `deda.plugins.game_asset` optimizer: its `--uv seams` mode derives seams from Smart UV Project on a smoothed copy. A trained seam model could replace or complement that step; Phase 2 compares them on distortion and packing.
 

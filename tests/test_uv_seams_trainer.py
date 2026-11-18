@@ -17,8 +17,8 @@
 # ###################################################################################
 """Tests for the PyTorch parts of deda.core.ai.uv_seams (model, training loop, evaluation, prediction).
 
-PyTorch is an optional dependency that CI does not install, so this whole module is skipped there. Run it
-wherever torch is available: ``python -m pytest tests/test_uv_seams_trainer.py``.
+PyTorch is an optional dependency. CI installs a CPU build for the test step; elsewhere this module is skipped
+unless torch is installed: ``python -m pytest tests/test_uv_seams_trainer.py``.
 """
 import json
 

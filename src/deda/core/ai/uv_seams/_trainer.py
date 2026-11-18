@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import torch  # pylint: disable=import-error  # optional dependency, not installed in CI
+import torch  # pylint: disable=import-error  # optional dependency; CI installs it after pylint
 from torch.nn import functional  # pylint: disable=import-error
 from torch.utils.data import DataLoader  # pylint: disable=import-error
 

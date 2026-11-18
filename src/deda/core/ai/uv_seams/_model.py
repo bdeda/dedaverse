@@ -22,7 +22,7 @@ per-mesh mean (so the network can reason about whole-shape structure such as clo
 neighbourhoods). The head scores each dual edge from the two faces it joins and is symmetric in them, so an
 undirected edge has exactly one answer.
 """
-import torch  # pylint: disable=import-error  # optional dependency, not installed in CI
+import torch  # pylint: disable=import-error  # optional dependency; CI installs it after pylint
 from torch import nn  # pylint: disable=import-error
 
 from ._geometry import EDGE_DIM, NODE_DIM
