@@ -134,6 +134,45 @@ class TestTrain:
         config = tiny_config(tmp_path, synthetic=0, data_dir=folder, epochs=1, val_frac=0.34)
         assert trainer.train(config).exists()
 
+    def test_trains_from_usd_files_in_several_folders(self, tmp_path):
+        from pxr import Gf, Sdf, Usd, UsdGeom, Vt  # pylint: disable=import-outside-toplevel
+
+        for i in range(4):
+            folder = tmp_path / f'dir{i % 2}'
+            folder.mkdir(exist_ok=True)
+            verts, faces, island = geo.make_synthetic_box(2, np.random.default_rng(i))
+            stage = Usd.Stage.CreateNew(str(folder / f'box_{i}.usda'))
+            mesh = UsdGeom.Mesh.Define(stage, '/Box')
+            mesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*map(float, p)) for p in verts]))
+            mesh.CreateFaceVertexCountsAttr(Vt.IntArray([3] * len(faces)))
+            mesh.CreateFaceVertexIndicesAttr(Vt.IntArray([int(v) for v in faces.ravel()]))
+            # Each box side projected onto its own two axes, in its own UV slot: one island per side.
+            uv = [tuple(float(x) for x in verts[faces[f, k]][[a for a in range(3) if a != island[f] % 3]] * 0.1
+                        + island[f] * 5.0) for f in range(len(faces)) for k in range(3)]
+            primvar = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar('st', Sdf.ValueTypeNames.TexCoord2fArray, 'faceVarying')
+            primvar.Set(Vt.Vec2fArray([Gf.Vec2f(*t) for t in uv]))
+            stage.Save()
+        config = tiny_config(tmp_path, synthetic=0, usd_paths=[tmp_path / 'dir0', tmp_path / 'dir1'], epochs=1,
+                             val_frac=0.25)
+        train_set, val_set = trainer._build_datasets(config)
+        assert len(train_set) == 3 and len(val_set) == 1
+        assert train_set[0].seam.sum() > 0
+        assert trainer.train(config).exists()
+
+    def test_usd_paths_without_usd_files_raise(self, tmp_path):
+        (tmp_path / 'empty').mkdir()
+        with pytest.raises(FileNotFoundError, match='no USD files'):
+            trainer.train(tiny_config(tmp_path, synthetic=0, usd_paths=[tmp_path / 'empty']))
+
+    def test_non_finite_loss_skips_the_batch(self, tmp_path, monkeypatch, caplog):
+        monkeypatch.setattr(trainer.functional, 'binary_cross_entropy_with_logits',
+                            lambda logits, target, **kw: (logits * 0).sum() + float('nan'))
+        config = tiny_config(tmp_path, epochs=1)
+        with caplog.at_level('WARNING'):
+            trainer.train(config)
+        assert 'non-finite loss' in caplog.text
+        assert json.loads((config.out / 'metrics.jsonl').read_text().splitlines()[0])['train_loss'] == 0.0
+
     def test_empty_data_folder_raises(self, tmp_path):
         folder = tmp_path / 'empty'
         folder.mkdir()
@@ -143,6 +182,20 @@ class TestTrain:
     def test_invalid_config_is_rejected_before_training(self, tmp_path):
         with pytest.raises(ValueError, match='epochs'):
             trainer.train(tiny_config(tmp_path, epochs=0))
+
+
+class TestAmpDtype:
+    def test_disabled_is_full_precision(self):
+        assert trainer._amp_dtype(False, CPU) is None
+
+    def test_cpu_falls_back_with_a_warning(self, caplog):
+        with caplog.at_level('WARNING'):
+            assert trainer._amp_dtype(True, CPU) is None
+        assert 'bfloat16' in caplog.text
+
+    def test_bf16_gpu_uses_bfloat16(self, monkeypatch):
+        monkeypatch.setattr(trainer.torch.cuda, 'is_bf16_supported', lambda: True)
+        assert trainer._amp_dtype(True, torch.device('cuda')) is torch.bfloat16
 
 
 class TestEvaluate:
