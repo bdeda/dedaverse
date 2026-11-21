@@ -94,8 +94,6 @@ class TestMetadata:
         layer = backed.get_edit_target()
         assert layer is not None and not layer.anonymous
 
-    @pytest.mark.xfail(strict=True, reason='Entity.prim_path omits the project prim, so Asset.prim is never valid '
-                                           'on a project created with Project.create (stage holds /Proj/Assets/Hero)')
     def test_asset_prim_resolves_on_a_real_project(self, tree):
         _, _, hero = tree
         assert hero.prim.IsValid()
@@ -258,6 +256,16 @@ class TestCollection:
     def test_children_of_a_collection_missing_from_the_stage_are_empty(self, tree):
         _, assets, _ = tree
         assert Collection('Ghost', assets).get_immediate_children() == []
+
+    def test_children_of_a_project_level_collection_are_listed(self, tree):
+        """Collection children must be found under the project's root prim on the composed stage."""
+        project, assets, _ = tree
+        sub = assets.add_collection('Villains')
+        sub.add_asset('Ogre')
+        assert {c['name']: c['is_collection'] for c in assets.get_immediate_children()} == {'Hero': False, 'Villains': True}
+        assert [c['name'] for c in Collection('Villains', assets).get_immediate_children()] == ['Ogre']
+        assert assets.prim.IsValid()
+        assert Asset('Ogre', sub).prim.IsValid()
 
     def test_project_children_come_from_the_default_prim(self, tree):
         project, _, _ = tree

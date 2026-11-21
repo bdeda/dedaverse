@@ -198,7 +198,7 @@ class Collection(Asset):
             default_prim = stage.GetDefaultPrim()
             prim = default_prim if default_prim.IsValid() else stage.GetPseudoRoot()
         else:
-            prim = stage.GetPrimAtPath(self.prim_path)
+            prim = stage.GetPrimAtPath(self.project.stage_path_for(self.prim_path))
             if not prim.IsValid():
                 return []
         scope_path = prim.GetPath()

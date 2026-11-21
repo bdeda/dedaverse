@@ -193,6 +193,26 @@ class Project(Collection):
             return self._rootdir
         return self._rootdir.joinpath(*segments)
 
+    def stage_path_for(self, prim_path: str) -> str:
+        """Map a child entity's prim_path to its path on the composed project stage.
+
+        Entity.prim_path for a child of the project is ``/{name}`` (the project is
+        not part of it), but the project stage composes children under the
+        project's root prim (``/{prim_name}/{name}``). Use this when looking an
+        entity up on ``stage``.
+
+        Args:
+            prim_path: A child entity's prim_path (never the project's own).
+
+        Returns:
+            The path of that entity's prim on the project stage.
+        """
+        stage = self.stage
+        default = stage.GetDefaultPrim() if stage else None
+        if default is None or not default.IsValid():
+            return prim_path
+        return default.GetPath().pathString.rstrip('/') + prim_path
+
     @property
     def stage(self):
         """Usd.Stage for the project's USDA metadata file, cached on the project.
