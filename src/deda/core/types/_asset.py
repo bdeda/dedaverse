@@ -66,7 +66,7 @@ class Asset(Entity):
         stage = proj.stage
         if stage is None:
             return Usd.Prim()
-        path = Sdf.Path(self.prim_path)
+        path = Sdf.Path(self.prim_path if self.parent is None else proj.stage_path_for(self.prim_path))
         prim = stage.GetPrimAtPath(path)
         if not prim.IsValid():
             stage = proj.stage

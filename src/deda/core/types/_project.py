@@ -193,6 +193,26 @@ class Project(Collection):
             return self._rootdir
         return self._rootdir.joinpath(*segments)
 
+    def stage_path_for(self, prim_path: str) -> str:
+        """Map a child entity's prim_path to its path on the composed project stage.
+
+        Entity.prim_path for a child of the project is ``/{name}`` (the project is
+        not part of it), but the project stage composes children under the
+        project's root prim (``/{prim_name}/{name}``). Use this when looking an
+        entity up on ``stage``.
+
+        Args:
+            prim_path: A child entity's prim_path (never the project's own).
+
+        Returns:
+            The path of that entity's prim on the project stage.
+        """
+        stage = self.stage
+        default = stage.GetDefaultPrim() if stage else None
+        if default is None or not default.IsValid():
+            return prim_path
+        return default.GetPath().pathString.rstrip('/') + prim_path
+
     @property
     def stage(self):
         """Usd.Stage for the project's USDA metadata file, cached on the project.
@@ -220,6 +240,62 @@ class Project(Collection):
             else:
                 self._stage = Usd.Stage.Open(str(path))
         return self._stage
+
+    def repair_metadata(self) -> int:
+        """Rewrite metadata files that store a prim *path* as their defaultPrim.
+
+        Older versions wrote ``defaultPrim = "/Assets/Hero"`` (the nested leaf), which is not a valid default prim.
+        Each such file gets its root prim name as defaultPrim, and every reference to it gains an explicit prim path
+        so it keeps resolving to the same prim. Safe to run repeatedly.
+
+        Returns:
+            Number of metadata files whose defaultPrim was fixed.
+        """
+        meta_dir = self.metadata_dir
+        if not meta_dir.is_dir():
+            return 0
+        files = [f for f in meta_dir.rglob('*.usda') if f.resolve() != self.user_settings_path.resolve()]
+        leaf_of: dict[Path, str] = {}
+        layers: dict[Path, Sdf.Layer] = {}
+        for f in files:
+            layer = Sdf.Layer.FindOrOpen(str(f))
+            if layer is None:
+                continue
+            layers[f.resolve()] = layer
+            default = layer.defaultPrim
+            if default and '/' in default:
+                leaf_of[f.resolve()] = Sdf.Path(default if default.startswith('/') else '/' + default).pathString
+        if not leaf_of:
+            return 0
+        dirty: set[Path] = set()
+
+        def retarget(spec_path, layer_file):
+            spec = layers[layer_file].GetPrimAtPath(spec_path)
+            refs = spec.referenceList
+            for attr in ('prependedItems', 'appendedItems', 'explicitItems', 'addedItems'):
+                items = list(getattr(refs, attr))
+                changed = False
+                for i, ref in enumerate(items):
+                    target = (layer_file.parent / ref.assetPath).resolve() if ref.assetPath else None
+                    if target in leaf_of and not ref.primPath:
+                        items[i] = Sdf.Reference(ref.assetPath, Sdf.Path(leaf_of[target]), ref.layerOffset, ref.customData)
+                        changed = True
+                if changed:
+                    setattr(refs, attr, items)
+                    dirty.add(layer_file)
+
+        for layer_file, layer in layers.items():
+            def visit(path, lf=layer_file):
+                if path.IsPrimPath() and layer.GetPrimAtPath(path).hasReferences:
+                    retarget(path, lf)
+            layer.Traverse(Sdf.Path.absoluteRootPath, visit)
+        for layer_file, leaf in leaf_of.items():
+            layers[layer_file].defaultPrim = leaf.strip('/').split('/')[0]
+            dirty.add(layer_file)
+        for layer_file in dirty:
+            layers[layer_file].Save()
+        self._stage = None
+        return len(leaf_of)
 
     def save_session_layer(self) -> None:
         """Save the project stage's session layer (user_settings.usda) if it is file-backed and dirty.
