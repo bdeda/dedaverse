@@ -60,6 +60,7 @@ def _create_entity_usda(
     # Build hierarchy: /seg0/seg1/.../segN; set kind on each (ancestors = group, leaf = kind_tokens)
     path = Sdf.Path("/" + path_segments[0])
     prim = stage.DefinePrim(path, "Scope")
+    root_prim = prim
     is_leaf = len(path_segments) == 1
     Usd.ModelAPI(prim).SetKind(kind_tokens if is_leaf else Kind.Tokens.group)
     for i, seg in enumerate(path_segments[1:], start=1):
@@ -67,7 +68,8 @@ def _create_entity_usda(
         prim = stage.DefinePrim(path, "Scope")
         is_leaf = i == len(path_segments) - 1
         Usd.ModelAPI(prim).SetKind(kind_tokens if is_leaf else Kind.Tokens.group)
-    stage.SetDefaultPrim(prim)
+    # USD requires defaultPrim to be a root prim name; the parent's reference addresses the nested leaf by prim path.
+    stage.SetDefaultPrim(root_prim)
     if asset_identifier:
         model_api = Usd.ModelAPI(prim)
         model_api.SetAssetName(path_segments[-1])
@@ -131,7 +133,7 @@ class Collection(Asset):
             Kind.Tokens.model,
             asset_identifier=_asset_id_string(self, name),
         )
-        _add_child_reference(self, name, child_path)
+        _add_child_reference(self, name, child_path, _prim_path_in_child_file(self, name))
         return Asset(name, self)
 
     def add_collection(self, name: str) -> "Collection":
@@ -163,7 +165,7 @@ class Collection(Asset):
         else:
             path_segments = self.prim_path.strip("/").split("/") + [name]
         _create_entity_usda(child_path, path_segments, Kind.Tokens.group)
-        _add_child_reference(self, name, child_path)
+        _add_child_reference(self, name, child_path, _prim_path_in_child_file(self, name))
         return Collection(name, self)
 
     def remove_child(self, name: str) -> bool:
@@ -226,8 +228,18 @@ class Collection(Asset):
             yield Asset._from_prim(prim)
 
 
-def _add_child_reference(parent: Collection, name: str, child_path: Path) -> None:
-    """Add a child prim on the parent's layer that references the child's USDA file."""
+def _prim_path_in_child_file(parent: Collection, name: str) -> str:
+    """Path of the child's own prim inside its USDA file (the entity path: the project prim is not part of it)."""
+    if parent.parent is None:
+        return f"/{name}"
+    return f"{parent.prim_path}/{name}"
+
+
+def _add_child_reference(parent: Collection, name: str, child_path: Path, target_prim_path: str | None = None) -> None:
+    """Add a child prim on the parent's layer that references the child's USDA file.
+
+    target_prim_path names the prim inside the child file to reference (the file's defaultPrim is only its root prim).
+    """
     parent_path = parent.metadata_path.resolve()
     parent_dir = parent_path.parent
     rel = os.path.relpath(str(child_path.resolve()), str(parent_dir))
@@ -238,7 +250,10 @@ def _add_child_reference(parent: Collection, name: str, child_path: Path) -> Non
     stage = Usd.Stage.Open(layer)
     child_prim_path = parent.prim_path + "/" + name
     child_prim = stage.DefinePrim(Sdf.Path(child_prim_path), "Scope")
-    child_prim.GetReferences().AddReference(rel)
+    if target_prim_path:
+        child_prim.GetReferences().AddReference(rel, Sdf.Path(target_prim_path))
+    else:
+        child_prim.GetReferences().AddReference(rel)
     stage.GetRootLayer().Save()
     proj = parent.project
     if hasattr(proj, "_stage"):

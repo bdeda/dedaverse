@@ -267,6 +267,44 @@ class TestCollection:
         assert assets.prim.IsValid()
         assert Asset('Ogre', sub).prim.IsValid()
 
+    def test_child_files_use_a_root_prim_name_as_default_prim(self, tree):
+        """defaultPrim must be a prim name, not a path; the parent's reference addresses the nested leaf by prim path."""
+        from pxr import Sdf
+        _, assets, hero = tree
+        sub = assets.add_collection('Villains')
+        ogre = sub.add_asset('Ogre')
+        for entity, leaf in ((assets, '/Assets'), (hero, '/Assets/Hero'), (sub, '/Assets/Villains'), (ogre, '/Assets/Villains/Ogre')):
+            layer = Sdf.Layer.FindOrOpen(str(entity.metadata_path))
+            assert layer.defaultPrim == 'Assets'
+            assert layer.GetPrimAtPath(Sdf.Path(leaf))
+        sub_layer = Sdf.Layer.FindOrOpen(str(sub.metadata_path))   # keep the layer alive while its specs are used
+        ref = sub_layer.GetPrimAtPath(Sdf.Path('/Assets/Villains/Ogre')).referenceList.prependedItems[0]
+        assert str(ref.primPath) == '/Assets/Villains/Ogre'
+
+    def test_repair_metadata_converts_legacy_path_default_prims(self, tree):
+        from pxr import Sdf
+        project, assets, hero = tree
+        sub = assets.add_collection('Villains')
+        ogre = sub.add_asset('Ogre')
+        legacy = {hero: '/Assets/Hero', sub: '/Assets/Villains', ogre: '/Assets/Villains/Ogre'}
+        for entity, leaf in legacy.items():        # rewrite the files the way older versions wrote them
+            layer = Sdf.Layer.FindOrOpen(str(entity.metadata_path))
+            layer.defaultPrim = leaf
+            layer.Save()
+        for parent, name in ((project, 'Assets'), (assets, 'Hero'), (assets, 'Villains'), (sub, 'Ogre')):
+            layer = Sdf.Layer.FindOrOpen(str(parent.metadata_path))
+            refs = layer.GetPrimAtPath(Sdf.Path(parent.prim_path + '/' + name)).referenceList
+            refs.prependedItems = [Sdf.Reference(refs.prependedItems[0].assetPath)]
+            layer.Save()
+        project._stage = None
+        assert project.repair_metadata() == 3
+        assert project.repair_metadata() == 0
+        for entity in legacy:
+            assert Sdf.Layer.FindOrOpen(str(entity.metadata_path)).defaultPrim == 'Assets'
+        assert [c['name'] for c in assets.get_immediate_children()] == ['Hero', 'Villains']
+        assert [c['name'] for c in Collection('Villains', assets).get_immediate_children()] == ['Ogre']
+        assert ogre.prim.IsValid() and hero.prim.IsValid()
+
     def test_project_children_come_from_the_default_prim(self, tree):
         project, _, _ = tree
         names = [c['name'] for c in project.get_immediate_children()]
