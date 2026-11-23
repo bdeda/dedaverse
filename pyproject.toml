@@ -31,7 +31,7 @@ trellis = [
   "gradio_client>=2.7.2",  # talks to the TRELLIS.2 Gradio server
 ]
 imagegen = [
-  "google-genai>=3.3.0",          # Imagen 3 / Gemini image generation (recommended)
+  "google-genai>=3.6.1",          # Imagen 3 / Gemini image generation (recommended)
   # "google-generativeai>=0.8", # Alternative: older Gemini SDK (fallback)
 ]
 dev = [
